@@ -1,0 +1,382 @@
+openapi: 3.1.0
+info:
+  title: Credbound OAuth, OIDC, and MCP HTTP adapter
+  version: 0.1.0
+  description: |
+    Transport contract implemented by `oauthhttp.Handler` and
+    `oauthhttp.Protect`. Credbound starts no server; the host mounts the handler,
+    supplies authenticated sessions and consent UI, and owns TLS, CSRF, rate
+    limiting, and proxy trust. The Go module tag, not this document's `info.version`,
+    is the library compatibility version.
+
+    Paths below are relative to the configured issuer URL. For a pathful issuer,
+    RFC 8414 metadata is also exposed at the origin-derived route
+    `/.well-known/oauth-authorization-server{issuerPath}`. Protected-resource
+    metadata is exposed at `/.well-known/oauth-protected-resource{resourcePath}`
+    on the resource origin. Those transformations are described explicitly
+    because arbitrary multi-segment runtime paths cannot be expressed as an
+    OpenAPI path parameter.
+servers:
+  - url: https://auth.example.com/{issuerBasePath}
+    variables:
+      issuerBasePath:
+        default: tenant
+        description: Configured issuer path without a leading slash.
+tags:
+  - name: Discovery
+  - name: Authorization
+  - name: Tokens
+  - name: Registration
+  - name: OIDC
+paths:
+  /.well-known/openid-configuration:
+    get:
+      tags: [Discovery]
+      operationId: oidcDiscovery
+      responses:
+        '200':
+          description: Active issuer metadata. OIDC fields are present only when enabled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationServerMetadata'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /.well-known/jwks.json:
+    get:
+      tags: [OIDC]
+      operationId: jwks
+      responses:
+        '200':
+          description: Active and verification-only retiring public signing keys.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: 'public, max-age=300'}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JWKS'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /authorize:
+    get:
+      tags: [Authorization]
+      operationId: authorize
+      description: |
+        Validates the request and transfers a sealed consent continuation to the
+        host callback. The callback renders UI or completes authorization through
+        the Go API. Errors are redirected only after exact client redirect-URI
+        validation and include `state` and `iss`.
+      parameters:
+        - {name: response_type, in: query, required: true, schema: {type: string, const: code}}
+        - {name: client_id, in: query, required: true, schema: {type: string, maxLength: 2048}}
+        - {name: redirect_uri, in: query, required: true, schema: {type: string, format: uri}}
+        - {name: resource, in: query, required: true, schema: {type: string, format: uri}}
+        - {name: scope, in: query, required: true, schema: {type: string}}
+        - {name: state, in: query, required: true, schema: {type: string}}
+        - {name: code_challenge, in: query, required: true, schema: {type: string, minLength: 43, maxLength: 43}}
+        - {name: code_challenge_method, in: query, required: true, schema: {type: string, const: S256}}
+        - {name: nonce, in: query, required: false, schema: {type: string}}
+      responses:
+        '204':
+          description: Example status when the host consent callback accepts control without rendering a body.
+        '302':
+          description: Authorization result or redirectable protocol error.
+          headers:
+            Location:
+              required: true
+              schema: {type: string, format: uri}
+            Cache-Control:
+              schema: {type: string, const: no-store}
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /token:
+    post:
+      tags: [Tokens]
+      operationId: token
+      description: Exchanges an authorization code or rotates a refresh token.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRequest'
+      responses:
+        '200':
+          description: Newly issued opaque tokens. Raw values are returned only in this response.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+            Pragma:
+              schema: {type: string, const: no-cache}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/InvalidClient'
+  /revoke:
+    post:
+      tags: [Tokens]
+      operationId: revoke
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: {type: string}
+                client_id: {type: string}
+                client_secret: {type: string}
+                client_assertion: {type: string}
+                client_assertion_type:
+                  type: string
+                  const: urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+      responses:
+        '200':
+          description: Revocation is idempotent, including for an unknown token.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/InvalidClient'
+  /register:
+    post:
+      tags: [Registration]
+      operationId: register
+      description: Present only for protected or open DCR. Protected mode requires a bearer initial access token.
+      security:
+        - {}
+        - initialAccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientRegistration'
+      responses:
+        '201':
+          description: Registered client. A client secret, when allowed, is returned only once.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientRegistrationResponse'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/InvalidClient'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /userinfo:
+    get:
+      tags: [OIDC]
+      operationId: userInfo
+      security:
+        - bearerToken: []
+      responses:
+        '200':
+          description: Claims consented through OIDC scopes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfo'
+        '401':
+          $ref: '#/components/responses/InvalidClient'
+    post:
+      tags: [OIDC]
+      operationId: userInfoPost
+      security:
+        - bearerToken: []
+      responses:
+        '200':
+          description: Claims consented through OIDC scopes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfo'
+        '401':
+          $ref: '#/components/responses/InvalidClient'
+  /.well-known/oauth-protected-resource/{resourcePath}:
+    servers:
+      - url: https://mcp.example.com
+    parameters:
+      - name: resourcePath
+        in: path
+        required: true
+        allowReserved: true
+        description: Full configured resource path without its leading slash; the adapter preserves all path segments.
+        schema: {type: string, example: workspaces/acme}
+    get:
+      tags: [Discovery]
+      operationId: protectedResourceMetadata
+      responses:
+        '200':
+          description: RFC 9728 metadata for the active protected resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProtectedResourceMetadata'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  securitySchemes:
+    bearerToken:
+      type: http
+      scheme: bearer
+    initialAccessToken:
+      type: http
+      scheme: bearer
+  responses:
+    InvalidRequest:
+      description: Invalid protocol input, scope, grant, or expired credential.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/OAuthError'
+    InvalidClient:
+      description: Client or bearer authentication failed.
+      headers:
+        WWW-Authenticate:
+          schema: {type: string}
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/OAuthError'
+    NotFound:
+      description: Endpoint capability or configured resource is unavailable.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/OAuthError'
+  schemas:
+    OAuthError:
+      type: object
+      required: [error, error_description]
+      properties:
+        error: {type: string}
+        error_description: {type: string}
+      additionalProperties: false
+    TokenRequest:
+      type: object
+      required: [grant_type]
+      properties:
+        grant_type:
+          type: string
+          enum: [authorization_code, refresh_token]
+        client_id: {type: string}
+        client_secret: {type: string}
+        client_assertion: {type: string}
+        client_assertion_type:
+          type: string
+          const: urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+        code: {type: string}
+        redirect_uri: {type: string, format: uri}
+        code_verifier: {type: string, minLength: 43, maxLength: 128}
+        refresh_token: {type: string}
+        resource: {type: string, format: uri}
+        scope: {type: string}
+    TokenResponse:
+      type: object
+      required: [access_token, token_type, expires_in, scope]
+      properties:
+        access_token: {type: string}
+        token_type: {type: string, const: Bearer}
+        expires_in: {type: integer, format: int64, minimum: 1}
+        refresh_token: {type: string}
+        scope: {type: string}
+        id_token: {type: string}
+    ClientRegistration:
+      type: object
+      required: [client_name, application_type, redirect_uris]
+      properties:
+        client_name: {type: string, minLength: 1, maxLength: 200}
+        application_type: {type: string, enum: [web, native]}
+        redirect_uris:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: {type: string, format: uri}
+        grant_types:
+          type: array
+          items: {type: string, enum: [authorization_code, refresh_token]}
+        response_types:
+          type: array
+          items: {type: string, const: code}
+        scope: {type: string}
+        token_endpoint_auth_method:
+          type: string
+          enum: [none, private_key_jwt, client_secret_basic]
+        jwks_uri: {type: string, format: uri}
+        jwks: {type: object}
+      additionalProperties: false
+    ClientRegistrationResponse:
+      allOf:
+        - $ref: '#/components/schemas/ClientRegistration'
+        - type: object
+          required: [client_id]
+          properties:
+            client_id: {type: string}
+            client_secret: {type: string}
+    AuthorizationServerMetadata:
+      type: object
+      required:
+        - issuer
+        - authorization_endpoint
+        - token_endpoint
+        - revocation_endpoint
+        - response_types_supported
+        - grant_types_supported
+        - token_endpoint_auth_methods_supported
+        - code_challenge_methods_supported
+        - authorization_response_iss_parameter_supported
+      properties:
+        issuer: {type: string, format: uri}
+        authorization_endpoint: {type: string, format: uri}
+        token_endpoint: {type: string, format: uri}
+        revocation_endpoint: {type: string, format: uri}
+        registration_endpoint: {type: string, format: uri}
+        jwks_uri: {type: string, format: uri}
+        userinfo_endpoint: {type: string, format: uri}
+        scopes_supported: {type: array, items: {type: string}}
+        response_types_supported: {type: array, items: {type: string}}
+        grant_types_supported: {type: array, items: {type: string}}
+        token_endpoint_auth_methods_supported: {type: array, items: {type: string}}
+        code_challenge_methods_supported: {type: array, items: {type: string}}
+        subject_types_supported: {type: array, items: {type: string}}
+        id_token_signing_alg_values_supported: {type: array, items: {type: string}}
+        authorization_response_iss_parameter_supported: {type: boolean}
+        client_id_metadata_document_supported: {type: boolean}
+    ProtectedResourceMetadata:
+      type: object
+      required: [resource, authorization_servers, bearer_methods_supported]
+      properties:
+        resource: {type: string, format: uri}
+        authorization_servers:
+          type: array
+          minItems: 1
+          items: {type: string, format: uri}
+        scopes_supported: {type: array, items: {type: string}}
+        bearer_methods_supported: {type: array, items: {type: string}}
+    JWKS:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items: {type: object}
+    UserInfo:
+      type: object
+      required: [sub]
+      properties:
+        sub: {type: string}
+        email: {type: string, format: email}
+        email_verified: {type: boolean}

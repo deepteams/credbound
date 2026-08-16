@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: credbound
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d credbound"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CREDBOUND_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/credbound?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Download dependencies
+        run: go mod download
+      - name: Verify generated sources
+        run: |
+          make generate
+          git diff --exit-code
+      - name: Vet
+        run: go vet ./...
+      - name: Race tests with PostgreSQL
+        run: go test -race ./...
+      - name: Coverage
+        run: make coverage
+      - name: Vulnerability scan
+        uses: golang/govulncheck-action@v1
+        with:
+          go-package: ./...

@@ -1,0 +1,32 @@
+version: "2"
+sql:
+  - name: postgresql
+    engine: postgresql
+    schema: sql/schema/postgresql.sql
+    queries: sql/queries/postgresql.sql
+    gen:
+      go:
+        package: postgresql
+        out: internal/sqlc/postgresql
+        sql_package: database/sql
+        emit_empty_slices: false
+        emit_json_tags: true
+        overrides:
+          - db_type: uuid
+            go_type: string
+          - db_type: uuid
+            nullable: true
+            go_type:
+              import: database/sql
+              type: NullString
+  - name: sqlite
+    engine: sqlite
+    schema: sql/schema/sqlite.sql
+    queries: sql/queries/sqlite.sql
+    gen:
+      go:
+        package: sqlite
+        out: internal/sqlc/sqlite
+        sql_package: database/sql
+        emit_empty_slices: false
+        emit_json_tags: true

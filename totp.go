@@ -1,0 +1,234 @@
+package credbound
+
+import (
+	"context"
+	"encoding/base32"
+	"fmt"
+	"strings"
+)
+
+const recoveryCodeCount = 10
+
+func (m *Manager) BeginTOTPEnrollment(ctx context.Context, actor Authentication) (_ TOTPEnrollment, err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "auth.totp.enroll.begin", started, err) }()
+	if err := m.requireRecentInteractive(ctx, actor); err != nil {
+		return TOTPEnrollment{}, err
+	}
+	user, err := m.store.UserByID(ctx, actor.UserID)
+	if err != nil {
+		return TOTPEnrollment{}, err
+	}
+	secret, uri, err := m.totp.Generate(user.Email)
+	if err != nil {
+		return TOTPEnrollment{}, fmt.Errorf("generate totp secret: %w", err)
+	}
+	encrypted, err := m.seal([]byte(secret))
+	if err != nil {
+		return TOTPEnrollment{}, err
+	}
+	now := m.now()
+	factor := TOTPFactor{UserID: actor.UserID, EncryptedSecret: encrypted, CreatedAt: now, UpdatedAt: now}
+	event, err := m.newAudit(actor.UserID, "totp.enrollment.begin", "user", actor.UserID, "", AuditSucceeded, "")
+	if err != nil {
+		return TOTPEnrollment{}, err
+	}
+	meta, err := m.newEventMeta(EventTOTPEnrollmentStarted, "auth.totp.enroll.begin", actor.UserID, "", event)
+	if err != nil {
+		return TOTPEnrollment{}, err
+	}
+	change := TOTPEnrollmentChange{EventMeta: meta, UserID: actor.UserID}
+	commit := m.transactionalCommit(event, "totp.enrollment", func(ctx context.Context, tx Tx, hook TransactionHook) error {
+		return hook.ApplyTOTPEnrollment(ctx, tx, change)
+	})
+	if err := m.store.SaveTOTPEnrollment(ctx, factor, commit); err != nil {
+		return TOTPEnrollment{}, m.mapStoreError(ctx, "auth.totp.enroll.begin", err)
+	}
+	startedEvent := TOTPEnrollmentStartedEvent{EventMeta: meta, UserID: actor.UserID}
+	m.events.emit(ctx, EventTOTPEnrollmentStarted, func(listener EventListener) error { return listener.OnTOTPEnrollmentStarted(ctx, startedEvent) })
+	return TOTPEnrollment{URI: uri}, nil
+}
+
+func (m *Manager) ConfirmTOTPEnrollment(ctx context.Context, actor Authentication, code string) (_ []string, err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "auth.totp.enroll.confirm", started, err) }()
+	if err := m.requireRecentInteractive(ctx, actor); err != nil {
+		return nil, err
+	}
+	factor, err := m.store.TOTPByUserID(ctx, actor.UserID)
+	if err != nil || factor.Active {
+		return nil, ErrNotFound
+	}
+	secret, err := m.decryptTOTPSecret(factor)
+	if err != nil {
+		return nil, err
+	}
+	_, valid := m.totp.Validate(strings.TrimSpace(code), secret, m.now())
+	if !valid {
+		if auditErr := m.appendAuthenticationAudit(ctx, actor.UserID, "totp.enrollment.confirm", AuditFailed, "invalid_credentials"); auditErr != nil {
+			return nil, auditErr
+		}
+		return nil, ErrInvalidCredentials
+	}
+	codes, records, err := m.generateRecoveryCodes(actor.UserID)
+	if err != nil {
+		return nil, err
+	}
+	factor.Active = true
+	factor.UpdatedAt = m.now()
+	event, err := m.newAudit(actor.UserID, "totp.enrollment.confirm", "user", actor.UserID, "", AuditSucceeded, "")
+	if err != nil {
+		return nil, err
+	}
+	meta, err := m.newEventMeta(EventTOTPActivated, "auth.totp.enroll.confirm", actor.UserID, "", event)
+	if err != nil {
+		return nil, err
+	}
+	change := TOTPActivation{EventMeta: meta, UserID: actor.UserID, RecoveryCodeCount: len(records)}
+	commit := m.transactionalCommit(event, "totp.activation", func(ctx context.Context, tx Tx, hook TransactionHook) error {
+		return hook.ApplyTOTPActivation(ctx, tx, change)
+	})
+	if err := m.store.ActivateTOTP(ctx, factor, records, commit); err != nil {
+		return nil, m.mapStoreError(ctx, "auth.totp.enroll.confirm", err)
+	}
+	activated := TOTPActivatedEvent{EventMeta: meta, UserID: actor.UserID, RecoveryCodeCount: len(records)}
+	m.events.emit(ctx, EventTOTPActivated, func(listener EventListener) error { return listener.OnTOTPActivated(ctx, activated) })
+	return codes, nil
+}
+
+func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code string) (_ Authentication, err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "auth.totp.verify", started, err) }()
+	if actor.UserID == "" || !actor.Interactive() {
+		return Authentication{}, ErrUnauthorized
+	}
+	factor, err := m.store.TOTPByUserID(ctx, actor.UserID)
+	if err != nil || !factor.Active {
+		return Authentication{}, ErrInvalidCredentials
+	}
+	secret, err := m.decryptTOTPSecret(factor)
+	if err != nil {
+		return Authentication{}, err
+	}
+	normalized := strings.TrimSpace(code)
+	step, valid := m.totp.Validate(normalized, secret, m.now())
+	if valid {
+		event, eventErr := m.newAudit(actor.UserID, "auth.totp", "user", actor.UserID, "", AuditSucceeded, "")
+		if eventErr != nil {
+			return Authentication{}, eventErr
+		}
+		used, useErr := m.store.UseTOTP(ctx, actor.UserID, step, Commit{Audit: event})
+		if useErr != nil {
+			return Authentication{}, m.mapStoreError(ctx, "auth.totp.verify", useErr)
+		}
+		if !used {
+			failedAudit, auditErr := m.recordAuthenticationAudit(ctx, actor.UserID, "auth.totp", AuditFailed, "invalid_credentials")
+			if auditErr != nil {
+				return Authentication{}, auditErr
+			}
+			meta, metaErr := m.newEventMeta(EventTOTPReplayRejected, "auth.totp.verify", actor.UserID, "", failedAudit)
+			if metaErr == nil {
+				rejected := TOTPReplayRejectedEvent{EventMeta: meta, UserID: actor.UserID}
+				m.events.emit(ctx, EventTOTPReplayRejected, func(listener EventListener) error { return listener.OnTOTPReplayRejected(ctx, rejected) })
+			}
+			m.emitAuthenticationFailed(ctx, "auth.totp.verify", failedAudit, MethodTOTP, actor.UserID, "invalid_credentials")
+			return Authentication{}, ErrInvalidCredentials
+		}
+		promoted := m.promoteTOTP(actor)
+		meta, metaErr := m.newEventMeta(EventTOTPVerified, "auth.totp.verify", actor.UserID, "", event)
+		if metaErr == nil {
+			verified := TOTPVerifiedEvent{EventMeta: meta, UserID: actor.UserID}
+			m.events.emit(ctx, EventTOTPVerified, func(listener EventListener) error { return listener.OnTOTPVerified(ctx, verified) })
+		}
+		m.emitAuthenticationSucceeded(ctx, "auth.totp.verify", event, promoted)
+		return promoted, nil
+	}
+
+	recoveryDigest := digest(m.recoveryPepper, normalizeRecoveryCode(normalized))
+	event, eventErr := m.newAudit(actor.UserID, "auth.recovery_code", "user", actor.UserID, "", AuditSucceeded, "")
+	if eventErr != nil {
+		return Authentication{}, eventErr
+	}
+	used, consumeErr := m.store.ConsumeRecoveryCode(ctx, actor.UserID, recoveryDigest, m.now(), Commit{Audit: event})
+	if consumeErr != nil {
+		return Authentication{}, m.mapStoreError(ctx, "auth.totp.verify", consumeErr)
+	}
+	if used {
+		promoted := m.promoteTOTP(actor)
+		meta, metaErr := m.newEventMeta(EventRecoveryCodeConsumed, "auth.totp.verify", actor.UserID, "", event)
+		if metaErr == nil {
+			consumed := RecoveryCodeConsumedEvent{EventMeta: meta, UserID: actor.UserID}
+			m.events.emit(ctx, EventRecoveryCodeConsumed, func(listener EventListener) error { return listener.OnRecoveryCodeConsumed(ctx, consumed) })
+		}
+		m.emitAuthenticationSucceeded(ctx, "auth.totp.verify", event, promoted)
+		return promoted, nil
+	}
+	failedAudit, auditErr := m.recordAuthenticationAudit(ctx, actor.UserID, "auth.totp", AuditFailed, "invalid_credentials")
+	if auditErr != nil {
+		return Authentication{}, auditErr
+	}
+	m.emitAuthenticationFailed(ctx, "auth.totp.verify", failedAudit, MethodTOTP, actor.UserID, "invalid_credentials")
+	return Authentication{}, ErrInvalidCredentials
+}
+
+func (m *Manager) DisableTOTP(ctx context.Context, actor Authentication, code string) (err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "auth.totp.disable", started, err) }()
+	promoted, err := m.VerifyTOTP(ctx, actor, code)
+	if err != nil {
+		return err
+	}
+	if err := m.requireStepUp(ctx, promoted, "auth.totp.disable"); err != nil {
+		return err
+	}
+	event, err := m.newAudit(actor.UserID, "totp.disable", "user", actor.UserID, "", AuditSucceeded, "")
+	if err != nil {
+		return err
+	}
+	meta, err := m.newEventMeta(EventTOTPDisabled, "auth.totp.disable", actor.UserID, "", event)
+	if err != nil {
+		return err
+	}
+	change := TOTPDisable{EventMeta: meta, UserID: actor.UserID}
+	commit := m.transactionalCommit(event, "totp.disable", func(ctx context.Context, tx Tx, hook TransactionHook) error {
+		return hook.ApplyTOTPDisable(ctx, tx, change)
+	})
+	if err := m.store.DisableTOTP(ctx, actor.UserID, commit); err != nil {
+		return m.mapStoreError(ctx, "auth.totp.disable", err)
+	}
+	disabled := TOTPDisabledEvent{EventMeta: meta, UserID: actor.UserID}
+	m.events.emit(ctx, EventTOTPDisabled, func(listener EventListener) error { return listener.OnTOTPDisabled(ctx, disabled) })
+	return nil
+}
+
+func (m *Manager) decryptTOTPSecret(factor TOTPFactor) (string, error) {
+	plaintext, err := m.open(factor.EncryptedSecret)
+	if err != nil {
+		return "", fmt.Errorf("decrypt totp secret: %w", err)
+	}
+	return string(plaintext), nil
+}
+
+func (m *Manager) generateRecoveryCodes(userID string) ([]string, []RecoveryCode, error) {
+	codes := make([]string, 0, recoveryCodeCount)
+	records := make([]RecoveryCode, 0, recoveryCodeCount)
+	for range recoveryCodeCount {
+		raw, err := randomBytes(m.random, 10)
+		if err != nil {
+			return nil, nil, err
+		}
+		encoded := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw)
+		code := encoded[:4] + "-" + encoded[4:8] + "-" + encoded[8:12] + "-" + encoded[12:]
+		codes = append(codes, code)
+		records = append(records, RecoveryCode{UserID: userID, Digest: digest(m.recoveryPepper, normalizeRecoveryCode(code))})
+	}
+	return codes, records, nil
+}
+
+func normalizeRecoveryCode(code string) string {
+	return strings.ToUpper(strings.NewReplacer("-", "", " ", "").Replace(strings.TrimSpace(code)))
+}
+
+func (m *Manager) promoteTOTP(actor Authentication) Authentication {
+	return Authentication{UserID: actor.UserID, Method: MethodTOTP, Level: AAL2, AuthenticatedAt: m.now()}
+}

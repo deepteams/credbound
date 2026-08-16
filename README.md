@@ -1,0 +1,203 @@
+# Credbound
+
+Credbound is a Go authentication and authorization library for Deepteams
+platforms. It centralizes security invariants that would otherwise be
+reimplemented in every project:
+
+- local password authentication;
+- WebAuthn passkeys;
+- TOTP second factor and recovery codes;
+- multiple verified email addresses per user, with one primary address;
+- transactional tracking of the latest authentication (`last_seen_at`);
+- optional SSO per SaaS application (Google, GitHub, Microsoft, OIDC, and SAML);
+- freshness checks for step-up operations;
+- Personal Access Tokens (PATs) displayed only once;
+- workspace isolation and extensible RBAC (`admin`, `member`, and application roles);
+- optional SCIM 2.0 provisioning per workspace (`Users`, `Groups`, `.search`);
+- optional OAuth 2.0/OIDC authorization-server capabilities for remote MCP
+  resources, with pre-registration, independent CIMD and DCR policies, PKCE,
+  opaque rotating tokens, pairwise subjects, and revocation cascades;
+- instance administration (`root`, `developer`, `support`, `marketing`, `sales`);
+- an append-only audit log that the host service can extend without spoofing
+  the actor or timestamp;
+- transactional hooks for atomic host-service business writes;
+- typed post-commit events for analytics, notifications, and external
+  integrations;
+- structured logs, traces, and OpenTelemetry metrics.
+
+The project follows a _Specs First_ approach. The product contract is defined in
+[`specs/PRD.md`](specs/PRD.md), and the Go API in [`specs/API.md`](specs/API.md).
+
+## Status
+
+The core, in-memory store, SQLite store, PostgreSQL store and migrations, and
+security adapters are implemented. Version `v0` may still introduce breaking
+changes before the first stable release. CI applies the PostgreSQL migrations
+to an isolated schema and exercises lifecycle, OAuth, pagination, transactional
+hooks, and append-only audit behavior against a real PostgreSQL service.
+
+## Security principles
+
+- No password, TOTP secret, PAT, or recovery code is stored in plaintext.
+- A raw PAT is returned only when it is created.
+- Sensitive mutations and their audit records are atomic at repository level.
+- A secondary address cannot authenticate until its time-limited proof has been
+  verified.
+- An SSO identity is explicitly linked by `issuer` and `subject`; the IdP email
+  address never triggers an automatic account merge.
+- A PAT can never satisfy an interactive step-up request.
+- Access to application resources must always provide a `workspace_id`.
+- All entity IDs created by Credbound are canonical UUIDv7 values that are
+  monotonic within the process.
+
+## Integration
+
+Credbound is a library, not a server. The host service remains responsible for
+cookies, CSRF, rate limiting, its TLS/H2/H3 reverse proxy, and its UI. WebAuthn
+ceremonies remain transport-agnostic: the JSON produced by the library is sent
+to the browser, whose response is then passed back to the library.
+
+### Minimal setup
+
+```go
+store, err := sqlite.New(database)
+if err != nil {
+    return err
+}
+
+passkeys, err := webauthnadapter.New(webauthnadapter.Config{
+    RPID:          "app.example.com",
+    RPDisplayName: "My application",
+    RPOrigins:     []string{"https://app.example.com"},
+    UserHandleKey: userHandleKey,
+})
+if err != nil {
+    return err
+}
+
+passwords, err := password.New(password.DefaultParams())
+if err != nil {
+    return err
+}
+
+totpProvider, err := totpadapter.New(totpadapter.Config{Issuer: "My application"})
+if err != nil {
+    return err
+}
+
+auth, err := credbound.New(credbound.Config{
+    Store:          store,
+    Passwords:      passwords,
+    TOTP:           totpProvider,
+    Passkeys:       passkeys,
+    SecretKey:      encryptionKey, // exactly 32 bytes
+    PATPepper:      patPepper,     // at least 32 bytes
+    RecoveryPepper: recoveryPepper,// at least 32 bytes
+    EmailVerificationTTL: 24 * time.Hour,
+    SSOProviders: []credbound.SSOProvider{
+        googleProvider,
+        oidcProvider,
+    },
+    WorkspaceRoles: []credbound.RoleDefinition{
+        {Role: "viewer", Permissions: []credbound.WorkspacePermission{"documents.read"}},
+        {Role: "editor", Permissions: []credbound.WorkspacePermission{"documents.write"}, Inherits: []credbound.Role{"viewer"}},
+    },
+    TransactionHooks: []credbound.TransactionHook{billingHook},
+    EventListeners:   []credbound.EventListener{segmentListener},
+})
+```
+
+Each SSO provider has a UUIDv7 configuration identifier. The host service
+implements the `SSOProvider` port for the IdPs it enables and remains responsible
+for network exchanges, client secrets, and cryptographic callback validation.
+Credbound handles sealed continuations, explicit linking, AAL2, step-up with
+forced IdP reauthentication, persistence, and auditing.
+
+The `admin` and `member` roles are always available. The workspace role catalog
+is frozen when the `Manager` is constructed; application roles may inherit from
+one another, and the application may add permissions to `admin` or `member`
+without removing their built-in guarantees. Access is authorized by permission
+through `AuthorizePermission`. This extension never adds instance-administration
+roles or permissions.
+
+### Optional SCIM provisioning
+
+The in-memory, SQLite, and PostgreSQL stores implement `SCIMStore`. A SaaS
+application offering SCIM creates a workspace configuration, returns the raw
+credential to the directory once, and then mounts the adapter:
+
+```go
+scim, err := scimhttp.New(auth)
+if err != nil {
+    return err
+}
+router.Handle("/scim/v2/", http.StripPrefix("/scim/v2", scim))
+```
+
+The SaaS application retains the commercial decision to enable SCIM. Credbound
+manages the service credential, configuration isolation, passwordless users,
+groups, mappings to registered roles, membership suspension, auditing, and
+events. Deprovisioning never disables the global user account.
+
+### Optional OAuth, OIDC, and MCP authorization
+
+`Config.OAuth` enables the authorization-server module. The host creates an
+issuer and workspace-bound protected resource, then selects pre-registration,
+CIMD, and DCR policies independently. The optional `oauthhttp.Handler` exposes
+discovery, authorization, token, revocation, registration, UserInfo, and JWKS
+routes when mounted by the host. `oauthhttp.Protect` validates a bearer token
+again at the resource boundary before calling an MCP handler.
+
+Use `oauthclientadapter.JWTAssertionVerifier` for hardened `private_key_jwt`
+verification and `oauthhttp.MetadataFetcher` for CIMD loading. The latter
+blocks special/private destinations, redirects, oversized documents, and
+unbounded concurrency. `oidcadapter.NewES256KeyRing` publishes one active
+signing key and any verification-only retiring keys during rotation.
+
+The adapter contract is summarized in
+[`specs/oauthhttp.openapi.yaml`](specs/oauthhttp.openapi.yaml). The host still
+owns login and consent UI, sessions, CSRF, rate limits, TLS, and route-level
+commercial policy.
+
+A `TransactionHook` extends the Credbound transaction before its audit record
+and commit. This is the intended extension point for atomically creating a
+freemium credit ledger, quota, or outbox row in the host-service database.
+SQLite and PostgreSQL provide a typed `TxFrom`; the handle is valid only during
+the callback. Any hook error or panic cancels the entire mutation.
+
+An `EventListener` then receives the committed fact, such as `user.created` or
+`workspace.created`. It may call Segment on a best-effort basis. Its error is
+observed but never returned to the caller, and it does not prevent subsequent
+listeners from running. For guaranteed delivery, the hook writes to a
+transactional outbox and a host-service worker dispatches it after commit.
+
+The two interfaces embed `UnimplementedTransactionHook` and
+`UnimplementedEventListener`, respectively, so that an integration only needs
+to implement useful callbacks. Their full contract and payload list are defined
+in [`specs/API.md`](specs/API.md); the architecture decision is documented in
+[`ADR-008`](specs/adr/ADR-008-transaction-hooks-and-events.md).
+
+To add a business fact to the audit log, the service calls `RecordAudit` with an
+`AuditInput`. Credbound always constructs the UUIDv7 identifier, actor, and
+timestamp.
+
+Embedded Goose migrations are available through `migrations.SQLite()` and
+`migrations.PostgreSQL()`. The first `Bootstrap` call atomically creates the
+first user, their workspace, their `admin` membership, and their instance-level
+`root` role.
+
+Operational guidance is in [`specs/OPERATIONS.md`](specs/OPERATIONS.md), the
+release process in [`specs/RELEASING.md`](specs/RELEASING.md), and vulnerability
+reporting in [`SECURITY.md`](SECURITY.md).
+
+## Verification
+
+```sh
+make test
+make coverage
+make verify
+```
+
+`make coverage` enforces consolidated coverage strictly above 90% for maintained
+code. Generated sqlc code and the generated PostgreSQL store are excluded from
+this measurement; their reproducibility is checked by `make generate`.

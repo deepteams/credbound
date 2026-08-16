@@ -1,0 +1,252 @@
+package credbound
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"iter"
+	"strings"
+	"time"
+)
+
+const (
+	ssoLogin  = "login"
+	ssoLink   = "link"
+	ssoStepUp = "step_up"
+)
+
+type ssoContinuation struct {
+	ProviderConfigurationID string    `json:"provider_configuration_id"`
+	Operation               string    `json:"operation"`
+	UserID                  string    `json:"user_id,omitempty"`
+	ExpiresAt               time.Time `json:"expires_at"`
+	Session                 []byte    `json:"session"`
+}
+
+func (m *Manager) BeginSSO(ctx context.Context, providerConfigurationID string) (SSOChallenge, error) {
+	return m.beginSSO(ctx, Authentication{}, providerConfigurationID, ssoLogin)
+}
+
+func (m *Manager) BeginSSOLink(ctx context.Context, actor Authentication, providerConfigurationID string) (SSOChallenge, error) {
+	if err := m.requireRecentInteractive(ctx, actor); err != nil {
+		return SSOChallenge{}, err
+	}
+	return m.beginSSO(ctx, actor, providerConfigurationID, ssoLink)
+}
+
+func (m *Manager) BeginSSOStepUp(ctx context.Context, actor Authentication, providerConfigurationID string) (SSOChallenge, error) {
+	if err := m.requireRecentInteractive(ctx, actor); err != nil {
+		return SSOChallenge{}, err
+	}
+	return m.beginSSO(ctx, actor, providerConfigurationID, ssoStepUp)
+}
+
+func (m *Manager) beginSSO(ctx context.Context, actor Authentication, providerConfigurationID, operation string) (_ SSOChallenge, err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "auth.sso.begin", started, err) }()
+	provider, ok := m.ssoProviders[providerConfigurationID]
+	if !ok {
+		return SSOChallenge{}, ErrNotFound
+	}
+	providerChallenge, err := provider.Begin(ctx, SSORequest{ForceReauthentication: operation == ssoStepUp})
+	if err != nil {
+		return SSOChallenge{}, fmt.Errorf("begin SSO: %w", err)
+	}
+	if strings.TrimSpace(providerChallenge.RedirectURL) == "" || len(providerChallenge.Session) == 0 {
+		return SSOChallenge{}, fmt.Errorf("%w: SSO provider returned an incomplete challenge", ErrInvalidInput)
+	}
+	state := ssoContinuation{
+		ProviderConfigurationID: providerConfigurationID, Operation: operation,
+		UserID: actor.UserID, ExpiresAt: m.now().Add(m.ceremonyTTL), Session: providerChallenge.Session,
+	}
+	continuation, err := m.encodeSSOContinuation(state)
+	if err != nil {
+		return SSOChallenge{}, err
+	}
+	challenge := SSOChallenge{RedirectURL: providerChallenge.RedirectURL, Continuation: continuation}
+	if meta, metaErr := m.newEventMeta(EventSSOChallengeIssued, "auth.sso.begin", actor.UserID, "", AuditEvent{}); metaErr == nil {
+		issued := SSOChallengeIssuedEvent{
+			EventMeta: meta, ProviderConfigurationID: providerConfigurationID,
+			ProviderKind: provider.Kind(), Purpose: operation,
+		}
+		m.events.emit(ctx, EventSSOChallengeIssued, func(listener EventListener) error { return listener.OnSSOChallengeIssued(ctx, issued) })
+	}
+	return challenge, nil
+}
+
+func (m *Manager) FinishSSO(ctx context.Context, continuation string, response []byte) (_ Authentication, err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "auth.sso.finish", started, err) }()
+	state, err := m.decodeSSOContinuation(continuation)
+	if err != nil {
+		return Authentication{}, err
+	}
+	provider, ok := m.ssoProviders[state.ProviderConfigurationID]
+	if !ok {
+		return Authentication{}, ErrInvalidCredentials
+	}
+	claims, err := provider.Finish(ctx, state.Session, response)
+	if err != nil {
+		if state.UserID != "" {
+			audit, auditErr := m.recordAuthenticationAudit(ctx, state.UserID, "auth.sso", AuditFailed, "invalid_credentials")
+			if auditErr != nil {
+				return Authentication{}, auditErr
+			}
+			m.emitAuthenticationFailed(ctx, "auth.sso.finish", audit, MethodSSO, state.UserID, "invalid_credentials")
+		}
+		return Authentication{}, ErrInvalidCredentials
+	}
+	claims.Issuer, claims.Subject = strings.TrimSpace(claims.Issuer), strings.TrimSpace(claims.Subject)
+	if claims.Issuer == "" || claims.Subject == "" || len(claims.Issuer) > 500 || len(claims.Subject) > 500 {
+		return Authentication{}, ErrInvalidCredentials
+	}
+	if claims.Email != "" {
+		normalizedEmail, emailErr := validEmail(claims.Email)
+		if emailErr != nil {
+			return Authentication{}, ErrInvalidCredentials
+		}
+		claims.Email = normalizedEmail
+	}
+	if state.Operation == ssoLink {
+		return m.finishSSOLink(ctx, provider, state, claims)
+	}
+	identity, lookupErr := m.store.SSOIdentity(ctx, state.ProviderConfigurationID, claims.Issuer, claims.Subject)
+	if lookupErr != nil {
+		if errors.Is(lookupErr, ErrNotFound) {
+			return Authentication{}, ErrInvalidCredentials
+		}
+		return Authentication{}, lookupErr
+	}
+	if state.Operation == ssoStepUp && identity.UserID != state.UserID {
+		return Authentication{}, ErrInvalidCredentials
+	}
+	user, err := m.store.UserByID(ctx, identity.UserID)
+	if err != nil || user.Disabled {
+		return Authentication{}, ErrInvalidCredentials
+	}
+	now := m.now()
+	event, err := m.newAudit(user.ID, "auth.sso", "sso_identity", identity.ID, "", AuditSucceeded, "")
+	if err != nil {
+		return Authentication{}, err
+	}
+	if err := m.store.TouchSSO(ctx, user.ID, identity.ID, now, Commit{Audit: event}); err != nil {
+		return Authentication{}, m.mapStoreError(ctx, "auth.sso.finish", err)
+	}
+	authentication := Authentication{UserID: user.ID, Method: MethodSSO, Level: AAL2, AuthenticatedAt: now}
+	if meta, metaErr := m.newEventMeta(EventSSOAuthenticated, "auth.sso.finish", user.ID, "", event); metaErr == nil {
+		authenticated := SSOAuthenticatedEvent{EventMeta: meta, IdentityID: identity.ID, Authentication: authentication}
+		m.events.emit(ctx, EventSSOAuthenticated, func(listener EventListener) error { return listener.OnSSOAuthenticated(ctx, authenticated) })
+	}
+	m.emitAuthenticationSucceeded(ctx, "auth.sso.finish", event, authentication)
+	return authentication, nil
+}
+
+func (m *Manager) finishSSOLink(ctx context.Context, provider SSOProvider, state ssoContinuation, claims SSOClaims) (Authentication, error) {
+	id, err := m.newID()
+	if err != nil {
+		return Authentication{}, err
+	}
+	now := m.now()
+	identity := SSOIdentity{
+		ID: id, UserID: state.UserID, ProviderConfigurationID: state.ProviderConfigurationID,
+		ProviderKind: provider.Kind(), Issuer: claims.Issuer, Subject: claims.Subject,
+		Email: claims.Email, CreatedAt: now, LastUsedAt: cloneTime(&now),
+	}
+	event, err := m.newAudit(state.UserID, "sso.link", "sso_identity", id, "", AuditSucceeded, "")
+	if err != nil {
+		return Authentication{}, err
+	}
+	meta, err := m.newEventMeta(EventSSOLinked, "auth.sso.finish", state.UserID, "", event)
+	if err != nil {
+		return Authentication{}, err
+	}
+	change := SSOLink{EventMeta: meta, Identity: identity}
+	commit := m.transactionalCommit(event, "sso.link", func(ctx context.Context, tx Tx, hook TransactionHook) error {
+		return hook.ApplySSOLink(ctx, tx, change)
+	})
+	if err := m.store.LinkSSO(ctx, identity, commit); err != nil {
+		return Authentication{}, m.mapStoreError(ctx, "auth.sso.link", err)
+	}
+	linked := SSOLinkedEvent{EventMeta: meta, Identity: identity}
+	m.events.emit(ctx, EventSSOLinked, func(listener EventListener) error { return listener.OnSSOLinked(ctx, linked) })
+	return Authentication{UserID: state.UserID, Method: MethodSSO, Level: AAL2, AuthenticatedAt: now}, nil
+}
+
+func (m *Manager) UnlinkSSO(ctx context.Context, actor Authentication, identityID string) (err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "auth.sso.unlink", started, err) }()
+	if err := m.requireStepUp(ctx, actor, "auth.sso.unlink"); err != nil {
+		return err
+	}
+	if !validUUIDv7(identityID) {
+		return fmt.Errorf("%w: invalid SSO identity id", ErrInvalidInput)
+	}
+	event, err := m.newAudit(actor.UserID, "sso.unlink", "sso_identity", identityID, "", AuditSucceeded, "")
+	if err != nil {
+		return err
+	}
+	meta, err := m.newEventMeta(EventSSOUnlinked, "auth.sso.unlink", actor.UserID, "", event)
+	if err != nil {
+		return err
+	}
+	change := SSOUnlink{EventMeta: meta, UserID: actor.UserID, IdentityID: identityID}
+	commit := m.transactionalCommit(event, "sso.unlink", func(ctx context.Context, tx Tx, hook TransactionHook) error {
+		return hook.ApplySSOUnlink(ctx, tx, change)
+	})
+	if err := m.store.UnlinkSSO(ctx, actor.UserID, identityID, commit); err != nil {
+		return m.mapStoreError(ctx, "auth.sso.unlink", err)
+	}
+	unlinked := SSOUnlinkedEvent{EventMeta: meta, UserID: actor.UserID, IdentityID: identityID}
+	m.events.emit(ctx, EventSSOUnlinked, func(listener EventListener) error { return listener.OnSSOUnlinked(ctx, unlinked) })
+	return nil
+}
+
+func (m *Manager) SSOIdentities(ctx context.Context, actor Authentication, page PageRequest) iter.Seq2[PageEvent[SSOIdentity], error] {
+	if err := m.requireRecentInteractive(ctx, actor); err != nil {
+		return errorSeq[PageEvent[SSOIdentity]](err)
+	}
+	page, err := normalizePage(page)
+	if err != nil {
+		return errorSeq[PageEvent[SSOIdentity]](err)
+	}
+	return m.store.SSOIdentities(ctx, actor.UserID, page)
+}
+
+func (m *Manager) encodeSSOContinuation(state ssoContinuation) (string, error) {
+	payload, err := json.Marshal(state)
+	if err != nil {
+		return "", err
+	}
+	sealed, err := m.seal(payload)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(sealed), nil
+}
+
+func (m *Manager) decodeSSOContinuation(raw string) (ssoContinuation, error) {
+	sealed, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return ssoContinuation{}, ErrInvalidCredentials
+	}
+	payload, err := m.open(sealed)
+	if err != nil {
+		return ssoContinuation{}, ErrInvalidCredentials
+	}
+	var state ssoContinuation
+	if err := json.Unmarshal(payload, &state); err != nil || !validUUIDv7(state.ProviderConfigurationID) || len(state.Session) == 0 {
+		return ssoContinuation{}, ErrInvalidCredentials
+	}
+	if state.Operation != ssoLogin && state.Operation != ssoLink && state.Operation != ssoStepUp {
+		return ssoContinuation{}, ErrInvalidCredentials
+	}
+	if (state.Operation == ssoLink || state.Operation == ssoStepUp) && state.UserID == "" {
+		return ssoContinuation{}, ErrInvalidCredentials
+	}
+	if !m.now().Before(state.ExpiresAt) {
+		return ssoContinuation{}, ErrExpired
+	}
+	return state, nil
+}
