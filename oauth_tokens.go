@@ -49,7 +49,7 @@ func (m *Manager) ExchangeOAuthAuthorizationCode(ctx context.Context, input Exch
 		}
 		refresh, rawRefresh = &value, raw
 	}
-	audit, err := m.newAudit(client.ID, "oauth.token.issued", "oauth_grant", grant.ID, grant.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, client.ID, "oauth.token.issued", "oauth_grant", grant.ID, grant.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return OAuthTokenResponse{}, err
 	}
@@ -118,7 +118,7 @@ func (m *Manager) RefreshOAuthToken(ctx context.Context, input RefreshOAuthToken
 	if err != nil {
 		return OAuthTokenResponse{}, err
 	}
-	audit, err := m.newAudit(client.ID, "oauth.token.refreshed", "oauth_grant", grant.ID, grant.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, client.ID, "oauth.token.refreshed", "oauth_grant", grant.ID, grant.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return OAuthTokenResponse{}, err
 	}
@@ -162,7 +162,7 @@ func (m *Manager) RevokeOAuthToken(ctx context.Context, input RevokeOAuthTokenIn
 		if lookupErr != nil || token.ClientRecordID != client.ID || !hmac.Equal(token.Digest, m.oauthDigest("access-token", input.Token)) {
 			return nil
 		}
-		audit, auditErr := m.newAudit(client.ID, "oauth.token.revoked", "oauth_access_token", token.ID, token.WorkspaceID, AuditSucceeded, "")
+		audit, auditErr := m.newAudit(ctx, client.ID, "oauth.token.revoked", "oauth_access_token", token.ID, token.WorkspaceID, AuditSucceeded, "")
 		if auditErr != nil {
 			return auditErr
 		}
@@ -449,7 +449,7 @@ func (m *Manager) newOAuthRefreshToken(grant OAuthGrant, familyID string, ttl ti
 }
 
 func (m *Manager) revokeOAuthRefreshFamily(ctx context.Context, token OAuthRefreshToken, client OAuthClient, reason string) error {
-	audit, err := m.newAudit(client.ID, "oauth.refresh_family.revoked", "oauth_refresh_family", token.FamilyID, token.WorkspaceID, AuditSucceeded, reason)
+	audit, err := m.newAudit(ctx, client.ID, "oauth.refresh_family.revoked", "oauth_refresh_family", token.FamilyID, token.WorkspaceID, AuditSucceeded, reason)
 	if err != nil {
 		return err
 	}

@@ -35,6 +35,9 @@ func (m *Manager) Authorize(ctx context.Context, authn Authentication, workspace
 	if workspace.DisabledAt != nil {
 		return ErrForbidden
 	}
+	if workspace.RequireMFA && authn.Interactive() && authn.Level < AAL2 {
+		return ErrStepUpRequired
+	}
 	membership, err := m.store.Membership(ctx, workspaceID, authn.UserID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -74,6 +77,9 @@ func (m *Manager) AuthorizePermission(ctx context.Context, authn Authentication,
 	}
 	if workspace.DisabledAt != nil {
 		return ErrForbidden
+	}
+	if workspace.RequireMFA && authn.Interactive() && authn.Level < AAL2 {
+		return ErrStepUpRequired
 	}
 	membership, err := m.store.Membership(ctx, workspaceID, authn.UserID)
 	if err != nil {
@@ -119,7 +125,7 @@ func (m *Manager) GrantRole(ctx context.Context, actor Authentication, workspace
 	}
 	now := m.now()
 	membership := Membership{WorkspaceID: workspaceID, UserID: userID, Role: role, Status: status, ProvisioningSource: ProvisioningSourceLocal, UpdatedAt: now, CreatedAt: createdAt}
-	event, err := m.newAudit(actor.UserID, "membership.role.set", "user", userID, workspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "membership.role.set", "user", userID, workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}

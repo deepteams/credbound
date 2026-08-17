@@ -7,19 +7,27 @@ reimplemented in every project:
 - local password authentication;
 - WebAuthn passkeys;
 - TOTP second factor and recovery codes;
+- password reset and magic-link sign-in through single-use, expiring
+  email-proof tokens with enumeration-resistant initiation;
+- built-in account lockout after consecutive password or TOTP failures;
 - multiple verified email addresses per user, with one primary address;
 - transactional tracking of the latest authentication (`last_seen_at`);
 - optional SSO per SaaS application (Google, GitHub, Microsoft, OIDC, and SAML);
 - freshness checks for step-up operations;
 - Personal Access Tokens (PATs) displayed only once;
 - workspace isolation and extensible RBAC (`admin`, `member`, and application roles);
+- workspace invitations whose invitee chooses their own password, and an
+  optional per-workspace MFA requirement;
+- atomic revocation of every PAT and OAuth grant of a user;
 - optional SCIM 2.0 provisioning per workspace (`Users`, `Groups`, `.search`);
 - optional OAuth 2.0/OIDC authorization-server capabilities for remote MCP
   resources, with pre-registration, independent CIMD and DCR policies, PKCE,
   opaque rotating tokens, pairwise subjects, and revocation cascades;
 - instance administration (`root`, `developer`, `support`, `marketing`, `sales`);
-- an append-only audit log that the host service can extend without spoofing
-  the actor or timestamp;
+- an append-only, hash-chained audit log — carrying the client IP address and
+  user agent supplied by the host — that the host service can extend without
+  spoofing the actor or timestamp, and whose integrity `VerifyAuditChain`
+  recomputes end to end;
 - transactional hooks for atomic host-service business writes;
 - typed post-commit events for analytics, notifications, and external
   integrations;
@@ -46,6 +54,11 @@ hooks, and append-only audit behavior against a real PostgreSQL service.
 - An SSO identity is explicitly linked by `issuer` and `subject`; the IdP email
   address never triggers an automatic account merge.
 - A PAT can never satisfy an interactive step-up request.
+- Completing a password reset atomically revokes the account's PATs and OAuth
+  grants and clears its lockout; a locked account still performs the same
+  password derivation and never confirms whether an address exists.
+- Every audit event is hash-chained to its predecessor inside the commit
+  transaction; tampering is detectable with `VerifyAuditChain`.
 - Access to application resources must always provide a `workspace_id`.
 - All entity IDs created by Credbound are canonical UUIDv7 values that are
   monotonic within the process.

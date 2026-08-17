@@ -29,7 +29,7 @@ func (m *Manager) RecordAudit(ctx context.Context, actor Authentication, input A
 	} else if err := m.AuthorizeAdmin(ctx, actor, PermissionAdminAccess); err != nil {
 		return err
 	}
-	event, err := m.newAudit(actor.UserID, input.Action, input.ResourceType, input.ResourceID, input.WorkspaceID, input.Outcome, input.Reason)
+	event, err := m.newAudit(ctx, actor.UserID, input.Action, input.ResourceType, input.ResourceID, input.WorkspaceID, input.Outcome, input.Reason)
 	if err != nil {
 		return err
 	}

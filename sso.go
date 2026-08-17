@@ -127,7 +127,7 @@ func (m *Manager) FinishSSO(ctx context.Context, continuation string, response [
 		return Authentication{}, ErrInvalidCredentials
 	}
 	now := m.now()
-	event, err := m.newAudit(user.ID, "auth.sso", "sso_identity", identity.ID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, user.ID, "auth.sso", "sso_identity", identity.ID, "", AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, err
 	}
@@ -154,7 +154,7 @@ func (m *Manager) finishSSOLink(ctx context.Context, provider SSOProvider, state
 		ProviderKind: provider.Kind(), Issuer: claims.Issuer, Subject: claims.Subject,
 		Email: claims.Email, CreatedAt: now, LastUsedAt: cloneTime(&now),
 	}
-	event, err := m.newAudit(state.UserID, "sso.link", "sso_identity", id, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, state.UserID, "sso.link", "sso_identity", id, "", AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, err
 	}
@@ -183,7 +183,7 @@ func (m *Manager) UnlinkSSO(ctx context.Context, actor Authentication, identityI
 	if !validUUIDv7(identityID) {
 		return fmt.Errorf("%w: invalid SSO identity id", ErrInvalidInput)
 	}
-	event, err := m.newAudit(actor.UserID, "sso.unlink", "sso_identity", identityID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "sso.unlink", "sso_identity", identityID, "", AuditSucceeded, "")
 	if err != nil {
 		return err
 	}

@@ -112,7 +112,7 @@ func (m *Manager) CreateOAuthIssuer(ctx context.Context, actor Authentication, r
 		CodeTTL:                  policy.CodeTTL, AccessTokenTTL: policy.AccessTokenTTL,
 		RefreshTokenTTL: policy.RefreshTokenTTL, CreatedAt: now, UpdatedAt: now,
 	}
-	audit, err := m.newAudit(actor.UserID, "oauth.issuer.create", "oauth_issuer", issuer.ID, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.issuer.create", "oauth_issuer", issuer.ID, "", AuditSucceeded, "")
 	if err != nil {
 		return OAuthIssuer{}, err
 	}
@@ -156,7 +156,7 @@ func (m *Manager) UpdateOAuthIssuer(ctx context.Context, actor Authentication, r
 	issuer.AccessTokenTTL = policy.AccessTokenTTL
 	issuer.RefreshTokenTTL = policy.RefreshTokenTTL
 	issuer.UpdatedAt = m.now()
-	audit, err := m.newAudit(actor.UserID, "oauth.issuer.update", "oauth_issuer", issuer.ID, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.issuer.update", "oauth_issuer", issuer.ID, "", AuditSucceeded, "")
 	if err != nil {
 		return OAuthIssuer{}, err
 	}
@@ -206,7 +206,7 @@ func (m *Manager) CreateOAuthProtectedResource(ctx context.Context, actor Authen
 		ID: id, IssuerID: issuer.ID, WorkspaceID: workspaceID, Resource: resourceURL,
 		Scopes: scopes, CreatedAt: now, UpdatedAt: now,
 	}
-	audit, err := m.newAudit(actor.UserID, "oauth.resource.create", "oauth_resource", id, workspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.resource.create", "oauth_resource", id, workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return OAuthProtectedResource{}, err
 	}
@@ -237,7 +237,7 @@ func (m *Manager) PreRegisterOAuthClient(ctx context.Context, actor Authenticati
 	if err != nil {
 		return IssuedOAuthClient{}, err
 	}
-	audit, err := m.newAudit(actor.UserID, "oauth.client.pre_register", "oauth_client", client.ID, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.client.pre_register", "oauth_client", client.ID, "", AuditSucceeded, "")
 	if err != nil {
 		return IssuedOAuthClient{}, err
 	}
@@ -294,7 +294,7 @@ func (m *Manager) CreateOAuthInitialAccessToken(ctx context.Context, actor Authe
 		Digest: m.oauthDigest("initial-access-token", raw), MaxRegistrations: input.MaxRegistrations,
 		CreatedAt: m.now(), ExpiresAt: input.ExpiresAt.UTC(),
 	}
-	audit, err := m.newAudit(actor.UserID, "oauth.initial_access_token.create", "oauth_initial_access_token", id, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.initial_access_token.create", "oauth_initial_access_token", id, "", AuditSucceeded, "")
 	if err != nil {
 		return IssuedOAuthInitialAccessToken{}, err
 	}
@@ -322,7 +322,7 @@ func (m *Manager) RevokeOAuthInitialAccessToken(ctx context.Context, actor Authe
 	if !validUUIDv7(tokenID) {
 		return fmt.Errorf("%w: invalid initial access token id", ErrInvalidInput)
 	}
-	audit, err := m.newAudit(actor.UserID, "oauth.initial_access_token.revoke", "oauth_initial_access_token", tokenID, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.initial_access_token.revoke", "oauth_initial_access_token", tokenID, "", AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -376,7 +376,7 @@ func (m *Manager) RegisterOAuthClient(ctx context.Context, issuerURL, initialAcc
 	} else if initialAccessToken != "" {
 		return IssuedOAuthClient{}, fmt.Errorf("%w: initial access token is not accepted by open DCR", ErrInvalidInput)
 	}
-	audit, err := m.newAudit(actorID, "oauth.client.dynamic_register", "oauth_client", client.ID, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actorID, "oauth.client.dynamic_register", "oauth_client", client.ID, "", AuditSucceeded, "")
 	if err != nil {
 		return IssuedOAuthClient{}, err
 	}
@@ -516,7 +516,7 @@ func (m *Manager) CompleteOAuthAuthorization(ctx context.Context, actor Authenti
 	}
 	baseResult := OAuthAuthorizationResult{RedirectURI: continuation.RedirectURI, State: continuation.State, Issuer: issuer.Issuer}
 	if !approved {
-		audit, auditErr := m.newAudit(actor.UserID, "oauth.authorization.denied", "oauth_client", client.ID, resource.WorkspaceID, AuditFailed, "access_denied")
+		audit, auditErr := m.newAudit(ctx, actor.UserID, "oauth.authorization.denied", "oauth_client", client.ID, resource.WorkspaceID, AuditFailed, "access_denied")
 		if auditErr != nil {
 			return OAuthAuthorizationResult{}, auditErr
 		}
@@ -558,7 +558,7 @@ func (m *Manager) CompleteOAuthAuthorization(ctx context.Context, actor Authenti
 		CodeChallenge: continuation.CodeChallenge, Nonce: continuation.Nonce,
 		CreatedAt: now, ExpiresAt: now.Add(issuer.CodeTTL),
 	}
-	audit, err := m.newAudit(actor.UserID, "oauth.authorization.granted", "oauth_grant", grant.ID, resource.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.authorization.granted", "oauth_grant", grant.ID, resource.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return OAuthAuthorizationResult{}, err
 	}
@@ -801,7 +801,7 @@ func (m *Manager) resolveOAuthClient(ctx context.Context, issuer OAuthIssuer, cl
 	if client.ID != "" {
 		resolved.ID, resolved.CreatedAt = client.ID, client.CreatedAt
 	}
-	audit, err := m.newAudit("", action, "oauth_client", resolved.ID, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, "", action, "oauth_client", resolved.ID, "", AuditSucceeded, "")
 	if err != nil {
 		return OAuthClient{}, err
 	}
@@ -818,7 +818,7 @@ func (m *Manager) resolveOAuthClient(ctx context.Context, issuer OAuthIssuer, cl
 }
 
 func (m *Manager) emitOAuthCIMDRejected(ctx context.Context, issuer OAuthIssuer, clientID, reason string) {
-	audit, err := m.newAudit("", "oauth.cimd.reject", "oauth_client", clientID, "", AuditFailed, reason)
+	audit, err := m.newAudit(ctx, "", "oauth.cimd.reject", "oauth_client", clientID, "", AuditFailed, reason)
 	if err != nil {
 		return
 	}

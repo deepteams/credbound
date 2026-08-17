@@ -20,6 +20,11 @@ Credbound provides a reusable, testable, transport-independent core.
 | AUTH-004 | 2FA | A user can enable TOTP after confirming a valid code and receives single-use recovery codes. |
 | AUTH-005 | Step-up | A sensitive operation can require interactive AAL2 authentication newer than a configurable duration. |
 | AUTH-006 | Enumeration resistance | An unknown identifier and an invalid password produce the same public error and both perform a password derivation. |
+| AUTH-007 | Password reset | A single-use, expiring reset token is issued for an enabled account with the same cryptographic work for unknown addresses. Completing it atomically replaces the password, revokes the account's PATs and OAuth grants, clears its lockout, and audits the recovery. |
+| AUTH-008 | Magic link | A single-use, short-lived email token authenticates the owner of a verified address at AAL1 and reports whether a TOTP factor is still required. |
+| AUTH-009 | Lockout | Consecutive password or TOTP failures lock the account for a configurable duration. The check performs the same password derivation as a normal attempt, unknown accounts never reveal a lockout, and any successful authentication or completed reset clears the counter. |
+| AUTH-010 | Credential revocation | One atomic operation revokes every PAT and OAuth grant of a user, by the user with step-up or by an authorized instance administrator. |
+| AUTH-011 | Factor visibility | A user can list their passkeys and read their TOTP status (enrolled, active, unused recovery codes) without any secret material; administrators with users read may inspect another account. |
 | USER-001 | Latest activity | `last_seen_at` reflects the latest successful authentication across all factors. Its update and the authentication audit are atomic. |
 | EMAIL-001 | Multiple email addresses | A user may own multiple globally unique addresses, exactly one of which is primary. A secondary address becomes usable for sign-in only after verification. |
 | EMAIL-002 | Verification | Adding an address issues a random token displayed once to the host service; only its HMAC is persisted, and the token expires. |
@@ -31,6 +36,8 @@ Credbound provides a reusable, testable, transport-independent core.
 | TENANT-002 | Workspace lifecycle | An AAL2 user can create a workspace and becomes its `admin`; authorized administrators can rename or disable it atomically. A disabled workspace denies every tenant-scoped capability. |
 | TENANT-003 | Membership lifecycle | Authorized administrators can add, suspend, reactivate, and remove local memberships. SCIM-managed memberships remain directory-owned and the last active workspace administrator cannot be removed, suspended, or demoted. |
 | TENANT-004 | Revocation cascade | Disabling a workspace or suspending/removing a membership atomically revokes the affected workspace-scoped PAT and OAuth credentials. |
+| TENANT-005 | Invitations | An administrator with users write invites an email address with a pre-assigned role. The single-use, expiring token is returned once; the invitee either accepts from an authenticated account owning the verified address or registers a new account whose invited address is verified by token delivery. Invitations are unique per pending address, revocable, and listed without their digest. |
+| TENANT-006 | Workspace MFA policy | A workspace can require AAL2 from every interactive session. Non-interactive credentials such as PATs are unaffected, and the rejection uses the step-up sentinel so hosts can prompt for the second factor. |
 | RBAC-001 | Workspace roles | The `admin` and `member` roles are provided; the host service may register additional roles and permissions when constructing the `Manager`. |
 | RBAC-002 | Permission changes | Only a workspace administrator with a valid step-up may grant or modify a role. |
 | RBAC-003 | Permission-based authorization | The canonical check uses a workspace permission. Inheritance is validated without cycles, `admin` receives all registered permissions, and an unknown role fails closed. |
@@ -45,6 +52,8 @@ Credbound provides a reusable, testable, transport-independent core.
 | AUDIT-001 | Append-only audit | Every authentication, factor/PAT management operation, and permission change produces an immutable timestamped event with actor, action, target, workspace, and outcome. |
 | AUDIT-002 | Fail closed | A sensitive mutation fails if its audit event cannot be persisted atomically. |
 | AUDIT-003 | Application events | The consuming service may record an event through the Manager. It supplies the action, target, workspace, outcome, and reason; Credbound enforces the authenticated actor, UUIDv7, and timestamp. A global event requires an administration permission. |
+| AUDIT-004 | Request context | Audit events record the sanitized, bounded client IP address and user agent that the host attached to the request context; Credbound never reads transport headers itself. |
+| AUDIT-005 | Tamper evidence | Every audit event is hash-chained to its predecessor inside the commit transaction with a persisted chain head. `VerifyAuditChain` recomputes the chain and fails with a dedicated error on any edited, removed, or reordered event. |
 | SSO-001 | Providers | The core supports registered Google, GitHub, Microsoft, OpenID Connect, and SAML providers through a common port. Each SaaS application chooses which providers to enable. |
 | SSO-002 | Explicit linking | An external identity is linked from an existing interactive session. Credbound never automatically associates an account from an email address returned by the IdP. |
 | SSO-003 | Assurance | Validated SSO authentication produces AAL2. For step-up, the provider receives a requirement to force reauthentication and its own MFA. |
@@ -91,7 +100,6 @@ Credbound provides a reusable, testable, transport-independent core.
   reverse proxy: these are host-service responsibilities.
 - Cookie or JWT issuance: the library returns an authenticated identity; the
   host service chooses its session strategy.
-- Password reset in the first version; secondary-address verification is in scope.
 - Physical deletion or automatic anonymization. Privacy erasure requires an
   application-specific, separately reviewed retention policy; Credbound exposes
   disablement and revocation primitives without deleting append-only audit facts.

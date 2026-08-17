@@ -30,6 +30,10 @@ func (UnimplementedTransactionHook) ApplyMembershipChange(context.Context, Tx, M
 	return nil
 }
 
+func (UnimplementedTransactionHook) ApplyWorkspaceInvitationChange(context.Context, Tx, WorkspaceInvitationChange) error {
+	return nil
+}
+
 func (UnimplementedTransactionHook) ApplyPasswordChange(context.Context, Tx, PasswordChange) error {
 	return nil
 }
@@ -75,6 +79,10 @@ func (UnimplementedTransactionHook) ApplyPATCreation(context.Context, Tx, PATCre
 }
 
 func (UnimplementedTransactionHook) ApplyPATRevocation(context.Context, Tx, PATRevocation) error {
+	return nil
+}
+
+func (UnimplementedTransactionHook) ApplyUserCredentialRevocation(context.Context, Tx, UserCredentialRevocation) error {
 	return nil
 }
 
@@ -149,6 +157,18 @@ func (UnimplementedEventListener) OnWorkspaceChanged(context.Context, WorkspaceC
 }
 
 func (UnimplementedEventListener) OnMembershipChanged(context.Context, MembershipChangedEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnWorkspaceInvitationCreated(context.Context, WorkspaceInvitationEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnWorkspaceInvitationAccepted(context.Context, WorkspaceInvitationEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnWorkspaceInvitationRevoked(context.Context, WorkspaceInvitationEvent) error {
 	return nil
 }
 
@@ -229,6 +249,24 @@ func (UnimplementedEventListener) OnPasskeyAuthenticated(context.Context, Passke
 func (UnimplementedEventListener) OnPATCreated(context.Context, PATCreatedEvent) error { return nil }
 
 func (UnimplementedEventListener) OnPATRevoked(context.Context, PATRevokedEvent) error { return nil }
+
+func (UnimplementedEventListener) OnUserCredentialsRevoked(context.Context, UserCredentialsRevokedEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnUserLocked(context.Context, UserLockedEvent) error { return nil }
+
+func (UnimplementedEventListener) OnPasswordResetRequested(context.Context, PasswordResetRequestedEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnPasswordResetCompleted(context.Context, PasswordResetCompletedEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnEmailAuthenticationRequested(context.Context, EmailAuthenticationRequestedEvent) error {
+	return nil
+}
 
 func (UnimplementedEventListener) OnPATAuthenticated(context.Context, PATAuthenticatedEvent) error {
 	return nil

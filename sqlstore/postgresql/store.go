@@ -103,7 +103,7 @@ func (s *Store) Bootstrap(ctx context.Context, user credbound.User, email credbo
 		if err := q.InsertPassword(ctx, db.InsertPasswordParams{UserID: password.UserID, Hash: password.Hash, UpdatedAt: password.UpdatedAt}); err != nil {
 			return mapError(err)
 		}
-		if err := q.InsertWorkspace(ctx, db.InsertWorkspaceParams{ID: workspace.ID, Name: workspace.Name, CreatedAt: workspace.CreatedAt, UpdatedAt: workspace.UpdatedAt, DisabledAt: nullableTime(workspace.DisabledAt)}); err != nil {
+		if err := q.InsertWorkspace(ctx, db.InsertWorkspaceParams{ID: workspace.ID, Name: workspace.Name, CreatedAt: workspace.CreatedAt, UpdatedAt: workspace.UpdatedAt, DisabledAt: nullableTime(workspace.DisabledAt), RequireMfa: boolValue(workspace.RequireMFA)}); err != nil {
 			return mapError(err)
 		}
 		if err := upsertMembership(ctx, q, membership); err != nil {
@@ -252,10 +252,150 @@ func (s *Store) ReplacePassword(ctx context.Context, password credbound.Password
 	})
 }
 
+func (s *Store) LoginThrottleByUserID(ctx context.Context, userID string) (credbound.LoginThrottle, error) {
+	row, err := s.queries.GetLoginThrottle(ctx, userID)
+	if err != nil {
+		return credbound.LoginThrottle{}, mapError(err)
+	}
+	return credbound.LoginThrottle{
+		UserID: row.UserID, FailedAttempts: row.FailedAttempts,
+		LockedUntil: timePointer(row.LockedUntil), UpdatedAt: row.UpdatedAt,
+	}, nil
+}
+
+func (s *Store) RecordLoginFailure(ctx context.Context, userID string, at time.Time, threshold int64, lockedUntil time.Time, commit credbound.Commit) (credbound.LoginThrottle, error) {
+	result := credbound.LoginThrottle{UserID: userID, UpdatedAt: at}
+	err := s.mutate(ctx, commit, func(q *db.Queries) error {
+		if _, err := q.GetUserByID(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		current, currentErr := q.GetLoginThrottle(ctx, userID)
+		if currentErr != nil && !errors.Is(currentErr, sql.ErrNoRows) {
+			return mapError(currentErr)
+		}
+		if currentErr == nil && current.LockedUntil.Valid && !at.Before(current.LockedUntil.Time) {
+			// The previous lockout has expired: the failure window restarts.
+			if err := q.ClearLoginThrottle(ctx, userID); err != nil {
+				return mapError(err)
+			}
+		}
+		attempts, err := q.UpsertLoginFailure(ctx, db.UpsertLoginFailureParams{UserID: userID, UpdatedAt: at})
+		if err != nil {
+			return mapError(err)
+		}
+		result.FailedAttempts = attempts
+		if threshold > 0 && attempts >= threshold {
+			count, err := q.LockLoginThrottle(ctx, db.LockLoginThrottleParams{UserID: userID, LockedUntil: nullableTime(&lockedUntil)})
+			if err := affected(count, err); err != nil {
+				return err
+			}
+			deadline := lockedUntil
+			result.LockedUntil = &deadline
+		}
+		return nil
+	})
+	if err != nil {
+		return credbound.LoginThrottle{}, err
+	}
+	return result, nil
+}
+
 func (s *Store) RecordAuthentication(ctx context.Context, userID string, seenAt time.Time, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		count, err := q.TouchUserLastSeen(ctx, db.TouchUserLastSeenParams{ID: userID, LastSeenAt: nullableTime(&seenAt)})
-		return affected(count, err)
+		if err := affected(count, err); err != nil {
+			return err
+		}
+		return mapError(q.ClearLoginThrottle(ctx, userID))
+	})
+}
+
+func (s *Store) CreatePasswordReset(ctx context.Context, credential credbound.PasswordResetCredential, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		if _, err := q.GetUserByID(ctx, credential.UserID); err != nil {
+			return mapError(err)
+		}
+		return mapError(q.InsertPasswordReset(ctx, db.InsertPasswordResetParams{
+			ID: credential.ID, UserID: credential.UserID, Digest: credential.Digest,
+			CreatedAt: credential.CreatedAt, ExpiresAt: credential.ExpiresAt,
+		}))
+	})
+}
+
+func (s *Store) PasswordResetByID(ctx context.Context, resetID string) (credbound.PasswordResetCredential, error) {
+	row, err := s.queries.GetPasswordReset(ctx, resetID)
+	if err != nil {
+		return credbound.PasswordResetCredential{}, mapError(err)
+	}
+	return credbound.PasswordResetCredential{
+		ID: row.ID, UserID: row.UserID, Digest: row.Digest,
+		CreatedAt: row.CreatedAt, ExpiresAt: row.ExpiresAt, UsedAt: timePointer(row.UsedAt),
+	}, nil
+}
+
+func (s *Store) CompletePasswordReset(ctx context.Context, resetID string, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		count, err := q.ConsumePasswordReset(ctx, db.ConsumePasswordResetParams{ID: resetID, UsedAt: nullableTime(&at)})
+		if err != nil {
+			return mapError(err)
+		}
+		if count != 1 {
+			return credbound.ErrConflict
+		}
+		if err := q.DeleteOtherPasswordResets(ctx, db.DeleteOtherPasswordResetsParams{UserID: password.UserID, ID: resetID}); err != nil {
+			return mapError(err)
+		}
+		replaced, err := q.ReplacePassword(ctx, db.ReplacePasswordParams{UserID: password.UserID, Hash: password.Hash, UpdatedAt: password.UpdatedAt})
+		if err := affected(replaced, err); err != nil {
+			return err
+		}
+		if err := q.RevokeUserPATs(ctx, db.RevokeUserPATsParams{UserID: password.UserID, RevokedAt: nullableTime(&at)}); err != nil {
+			return mapError(err)
+		}
+		if err := s.revokeOAuthGrants(ctx, q, at, func(grant credbound.OAuthGrant) bool { return grant.UserID == password.UserID }); err != nil {
+			return err
+		}
+		return mapError(q.ClearLoginThrottle(ctx, password.UserID))
+	})
+}
+
+func (s *Store) CreateEmailAuthentication(ctx context.Context, credential credbound.EmailAuthenticationCredential, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		if _, err := q.GetUserByID(ctx, credential.UserID); err != nil {
+			return mapError(err)
+		}
+		return mapError(q.InsertEmailAuthentication(ctx, db.InsertEmailAuthenticationParams{
+			ID: credential.ID, UserID: credential.UserID, EmailID: credential.EmailID,
+			Digest: credential.Digest, CreatedAt: credential.CreatedAt, ExpiresAt: credential.ExpiresAt,
+		}))
+	})
+}
+
+func (s *Store) EmailAuthenticationByID(ctx context.Context, tokenID string) (credbound.EmailAuthenticationCredential, error) {
+	row, err := s.queries.GetEmailAuthentication(ctx, tokenID)
+	if err != nil {
+		return credbound.EmailAuthenticationCredential{}, mapError(err)
+	}
+	return credbound.EmailAuthenticationCredential{
+		ID: row.ID, UserID: row.UserID, EmailID: row.EmailID, Digest: row.Digest,
+		CreatedAt: row.CreatedAt, ExpiresAt: row.ExpiresAt, UsedAt: timePointer(row.UsedAt),
+	}, nil
+}
+
+func (s *Store) ConsumeEmailAuthentication(ctx context.Context, tokenID, userID string, at time.Time, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		count, err := q.ConsumeEmailAuthentication(ctx, db.ConsumeEmailAuthenticationParams{ID: tokenID, UserID: userID, UsedAt: nullableTime(&at)})
+		if err != nil {
+			return mapError(err)
+		}
+		if count != 1 {
+			return credbound.ErrConflict
+		}
+		touched, err := q.TouchUserLastSeen(ctx, db.TouchUserLastSeenParams{ID: userID, LastSeenAt: nullableTime(&at)})
+		if err := affected(touched, err); err != nil {
+			return err
+		}
+		return mapError(q.ClearLoginThrottle(ctx, userID))
 	})
 }
 
@@ -427,6 +567,9 @@ func (s *Store) UseTOTP(ctx context.Context, userID string, step int64, commit c
 			if _, err := q.TouchUserLastSeen(ctx, db.TouchUserLastSeenParams{ID: userID, LastSeenAt: nullableTime(&commit.Audit.OccurredAt)}); err != nil {
 				return false, mapError(err)
 			}
+			if err := q.ClearLoginThrottle(ctx, userID); err != nil {
+				return false, mapError(err)
+			}
 		}
 		return used, nil
 	})
@@ -445,10 +588,21 @@ func (s *Store) ConsumeRecoveryCode(ctx context.Context, userID string, digest [
 			if _, err := q.TouchUserLastSeen(ctx, db.TouchUserLastSeenParams{ID: userID, LastSeenAt: nullableTime(&usedAt)}); err != nil {
 				return false, mapError(err)
 			}
+			if err := q.ClearLoginThrottle(ctx, userID); err != nil {
+				return false, mapError(err)
+			}
 		}
 		return used, nil
 	})
 	return used, err
+}
+
+func (s *Store) CountUnusedRecoveryCodes(ctx context.Context, userID string) (int64, error) {
+	count, err := s.queries.CountUnusedRecoveryCodes(ctx, userID)
+	if err != nil {
+		return 0, mapError(err)
+	}
+	return count, nil
 }
 
 func (s *Store) DisableTOTP(ctx context.Context, userID string, commit credbound.Commit) error {
@@ -562,6 +716,18 @@ func (s *Store) RevokePAT(ctx context.Context, userID, id string, revokedAt time
 	})
 }
 
+func (s *Store) RevokeUserCredentials(ctx context.Context, userID string, at time.Time, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		if _, err := q.GetUserByID(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		if err := q.RevokeUserPATs(ctx, db.RevokeUserPATsParams{UserID: userID, RevokedAt: nullableTime(&at)}); err != nil {
+			return mapError(err)
+		}
+		return s.revokeOAuthGrants(ctx, q, at, func(grant credbound.OAuthGrant) bool { return grant.UserID == userID })
+	})
+}
+
 func (s *Store) PATs(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.PAT], error] {
 	return func(yield func(credbound.PageEvent[credbound.PAT], error) bool) {
 		streamCtx, cancel := context.WithTimeout(ctx, s.streamTimeout)
@@ -608,11 +774,143 @@ ORDER BY created_at DESC, id DESC LIMIT $6`, userID, cursor.ID != "", cursor.Tim
 	}
 }
 
+func (s *Store) CreateWorkspaceInvitation(ctx context.Context, invitation credbound.WorkspaceInvitation, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		return mapError(q.InsertWorkspaceInvitation(ctx, db.InsertWorkspaceInvitationParams{
+			ID: invitation.ID, WorkspaceID: invitation.WorkspaceID, Email: invitation.Email,
+			Role: string(invitation.Role), InvitedBy: invitation.InvitedBy, Digest: invitation.Digest,
+			CreatedAt: invitation.CreatedAt, ExpiresAt: invitation.ExpiresAt,
+		}))
+	})
+}
+
+func (s *Store) WorkspaceInvitationByID(ctx context.Context, invitationID string) (credbound.WorkspaceInvitation, error) {
+	row, err := s.queries.GetWorkspaceInvitation(ctx, invitationID)
+	if err != nil {
+		return credbound.WorkspaceInvitation{}, mapError(err)
+	}
+	return invitationFromRow(row.ID, row.WorkspaceID, row.Email, row.Role, row.InvitedBy, row.Digest, row.CreatedAt, row.ExpiresAt, row.AcceptedAt, row.AcceptedUserID, row.RevokedAt), nil
+}
+
+func (s *Store) PendingWorkspaceInvitation(ctx context.Context, workspaceID, email string) (credbound.WorkspaceInvitation, error) {
+	row, err := s.queries.GetPendingWorkspaceInvitation(ctx, db.GetPendingWorkspaceInvitationParams{WorkspaceID: workspaceID, Email: email})
+	if err != nil {
+		return credbound.WorkspaceInvitation{}, mapError(err)
+	}
+	return invitationFromRow(row.ID, row.WorkspaceID, row.Email, row.Role, row.InvitedBy, row.Digest, row.CreatedAt, row.ExpiresAt, row.AcceptedAt, row.AcceptedUserID, row.RevokedAt), nil
+}
+
+func (s *Store) AcceptWorkspaceInvitation(ctx context.Context, invitationID, userID string, at time.Time, membership credbound.Membership, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		count, err := q.AcceptWorkspaceInvitation(ctx, db.AcceptWorkspaceInvitationParams{ID: invitationID, AcceptedAt: nullableTime(&at), AcceptedUserID: nullableString(userID)})
+		if err != nil {
+			return mapError(err)
+		}
+		if count != 1 {
+			return credbound.ErrConflict
+		}
+		return upsertMembership(ctx, q, membership)
+	})
+}
+
+func (s *Store) RegisterInvitedUser(ctx context.Context, invitationID string, user credbound.User, email credbound.EmailAddress, password credbound.PasswordCredential, membership credbound.Membership, at time.Time, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		count, err := q.AcceptWorkspaceInvitation(ctx, db.AcceptWorkspaceInvitationParams{ID: invitationID, AcceptedAt: nullableTime(&at), AcceptedUserID: nullableString(user.ID)})
+		if err != nil {
+			return mapError(err)
+		}
+		if count != 1 {
+			return credbound.ErrConflict
+		}
+		if err := insertUser(ctx, q, user); err != nil {
+			return err
+		}
+		if err := insertEmail(ctx, q, email, credbound.EmailVerificationCredential{}); err != nil {
+			return err
+		}
+		if err := q.InsertPassword(ctx, db.InsertPasswordParams{UserID: password.UserID, Hash: password.Hash, UpdatedAt: password.UpdatedAt}); err != nil {
+			return mapError(err)
+		}
+		return upsertMembership(ctx, q, membership)
+	})
+}
+
+func (s *Store) RevokeWorkspaceInvitation(ctx context.Context, workspaceID, invitationID string, at time.Time, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		count, err := q.RevokeWorkspaceInvitation(ctx, db.RevokeWorkspaceInvitationParams{WorkspaceID: workspaceID, ID: invitationID, RevokedAt: nullableTime(&at)})
+		if err != nil {
+			return mapError(err)
+		}
+		if count != 1 {
+			return credbound.ErrConflict
+		}
+		return nil
+	})
+}
+
+func (s *Store) WorkspaceInvitations(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.WorkspaceInvitation], error] {
+	return func(yield func(credbound.PageEvent[credbound.WorkspaceInvitation], error) bool) {
+		streamCtx, cancel := context.WithTimeout(ctx, s.streamTimeout)
+		defer cancel()
+		cursor, err := decodeCursor(page.Cursor)
+		if err != nil {
+			yield(credbound.PageEvent[credbound.WorkspaceInvitation]{}, err)
+			return
+		}
+		rows, err := s.rows.Query(streamCtx, `SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
+FROM credbound_workspace_invitations
+WHERE workspace_id = $1 AND (NOT $2 OR created_at < $3 OR (created_at = $4 AND id < $5))
+ORDER BY created_at DESC, id DESC LIMIT $6`, workspaceID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
+		if err != nil {
+			yield(credbound.PageEvent[credbound.WorkspaceInvitation]{}, mapError(err))
+			return
+		}
+		defer rows.Close()
+		var last credbound.WorkspaceInvitation
+		count := 0
+		for rows.Next() {
+			var value credbound.WorkspaceInvitation
+			var role string
+			var accepted, revoked sql.NullTime
+			var acceptedUser sql.NullString
+			if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Email, &role, &value.InvitedBy, &value.Digest, &value.CreatedAt, &value.ExpiresAt, &accepted, &acceptedUser, &revoked); err != nil {
+				yield(credbound.PageEvent[credbound.WorkspaceInvitation]{}, err)
+				return
+			}
+			value.Role = credbound.Role(role)
+			value.AcceptedAt, value.RevokedAt = timePointer(accepted), timePointer(revoked)
+			value.AcceptedUserID = acceptedUser.String
+			if count == page.Limit {
+				yield(credbound.EndEvent[credbound.WorkspaceInvitation](credbound.PageEnd{HasMore: true, NextCursor: encodeCursor(last.CreatedAt, last.ID)}), nil)
+				return
+			}
+			last, count = value, count+1
+			if !yield(credbound.ItemEvent(value), nil) {
+				return
+			}
+		}
+		if err := rows.Err(); err != nil {
+			yield(credbound.PageEvent[credbound.WorkspaceInvitation]{}, err)
+			return
+		}
+		yield(credbound.EndEvent[credbound.WorkspaceInvitation](credbound.PageEnd{}), nil)
+	}
+}
+
+func invitationFromRow(id, workspaceID, email, role, invitedBy string, digestValue []byte, createdAt, expiresAt time.Time, acceptedAt sql.NullTime, acceptedUserID sql.NullString, revokedAt sql.NullTime) credbound.WorkspaceInvitation {
+	return credbound.WorkspaceInvitation{
+		ID: id, WorkspaceID: workspaceID, Email: email, Role: credbound.Role(role), InvitedBy: invitedBy,
+		Digest: digestValue, CreatedAt: createdAt, ExpiresAt: expiresAt,
+		AcceptedAt: timePointer(acceptedAt), AcceptedUserID: acceptedUserID.String, RevokedAt: timePointer(revokedAt),
+	}
+}
+
 func (s *Store) CreateWorkspace(ctx context.Context, workspace credbound.Workspace, owner credbound.Membership, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		if err := q.InsertWorkspace(ctx, db.InsertWorkspaceParams{
 			ID: workspace.ID, Name: workspace.Name, CreatedAt: workspace.CreatedAt,
 			UpdatedAt: workspace.UpdatedAt, DisabledAt: nullableTime(workspace.DisabledAt),
+			RequireMfa: boolValue(workspace.RequireMFA),
 		}); err != nil {
 			return mapError(err)
 		}
@@ -630,7 +928,7 @@ func (s *Store) WorkspaceByID(ctx context.Context, workspaceID string) (credboun
 
 func (s *Store) UpdateWorkspace(ctx context.Context, workspace credbound.Workspace, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
-		count, err := q.UpdateWorkspace(ctx, db.UpdateWorkspaceParams{ID: workspace.ID, Name: workspace.Name, UpdatedAt: workspace.UpdatedAt})
+		count, err := q.UpdateWorkspace(ctx, db.UpdateWorkspaceParams{ID: workspace.ID, Name: workspace.Name, UpdatedAt: workspace.UpdatedAt, RequireMfa: boolValue(workspace.RequireMFA)})
 		return affected(count, err)
 	})
 }
@@ -669,7 +967,7 @@ func (s *Store) workspaces(ctx context.Context, userID string, page credbound.Pa
 			yield(credbound.PageEvent[credbound.Workspace]{}, err)
 			return
 		}
-		query := `SELECT w.id, w.name, w.created_at, w.updated_at, w.disabled_at
+		query := `SELECT w.id, w.name, w.created_at, w.updated_at, w.disabled_at, w.require_mfa
 FROM credbound_workspaces w
 WHERE (NOT $1 OR EXISTS (SELECT 1 FROM credbound_memberships m WHERE m.workspace_id = w.id AND m.user_id = $2))
 AND (NOT $3 OR w.created_at < $4 OR (w.created_at = $5 AND w.id < $6))
@@ -685,11 +983,12 @@ ORDER BY w.created_at DESC, w.id DESC LIMIT $7`
 		for rows.Next() {
 			var value credbound.Workspace
 			var disabled sql.NullTime
-			if err := rows.Scan(&value.ID, &value.Name, &value.CreatedAt, &value.UpdatedAt, &disabled); err != nil {
+			var requireMFA bool
+			if err := rows.Scan(&value.ID, &value.Name, &value.CreatedAt, &value.UpdatedAt, &disabled, &requireMFA); err != nil {
 				yield(credbound.PageEvent[credbound.Workspace]{}, err)
 				return
 			}
-			value.DisabledAt = timePointer(disabled)
+			value.DisabledAt, value.RequireMFA = timePointer(disabled), requireMFA
 			if count == page.Limit {
 				yield(credbound.EndEvent[credbound.Workspace](credbound.PageEnd{HasMore: true, NextCursor: encodeCursor(last.CreatedAt, last.ID)}), nil)
 				return
@@ -973,7 +1272,7 @@ func (s *Store) AppendAudit(ctx context.Context, commit credbound.Commit) error 
 }
 
 func (s *Store) AuditEvents(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.AuditEvent], error] {
-	query := `SELECT id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason
+	query := `SELECT id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash
 FROM credbound_audit_events
 WHERE workspace_id = $1 AND (NOT $2 OR occurred_at < $3 OR (occurred_at = $4 AND id < $5))
 ORDER BY occurred_at DESC, id DESC LIMIT $6`
@@ -981,7 +1280,7 @@ ORDER BY occurred_at DESC, id DESC LIMIT $6`
 }
 
 func (s *Store) InstanceAuditEvents(ctx context.Context, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.AuditEvent], error] {
-	query := `SELECT id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason
+	query := `SELECT id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash
 FROM credbound_audit_events
 WHERE (NOT $1 OR occurred_at < $2 OR (occurred_at = $3 AND id < $4))
 ORDER BY occurred_at DESC, id DESC LIMIT $5`
@@ -1007,13 +1306,11 @@ func (s *Store) auditEvents(ctx context.Context, page credbound.PageRequest, que
 		var last credbound.AuditEvent
 		count := 0
 		for rows.Next() {
-			var value credbound.AuditEvent
-			var actor, workspace sql.NullString
-			if err := rows.Scan(&value.ID, &value.OccurredAt, &value.ActorKind, &actor, &value.Action, &value.ResourceType, &value.ResourceID, &workspace, &value.Outcome, &value.Reason); err != nil {
+			value, err := scanAuditEvent(rows)
+			if err != nil {
 				yield(credbound.PageEvent[credbound.AuditEvent]{}, err)
 				return
 			}
-			value.ActorID, value.WorkspaceID = actor.String, workspace.String
 			if count == page.Limit {
 				yield(credbound.EndEvent[credbound.AuditEvent](credbound.PageEnd{HasMore: true, NextCursor: encodeCursor(last.OccurredAt, last.ID)}), nil)
 				return
@@ -1058,10 +1355,86 @@ func (s *Store) mutateIf(ctx context.Context, commit credbound.Commit, fn func(*
 			return hookErr
 		}
 	}
-	if err := q.InsertAudit(ctx, auditParams(commit.Audit)); err != nil {
-		return fmt.Errorf("%w: %v", credbound.ErrAuditUnavailable, err)
+	if err := chainAudit(ctx, q, commit.Audit); err != nil {
+		return err
 	}
 	return mapError(tx.Commit())
+}
+
+// chainAudit links the audit event to the persisted chain head and appends it
+// inside the same transaction as the mutation it records.
+func chainAudit(ctx context.Context, q *db.Queries, event credbound.AuditEvent) error {
+	if event.ActorKind == "" {
+		event.ActorKind = credbound.ActorUser
+	}
+	head, err := q.GetAuditChainHead(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: %v", credbound.ErrAuditUnavailable, err)
+	}
+	event.Sequence = head.Sequence + 1
+	event.PreviousHash = head.HeadHash
+	event.Hash = credbound.ComputeAuditHash(head.HeadHash, event)
+	if err := q.InsertAudit(ctx, auditParams(event)); err != nil {
+		return fmt.Errorf("%w: %v", credbound.ErrAuditUnavailable, err)
+	}
+	count, err := q.UpdateAuditChainHead(ctx, db.UpdateAuditChainHeadParams{Sequence: event.Sequence, HeadHash: event.Hash})
+	if err != nil || count != 1 {
+		return fmt.Errorf("%w: audit chain head update failed: %v", credbound.ErrAuditUnavailable, err)
+	}
+	return nil
+}
+
+func (s *Store) AuditChainHead(ctx context.Context) (int64, []byte, error) {
+	head, err := s.queries.GetAuditChainHead(ctx)
+	if err != nil {
+		return 0, nil, mapError(err)
+	}
+	return head.Sequence, head.HeadHash, nil
+}
+
+const chainedAuditQuery = `SELECT id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash
+FROM credbound_audit_events WHERE sequence IS NOT NULL ORDER BY sequence`
+
+func (s *Store) ChainedAuditEvents(ctx context.Context) iter.Seq2[credbound.AuditEvent, error] {
+	return func(yield func(credbound.AuditEvent, error) bool) {
+		streamCtx, cancel := context.WithTimeout(ctx, s.streamTimeout)
+		defer cancel()
+		rows, err := s.rows.Query(streamCtx, chainedAuditQuery)
+		if err != nil {
+			yield(credbound.AuditEvent{}, mapError(err))
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			value, err := scanAuditEvent(rows)
+			if err != nil {
+				yield(credbound.AuditEvent{}, err)
+				return
+			}
+			if !yield(value, nil) {
+				return
+			}
+		}
+		if err := rows.Err(); err != nil {
+			yield(credbound.AuditEvent{}, err)
+		}
+	}
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanAuditEvent(rows rowScanner) (credbound.AuditEvent, error) {
+	var value credbound.AuditEvent
+	var actor, workspace sql.NullString
+	var sequence sql.NullInt64
+	if err := rows.Scan(&value.ID, &value.OccurredAt, &value.ActorKind, &actor, &value.Action, &value.ResourceType, &value.ResourceID, &workspace, &value.Outcome, &value.Reason, &value.IPAddress, &value.UserAgent, &sequence, &value.PreviousHash, &value.Hash); err != nil {
+		return credbound.AuditEvent{}, err
+	}
+	value.ActorID, value.WorkspaceID = actor.String, workspace.String
+	value.Sequence = sequence.Int64
+	return value, nil
 }
 
 func insertUser(ctx context.Context, q *db.Queries, user credbound.User) error {
@@ -1109,6 +1482,9 @@ func auditParams(event credbound.AuditEvent) db.InsertAuditParams {
 		ID: event.ID, OccurredAt: event.OccurredAt, ActorKind: string(event.ActorKind), ActorID: nullableString(event.ActorID), Action: event.Action,
 		ResourceType: event.ResourceType, ResourceID: event.ResourceID, WorkspaceID: nullableString(event.WorkspaceID),
 		Outcome: string(event.Outcome), Reason: event.Reason,
+		IpAddress: event.IPAddress, UserAgent: event.UserAgent,
+		Sequence:     sql.NullInt64{Int64: event.Sequence, Valid: event.Sequence > 0},
+		PreviousHash: event.PreviousHash, Hash: event.Hash,
 	}
 }
 
@@ -1128,10 +1504,14 @@ func userFromIDRow(row db.GetUserByIDRow) credbound.User {
 
 func workspaceFromRow(row db.CredboundWorkspace) credbound.Workspace {
 	return credbound.Workspace{
-		ID: row.ID, Name: row.Name, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		ID: row.ID, Name: row.Name, RequireMFA: row.RequireMfa,
+		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		DisabledAt: timePointer(row.DisabledAt),
 	}
 }
+
+// boolValue converts a policy flag to its PostgreSQL representation.
+func boolValue(value bool) bool { return value }
 
 func emailFromRow(row db.CredboundUserEmail) credbound.EmailAddress {
 	return credbound.EmailAddress{

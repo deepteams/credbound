@@ -3,6 +3,7 @@ package credbound
 import (
 	"context"
 	"encoding/base32"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -29,7 +30,7 @@ func (m *Manager) BeginTOTPEnrollment(ctx context.Context, actor Authentication)
 	}
 	now := m.now()
 	factor := TOTPFactor{UserID: actor.UserID, EncryptedSecret: encrypted, CreatedAt: now, UpdatedAt: now}
-	event, err := m.newAudit(actor.UserID, "totp.enrollment.begin", "user", actor.UserID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "totp.enrollment.begin", "user", actor.UserID, "", AuditSucceeded, "")
 	if err != nil {
 		return TOTPEnrollment{}, err
 	}
@@ -76,7 +77,7 @@ func (m *Manager) ConfirmTOTPEnrollment(ctx context.Context, actor Authenticatio
 	}
 	factor.Active = true
 	factor.UpdatedAt = m.now()
-	event, err := m.newAudit(actor.UserID, "totp.enrollment.confirm", "user", actor.UserID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "totp.enrollment.confirm", "user", actor.UserID, "", AuditSucceeded, "")
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +103,9 @@ func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code str
 	if actor.UserID == "" || !actor.Interactive() {
 		return Authentication{}, ErrUnauthorized
 	}
+	if err := m.requireUnlocked(ctx, actor.UserID, "auth.totp"); err != nil {
+		return Authentication{}, err
+	}
 	factor, err := m.store.TOTPByUserID(ctx, actor.UserID)
 	if err != nil || !factor.Active {
 		return Authentication{}, ErrInvalidCredentials
@@ -113,7 +117,7 @@ func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code str
 	normalized := strings.TrimSpace(code)
 	step, valid := m.totp.Validate(normalized, secret, m.now())
 	if valid {
-		event, eventErr := m.newAudit(actor.UserID, "auth.totp", "user", actor.UserID, "", AuditSucceeded, "")
+		event, eventErr := m.newAudit(ctx, actor.UserID, "auth.totp", "user", actor.UserID, "", AuditSucceeded, "")
 		if eventErr != nil {
 			return Authentication{}, eventErr
 		}
@@ -145,7 +149,7 @@ func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code str
 	}
 
 	recoveryDigest := digest(m.recoveryPepper, normalizeRecoveryCode(normalized))
-	event, eventErr := m.newAudit(actor.UserID, "auth.recovery_code", "user", actor.UserID, "", AuditSucceeded, "")
+	event, eventErr := m.newAudit(ctx, actor.UserID, "auth.recovery_code", "user", actor.UserID, "", AuditSucceeded, "")
 	if eventErr != nil {
 		return Authentication{}, eventErr
 	}
@@ -163,7 +167,7 @@ func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code str
 		m.emitAuthenticationSucceeded(ctx, "auth.totp.verify", event, promoted)
 		return promoted, nil
 	}
-	failedAudit, auditErr := m.recordAuthenticationAudit(ctx, actor.UserID, "auth.totp", AuditFailed, "invalid_credentials")
+	failedAudit, auditErr := m.recordAuthenticationFailure(ctx, actor.UserID, "auth.totp", true)
 	if auditErr != nil {
 		return Authentication{}, auditErr
 	}
@@ -181,7 +185,7 @@ func (m *Manager) DisableTOTP(ctx context.Context, actor Authentication, code st
 	if err := m.requireStepUp(ctx, promoted, "auth.totp.disable"); err != nil {
 		return err
 	}
-	event, err := m.newAudit(actor.UserID, "totp.disable", "user", actor.UserID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "totp.disable", "user", actor.UserID, "", AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -199,6 +203,43 @@ func (m *Manager) DisableTOTP(ctx context.Context, actor Authentication, code st
 	disabled := TOTPDisabledEvent{EventMeta: meta, UserID: actor.UserID}
 	m.events.emit(ctx, EventTOTPDisabled, func(listener EventListener) error { return listener.OnTOTPDisabled(ctx, disabled) })
 	return nil
+}
+
+// TOTPStatus reports whether a user has a TOTP factor, whether it is active,
+// and how many recovery codes remain unused. It never exposes the secret.
+// Reading another user requires admin users read permission.
+func (m *Manager) TOTPStatus(ctx context.Context, actor Authentication, userID string) (_ TOTPStatus, err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "auth.totp.status", started, err) }()
+	if actor.UserID == "" {
+		return TOTPStatus{}, ErrUnauthorized
+	}
+	if userID == "" {
+		userID = actor.UserID
+	}
+	if userID == actor.UserID {
+		if err := m.requireRecentInteractive(ctx, actor); err != nil {
+			return TOTPStatus{}, err
+		}
+	} else if err := m.AuthorizeAdmin(ctx, actor, PermissionUsersRead); err != nil {
+		return TOTPStatus{}, err
+	}
+	factor, err := m.store.TOTPByUserID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return TOTPStatus{}, nil
+		}
+		return TOTPStatus{}, err
+	}
+	status := TOTPStatus{Enrolled: true, Active: factor.Active, CreatedAt: factor.CreatedAt, UpdatedAt: factor.UpdatedAt}
+	if factor.Active {
+		remaining, err := m.store.CountUnusedRecoveryCodes(ctx, userID)
+		if err != nil {
+			return TOTPStatus{}, err
+		}
+		status.UnusedRecoveryCodes = int(remaining)
+	}
+	return status, nil
 }
 
 func (m *Manager) decryptTOTPSecret(factor TOTPFactor) (string, error) {

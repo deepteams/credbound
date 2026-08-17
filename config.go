@@ -11,26 +11,42 @@ import (
 )
 
 type Config struct {
-	Store                Store
-	Passwords            PasswordHasher
-	TOTP                 TOTPProvider
-	Passkeys             PasskeyProvider
-	SecretKey            []byte
-	PATPepper            []byte
-	RecoveryPepper       []byte
-	StepUpMaxAge         time.Duration
-	CeremonyTTL          time.Duration
-	MinPasswordLen       int
+	Store          Store
+	Passwords      PasswordHasher
+	TOTP           TOTPProvider
+	Passkeys       PasskeyProvider
+	SecretKey      []byte
+	PATPepper      []byte
+	RecoveryPepper []byte
+	StepUpMaxAge   time.Duration
+	CeremonyTTL    time.Duration
+	MinPasswordLen int
+	// MaxFailedLogins locks an account after that many consecutive password
+	// or TOTP failures. Zero keeps the default of 10; a negative value
+	// disables the built-in lockout for hosts that throttle upstream.
+	MaxFailedLogins int
+	// LockoutDuration is how long a locked account rejects authentication.
+	// Zero keeps the default of 15 minutes.
+	LockoutDuration      time.Duration
 	Clock                func() time.Time
 	Random               io.Reader
 	Observer             Observer
 	AdminPermissions     map[InstanceRole][]Permission
 	WorkspaceRoles       []RoleDefinition
 	EmailVerificationTTL time.Duration
-	SSOProviders         []SSOProvider
-	TransactionHooks     []TransactionHook
-	EventListeners       []EventListener
-	OAuth                *OAuthConfig
+	// PasswordResetTTL bounds the validity of a password reset token. Zero
+	// keeps the default of 1 hour.
+	PasswordResetTTL time.Duration
+	// EmailAuthenticationTTL bounds the validity of a magic-link token. Zero
+	// keeps the default of 15 minutes.
+	EmailAuthenticationTTL time.Duration
+	// InvitationTTL bounds the validity of a workspace invitation token.
+	// Zero keeps the default of 7 days.
+	InvitationTTL    time.Duration
+	SSOProviders     []SSOProvider
+	TransactionHooks []TransactionHook
+	EventListeners   []EventListener
+	OAuth            *OAuthConfig
 }
 
 type OAuthConfig struct {
@@ -51,12 +67,17 @@ type Manager struct {
 	stepUpMaxAge         time.Duration
 	ceremonyTTL          time.Duration
 	minPasswordLen       int
+	maxFailedLogins      int64
+	lockoutDuration      time.Duration
 	clock                func() time.Time
 	random               io.Reader
 	observer             Observer
 	adminPermissions     map[InstanceRole]map[Permission]struct{}
 	workspaceRoles       *roleCatalog
 	emailVerificationTTL time.Duration
+	passwordResetTTL     time.Duration
+	emailAuthTTL         time.Duration
+	invitationTTL        time.Duration
 	ssoProviders         map[string]SSOProvider
 	events               *eventRegistry
 	scimStore            SCIMStore
@@ -87,8 +108,26 @@ func New(cfg Config) (*Manager, error) {
 	if cfg.EmailVerificationTTL <= 0 {
 		cfg.EmailVerificationTTL = 24 * time.Hour
 	}
+	if cfg.PasswordResetTTL <= 0 {
+		cfg.PasswordResetTTL = time.Hour
+	}
+	if cfg.EmailAuthenticationTTL <= 0 {
+		cfg.EmailAuthenticationTTL = 15 * time.Minute
+	}
+	if cfg.InvitationTTL <= 0 {
+		cfg.InvitationTTL = 7 * 24 * time.Hour
+	}
 	if cfg.MinPasswordLen == 0 {
 		cfg.MinPasswordLen = 12
+	}
+	if cfg.MaxFailedLogins == 0 {
+		cfg.MaxFailedLogins = 10
+	}
+	if cfg.MaxFailedLogins < 0 {
+		cfg.MaxFailedLogins = 0
+	}
+	if cfg.LockoutDuration <= 0 {
+		cfg.LockoutDuration = 15 * time.Minute
 	}
 	if cfg.MinPasswordLen < 10 {
 		return nil, fmt.Errorf("%w: minimum password length cannot be below 10", ErrInvalidInput)
@@ -152,12 +191,17 @@ func New(cfg Config) (*Manager, error) {
 		stepUpMaxAge:         cfg.StepUpMaxAge,
 		ceremonyTTL:          cfg.CeremonyTTL,
 		minPasswordLen:       cfg.MinPasswordLen,
+		maxFailedLogins:      int64(cfg.MaxFailedLogins),
+		lockoutDuration:      cfg.LockoutDuration,
 		clock:                cfg.Clock,
 		random:               cfg.Random,
 		observer:             cfg.Observer,
 		adminPermissions:     adminPermissions,
 		workspaceRoles:       workspaceRoles,
 		emailVerificationTTL: cfg.EmailVerificationTTL,
+		passwordResetTTL:     cfg.PasswordResetTTL,
+		emailAuthTTL:         cfg.EmailAuthenticationTTL,
+		invitationTTL:        cfg.InvitationTTL,
 		ssoProviders:         ssoProviders,
 		events:               events,
 		scimStore:            scimStore,

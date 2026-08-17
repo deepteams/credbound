@@ -40,76 +40,84 @@ type Commit struct {
 type EventName string
 
 const (
-	EventBootstrapCompleted        EventName = "bootstrap.completed"
-	EventUserCreated               EventName = "user.created"
-	EventUserDisabled              EventName = "user.disabled"
-	EventUserEnabled               EventName = "user.enabled"
-	EventWorkspaceCreated          EventName = "workspace.created"
-	EventWorkspaceUpdated          EventName = "workspace.updated"
-	EventWorkspaceDisabled         EventName = "workspace.disabled"
-	EventWorkspaceEnabled          EventName = "workspace.enabled"
-	EventMembershipAdded           EventName = "membership.added"
-	EventMembershipStatusChanged   EventName = "membership.status_changed"
-	EventMembershipRemoved         EventName = "membership.removed"
-	EventPasswordChanged           EventName = "password.changed"
-	EventPasswordRehashed          EventName = "password.rehashed"
-	EventAuthenticationSucceeded   EventName = "authentication.succeeded"
-	EventAuthenticationFailed      EventName = "authentication.failed"
-	EventStepUpDenied              EventName = "step_up.denied"
-	EventAuthorizationDenied       EventName = "authorization.denied"
-	EventEmailAdded                EventName = "email.added"
-	EventEmailConfirmed            EventName = "email.confirmed"
-	EventPrimaryEmailChanged       EventName = "email.primary_changed"
-	EventEmailRemoved              EventName = "email.removed"
-	EventTOTPEnrollmentStarted     EventName = "totp.enrollment_started"
-	EventTOTPActivated             EventName = "totp.activated"
-	EventTOTPDisabled              EventName = "totp.disabled"
-	EventTOTPVerified              EventName = "totp.verified"
-	EventTOTPReplayRejected        EventName = "totp.replay_rejected"
-	EventRecoveryCodeConsumed      EventName = "recovery_code.consumed"
-	EventPasskeyRegistered         EventName = "passkey.registered"
-	EventPasskeyDeleted            EventName = "passkey.deleted"
-	EventPasskeyAuthenticated      EventName = "passkey.authenticated"
-	EventPATCreated                EventName = "pat.created"
-	EventPATRevoked                EventName = "pat.revoked"
-	EventPATAuthenticated          EventName = "pat.authenticated"
-	EventPATRejected               EventName = "pat.rejected"
-	EventSSOChallengeIssued        EventName = "sso.challenge_issued"
-	EventSSOLinked                 EventName = "sso.linked"
-	EventSSOUnlinked               EventName = "sso.unlinked"
-	EventSSOAuthenticated          EventName = "sso.authenticated"
-	EventRoleGranted               EventName = "role.granted"
-	EventInstanceRoleChanged       EventName = "instance_role.changed"
-	EventInstanceRoleRemoved       EventName = "instance_role.removed"
-	EventClientAuditRecorded       EventName = "client_audit.recorded"
-	EventAuditUnavailable          EventName = "audit.unavailable"
-	EventSCIMConfigurationCreated  EventName = "scim.configuration.created"
-	EventSCIMUserProvisioned       EventName = "scim.user.provisioned"
-	EventSCIMUserUpdated           EventName = "scim.user.updated"
-	EventSCIMUserActivated         EventName = "scim.user.activated"
-	EventSCIMUserSuspended         EventName = "scim.user.suspended"
-	EventSCIMUserDeprovisioned     EventName = "scim.user.deprovisioned"
-	EventSCIMGroupCreated          EventName = "scim.group.created"
-	EventSCIMGroupUpdated          EventName = "scim.group.updated"
-	EventSCIMGroupDeleted          EventName = "scim.group.deleted"
-	EventSCIMGroupMembersChanged   EventName = "scim.group.members_changed"
-	EventOAuthClientRegistered     EventName = "oauth.client.registered"
-	EventOAuthClientDisabled       EventName = "oauth.client.disabled"
-	EventOAuthClientEnabled        EventName = "oauth.client.enabled"
-	EventOAuthIssuerDisabled       EventName = "oauth.issuer.disabled"
-	EventOAuthIssuerEnabled        EventName = "oauth.issuer.enabled"
-	EventOAuthResourceDisabled     EventName = "oauth.resource.disabled"
-	EventOAuthResourceEnabled      EventName = "oauth.resource.enabled"
-	EventOAuthCIMDResolved         EventName = "oauth.cimd.resolved"
-	EventOAuthCIMDRejected         EventName = "oauth.cimd.rejected"
-	EventOAuthCIMDChanged          EventName = "oauth.cimd.changed"
-	EventOAuthAuthorizationGranted EventName = "oauth.authorization.granted"
-	EventOAuthAuthorizationDenied  EventName = "oauth.authorization.denied"
-	EventOAuthTokenIssued          EventName = "oauth.token.issued"
-	EventOAuthTokenRefreshed       EventName = "oauth.token.refreshed"
-	EventOAuthTokenRevoked         EventName = "oauth.token.revoked"
-	EventOAuthRefreshReuseDetected EventName = "oauth.refresh_token.reuse_detected"
-	EventOAuthConsentRevoked       EventName = "oauth.consent.revoked"
+	EventBootstrapCompleted           EventName = "bootstrap.completed"
+	EventUserCreated                  EventName = "user.created"
+	EventUserDisabled                 EventName = "user.disabled"
+	EventUserEnabled                  EventName = "user.enabled"
+	EventWorkspaceCreated             EventName = "workspace.created"
+	EventWorkspaceUpdated             EventName = "workspace.updated"
+	EventWorkspaceDisabled            EventName = "workspace.disabled"
+	EventWorkspaceEnabled             EventName = "workspace.enabled"
+	EventMembershipAdded              EventName = "membership.added"
+	EventWorkspaceInvitationCreated   EventName = "workspace.invitation_created"
+	EventWorkspaceInvitationAccepted  EventName = "workspace.invitation_accepted"
+	EventWorkspaceInvitationRevoked   EventName = "workspace.invitation_revoked"
+	EventMembershipStatusChanged      EventName = "membership.status_changed"
+	EventMembershipRemoved            EventName = "membership.removed"
+	EventPasswordChanged              EventName = "password.changed"
+	EventPasswordRehashed             EventName = "password.rehashed"
+	EventPasswordResetRequested       EventName = "password.reset_requested"
+	EventPasswordResetCompleted       EventName = "password.reset_completed"
+	EventEmailAuthenticationRequested EventName = "email_authentication.requested"
+	EventAuthenticationSucceeded      EventName = "authentication.succeeded"
+	EventAuthenticationFailed         EventName = "authentication.failed"
+	EventStepUpDenied                 EventName = "step_up.denied"
+	EventAuthorizationDenied          EventName = "authorization.denied"
+	EventEmailAdded                   EventName = "email.added"
+	EventEmailConfirmed               EventName = "email.confirmed"
+	EventPrimaryEmailChanged          EventName = "email.primary_changed"
+	EventEmailRemoved                 EventName = "email.removed"
+	EventTOTPEnrollmentStarted        EventName = "totp.enrollment_started"
+	EventTOTPActivated                EventName = "totp.activated"
+	EventTOTPDisabled                 EventName = "totp.disabled"
+	EventTOTPVerified                 EventName = "totp.verified"
+	EventTOTPReplayRejected           EventName = "totp.replay_rejected"
+	EventRecoveryCodeConsumed         EventName = "recovery_code.consumed"
+	EventPasskeyRegistered            EventName = "passkey.registered"
+	EventPasskeyDeleted               EventName = "passkey.deleted"
+	EventPasskeyAuthenticated         EventName = "passkey.authenticated"
+	EventUserCredentialsRevoked       EventName = "user.credentials_revoked"
+	EventUserLocked                   EventName = "user.locked"
+	EventPATCreated                   EventName = "pat.created"
+	EventPATRevoked                   EventName = "pat.revoked"
+	EventPATAuthenticated             EventName = "pat.authenticated"
+	EventPATRejected                  EventName = "pat.rejected"
+	EventSSOChallengeIssued           EventName = "sso.challenge_issued"
+	EventSSOLinked                    EventName = "sso.linked"
+	EventSSOUnlinked                  EventName = "sso.unlinked"
+	EventSSOAuthenticated             EventName = "sso.authenticated"
+	EventRoleGranted                  EventName = "role.granted"
+	EventInstanceRoleChanged          EventName = "instance_role.changed"
+	EventInstanceRoleRemoved          EventName = "instance_role.removed"
+	EventClientAuditRecorded          EventName = "client_audit.recorded"
+	EventAuditUnavailable             EventName = "audit.unavailable"
+	EventSCIMConfigurationCreated     EventName = "scim.configuration.created"
+	EventSCIMUserProvisioned          EventName = "scim.user.provisioned"
+	EventSCIMUserUpdated              EventName = "scim.user.updated"
+	EventSCIMUserActivated            EventName = "scim.user.activated"
+	EventSCIMUserSuspended            EventName = "scim.user.suspended"
+	EventSCIMUserDeprovisioned        EventName = "scim.user.deprovisioned"
+	EventSCIMGroupCreated             EventName = "scim.group.created"
+	EventSCIMGroupUpdated             EventName = "scim.group.updated"
+	EventSCIMGroupDeleted             EventName = "scim.group.deleted"
+	EventSCIMGroupMembersChanged      EventName = "scim.group.members_changed"
+	EventOAuthClientRegistered        EventName = "oauth.client.registered"
+	EventOAuthClientDisabled          EventName = "oauth.client.disabled"
+	EventOAuthClientEnabled           EventName = "oauth.client.enabled"
+	EventOAuthIssuerDisabled          EventName = "oauth.issuer.disabled"
+	EventOAuthIssuerEnabled           EventName = "oauth.issuer.enabled"
+	EventOAuthResourceDisabled        EventName = "oauth.resource.disabled"
+	EventOAuthResourceEnabled         EventName = "oauth.resource.enabled"
+	EventOAuthCIMDResolved            EventName = "oauth.cimd.resolved"
+	EventOAuthCIMDRejected            EventName = "oauth.cimd.rejected"
+	EventOAuthCIMDChanged             EventName = "oauth.cimd.changed"
+	EventOAuthAuthorizationGranted    EventName = "oauth.authorization.granted"
+	EventOAuthAuthorizationDenied     EventName = "oauth.authorization.denied"
+	EventOAuthTokenIssued             EventName = "oauth.token.issued"
+	EventOAuthTokenRefreshed          EventName = "oauth.token.refreshed"
+	EventOAuthTokenRevoked            EventName = "oauth.token.revoked"
+	EventOAuthRefreshReuseDetected    EventName = "oauth.refresh_token.reuse_detected"
+	EventOAuthConsentRevoked          EventName = "oauth.consent.revoked"
 )
 
 type EventMeta struct {
@@ -154,6 +162,12 @@ type MembershipChange struct {
 	Membership Membership
 	Previous   *Membership
 	Removed    bool
+}
+
+// WorkspaceInvitationChange never carries the invitation digest.
+type WorkspaceInvitationChange struct {
+	EventMeta
+	Invitation WorkspaceInvitation
 }
 
 type PasswordChange struct {
@@ -225,6 +239,11 @@ type PATCreation struct {
 type PATRevocation struct {
 	EventMeta
 	PATID  string
+	UserID string
+}
+
+type UserCredentialRevocation struct {
+	EventMeta
 	UserID string
 }
 
@@ -430,6 +449,36 @@ type PATRevokedEvent struct {
 	UserID string
 }
 
+type UserCredentialsRevokedEvent struct {
+	EventMeta
+	UserID string
+}
+
+type UserLockedEvent struct {
+	EventMeta
+	UserID      string
+	LockedUntil time.Time
+}
+
+type PasswordResetRequestedEvent struct {
+	EventMeta
+	UserID    string
+	ResetID   string
+	ExpiresAt time.Time
+}
+
+type PasswordResetCompletedEvent struct {
+	EventMeta
+	UserID string
+}
+
+type EmailAuthenticationRequestedEvent struct {
+	EventMeta
+	UserID    string
+	EmailID   string
+	ExpiresAt time.Time
+}
+
 type PATAuthenticatedEvent struct {
 	EventMeta
 	PATID  string
@@ -533,6 +582,12 @@ type MembershipChangedEvent struct {
 	Removed    bool
 }
 
+// WorkspaceInvitationEvent never carries the invitation digest.
+type WorkspaceInvitationEvent struct {
+	EventMeta
+	Invitation WorkspaceInvitation
+}
+
 type TransactionHook interface {
 	unimplementedTransactionHook()
 
@@ -541,6 +596,7 @@ type TransactionHook interface {
 	ApplyUserStatusChange(context.Context, Tx, UserStatusChange) error
 	ApplyWorkspaceChange(context.Context, Tx, WorkspaceChange) error
 	ApplyMembershipChange(context.Context, Tx, MembershipChange) error
+	ApplyWorkspaceInvitationChange(context.Context, Tx, WorkspaceInvitationChange) error
 	ApplyPasswordChange(context.Context, Tx, PasswordChange) error
 	ApplyEmailAddition(context.Context, Tx, EmailAddition) error
 	ApplyEmailConfirmation(context.Context, Tx, EmailConfirmation) error
@@ -553,6 +609,7 @@ type TransactionHook interface {
 	ApplyPasskeyDeletion(context.Context, Tx, PasskeyDeletion) error
 	ApplyPATCreation(context.Context, Tx, PATCreation) error
 	ApplyPATRevocation(context.Context, Tx, PATRevocation) error
+	ApplyUserCredentialRevocation(context.Context, Tx, UserCredentialRevocation) error
 	ApplySSOLink(context.Context, Tx, SSOLink) error
 	ApplySSOUnlink(context.Context, Tx, SSOUnlink) error
 	ApplyRoleGrant(context.Context, Tx, RoleGrant) error
@@ -577,6 +634,9 @@ type EventListener interface {
 	OnUserStatusChanged(context.Context, UserStatusEvent) error
 	OnWorkspaceChanged(context.Context, WorkspaceChangedEvent) error
 	OnMembershipChanged(context.Context, MembershipChangedEvent) error
+	OnWorkspaceInvitationCreated(context.Context, WorkspaceInvitationEvent) error
+	OnWorkspaceInvitationAccepted(context.Context, WorkspaceInvitationEvent) error
+	OnWorkspaceInvitationRevoked(context.Context, WorkspaceInvitationEvent) error
 	OnPasswordChanged(context.Context, PasswordChangedEvent) error
 	OnPasswordRehashed(context.Context, PasswordRehashedEvent) error
 	OnAuthenticationSucceeded(context.Context, AuthenticationEvent) error
@@ -598,6 +658,11 @@ type EventListener interface {
 	OnPasskeyAuthenticated(context.Context, PasskeyAuthenticatedEvent) error
 	OnPATCreated(context.Context, PATCreatedEvent) error
 	OnPATRevoked(context.Context, PATRevokedEvent) error
+	OnUserCredentialsRevoked(context.Context, UserCredentialsRevokedEvent) error
+	OnUserLocked(context.Context, UserLockedEvent) error
+	OnPasswordResetRequested(context.Context, PasswordResetRequestedEvent) error
+	OnPasswordResetCompleted(context.Context, PasswordResetCompletedEvent) error
+	OnEmailAuthenticationRequested(context.Context, EmailAuthenticationRequestedEvent) error
 	OnPATAuthenticated(context.Context, PATAuthenticatedEvent) error
 	OnPATRejected(context.Context, PATRejectedEvent) error
 	OnSSOChallengeIssued(context.Context, SSOChallengeIssuedEvent) error

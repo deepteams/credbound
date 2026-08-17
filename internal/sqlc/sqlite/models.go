@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+type CredboundAuditChain struct {
+	Singleton int64  `json:"singleton"`
+	Sequence  int64  `json:"sequence"`
+	HeadHash  []byte `json:"head_hash"`
+}
+
 type CredboundAuditEvent struct {
 	ID           string         `json:"id"`
 	OccurredAt   time.Time      `json:"occurred_at"`
@@ -20,6 +26,21 @@ type CredboundAuditEvent struct {
 	WorkspaceID  sql.NullString `json:"workspace_id"`
 	Outcome      string         `json:"outcome"`
 	Reason       string         `json:"reason"`
+	IpAddress    string         `json:"ip_address"`
+	UserAgent    string         `json:"user_agent"`
+	Sequence     sql.NullInt64  `json:"sequence"`
+	PreviousHash []byte         `json:"previous_hash"`
+	Hash         []byte         `json:"hash"`
+}
+
+type CredboundEmailAuthentication struct {
+	ID        string       `json:"id"`
+	UserID    string       `json:"user_id"`
+	EmailID   string       `json:"email_id"`
+	Digest    []byte       `json:"digest"`
+	CreatedAt time.Time    `json:"created_at"`
+	ExpiresAt time.Time    `json:"expires_at"`
+	UsedAt    sql.NullTime `json:"used_at"`
 }
 
 type CredboundInstance struct {
@@ -32,6 +53,13 @@ type CredboundInstanceAdministrator struct {
 	Role      string    `json:"role"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type CredboundLoginThrottle struct {
+	UserID         string       `json:"user_id"`
+	FailedAttempts int64        `json:"failed_attempts"`
+	LockedUntil    sql.NullTime `json:"locked_until"`
+	UpdatedAt      time.Time    `json:"updated_at"`
 }
 
 type CredboundMembership struct {
@@ -130,6 +158,15 @@ type CredboundPasswordCredential struct {
 	UserID    string    `json:"user_id"`
 	Hash      string    `json:"hash"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type CredboundPasswordReset struct {
+	ID        string       `json:"id"`
+	UserID    string       `json:"user_id"`
+	Digest    []byte       `json:"digest"`
+	CreatedAt time.Time    `json:"created_at"`
+	ExpiresAt time.Time    `json:"expires_at"`
+	UsedAt    sql.NullTime `json:"used_at"`
 }
 
 type CredboundPersonalAccessToken struct {
@@ -248,4 +285,19 @@ type CredboundWorkspace struct {
 	CreatedAt  time.Time    `json:"created_at"`
 	UpdatedAt  time.Time    `json:"updated_at"`
 	DisabledAt sql.NullTime `json:"disabled_at"`
+	RequireMfa int64        `json:"require_mfa"`
+}
+
+type CredboundWorkspaceInvitation struct {
+	ID             string         `json:"id"`
+	WorkspaceID    string         `json:"workspace_id"`
+	Email          string         `json:"email"`
+	Role           string         `json:"role"`
+	InvitedBy      string         `json:"invited_by"`
+	Digest         []byte         `json:"digest"`
+	CreatedAt      time.Time      `json:"created_at"`
+	ExpiresAt      time.Time      `json:"expires_at"`
+	AcceptedAt     sql.NullTime   `json:"accepted_at"`
+	AcceptedUserID sql.NullString `json:"accepted_user_id"`
+	RevokedAt      sql.NullTime   `json:"revoked_at"`
 }

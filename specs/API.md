@@ -51,6 +51,17 @@ weak fallback.
 - `Authentication`: user, method, assurance level, and authentication time.
 - `PAT`: persisted metadata without the secret.
 - `IssuedPAT`: metadata and raw token, returned only by `CreatePAT`.
+- `TOTPStatus`: enrollment state and unused recovery-code count, never the secret.
+- `LoginThrottle`: per-user failure counter and lockout deadline.
+- `PasswordResetCredential`, `IssuedPasswordReset`: single-use recovery proof;
+  the raw token is returned only by `BeginPasswordReset`.
+- `EmailAuthenticationCredential`, `IssuedEmailAuthentication`: single-use
+  magic-link proof; the raw token is returned only by `BeginEmailAuthentication`.
+- `WorkspaceInvitation`, `IssuedWorkspaceInvitation`: pending invitation and
+  its raw token, returned only by `InviteToWorkspace`.
+- `RequestMetadata`: sanitized client IP address and user agent that the host
+  attaches with `WithRequestMetadata` for auditing.
+- `AuditChainReport`: result of a successful `VerifyAuditChain`.
 - `AuditEvent`: append-only entry.
 - `SCIMConfiguration`, `SCIMCredential`, `SCIMAuthentication`: provisioning
   domain and service identity.
@@ -88,6 +99,11 @@ UserWorkspaces(ctx, authn, PageRequest) iter.Seq2[PageEvent[Workspace], error]
 Memberships(ctx, authn, workspaceID, PageRequest) iter.Seq2[PageEvent[Membership], error]
 AuthenticatePassword(ctx, email, password) (Authentication, error)
 ChangePassword(ctx, authn, currentPassword, newPassword) error
+BeginPasswordReset(ctx, email) (IssuedPasswordReset, error)
+CompletePasswordReset(ctx, resetToken, newPassword) (User, error)
+BeginEmailAuthentication(ctx, email) (IssuedEmailAuthentication, error)
+CompleteEmailAuthentication(ctx, linkToken) (Authentication, error)
+RevokeUserCredentials(ctx, authn, TrustedRequest, userID) error
 
 BeginEmailAddition(ctx, authn, email) (IssuedEmailVerification, error)
 ConfirmEmail(ctx, verificationToken) (EmailAddress, error)
@@ -99,12 +115,14 @@ BeginTOTPEnrollment(ctx, authn) (TOTPEnrollment, error)
 ConfirmTOTPEnrollment(ctx, authn, code) ([]string, error)
 VerifyTOTP(ctx, authn, code) (Authentication, error)
 DisableTOTP(ctx, authn, code) error
+TOTPStatus(ctx, authn, userID) (TOTPStatus, error)
 
 BeginPasskeyRegistration(ctx, authn, name) (PasskeyChallenge, error)
 FinishPasskeyRegistration(ctx, authn, continuation, response) (Passkey, error)
 BeginPasskeyAuthentication(ctx, email) (PasskeyChallenge, error)
 FinishPasskeyAuthentication(ctx, continuation, response) (Authentication, error)
 DeletePasskey(ctx, authn, passkeyID) error
+Passkeys(ctx, authn, userID) iter.Seq2[Passkey, error]
 
 BeginSSO(ctx, providerConfigurationID) (SSOChallenge, error)
 BeginSSOLink(ctx, authn, providerConfigurationID) (SSOChallenge, error)
@@ -121,6 +139,11 @@ RevokePAT(ctx, authn, patID) error
 PATs(ctx, authn, PageRequest) iter.Seq2[PageEvent[PAT], error]
 
 GrantRole(ctx, authn, workspaceID, userID, role) error
+InviteToWorkspace(ctx, authn, workspaceID, InviteToWorkspaceInput) (IssuedWorkspaceInvitation, error)
+AcceptInvitation(ctx, authn, invitationToken) (Membership, error)
+RegisterFromInvitation(ctx, invitationToken, RegisterFromInvitationInput) (Authentication, User, error)
+RevokeInvitation(ctx, authn, workspaceID, invitationID) error
+WorkspaceInvitations(ctx, authn, workspaceID, PageRequest) iter.Seq2[PageEvent[WorkspaceInvitation], error]
 Authorize(ctx, authn, workspaceID, minimumRole) error
 AuthorizePermission(ctx, authn, workspaceID, permission) error
 
@@ -178,6 +201,7 @@ RemoveInstanceRole(ctx, authn, TrustedRequest, userID) error
 AuditEvents(ctx, authn, workspaceID, PageRequest) iter.Seq2[PageEvent[AuditEvent], error]
 InstanceAuditEvents(ctx, authn, PageRequest) iter.Seq2[PageEvent[AuditEvent], error]
 RecordAudit(ctx, authn, AuditInput) error
+VerifyAuditChain(ctx, authn) (AuditChainReport, error)
 
 AddTransactionHook(TransactionHook) Subscription
 AddEventListener(EventListener) Subscription
@@ -186,6 +210,21 @@ AddEventListener(EventListener) Subscription
 `RecordAudit` does not allow callers to provide `ActorID`, `ID`, or `OccurredAt`.
 Credbound derives these values so that a consuming service cannot impersonate
 an actor or backdate an entry.
+
+`BeginPasswordReset` and `BeginEmailAuthentication` perform the same
+cryptographic work whether or not the address exists; the host answers the end
+user identically in both cases and delivers the returned token itself.
+`CompletePasswordReset` atomically installs the password, revokes the user's
+PATs and OAuth grants, and clears the lockout counter; host-owned sessions must
+be terminated by the host alongside it.
+
+`WithRequestMetadata(ctx, RequestMetadata)` attaches the client network context
+that every audit event recorded while serving the request will carry. The host
+resolves the real client address from its trusted proxy configuration;
+Credbound never reads transport headers.
+
+`ComputeAuditHash(previous, event)` is the canonical chain hash used by the
+bundled stores; auditors can recompute it over exported logs.
 
 `TrustedRequest.Local` must be set only by a server adapter that has verified
 that the network peer is loopback. It must never be copied from a request
@@ -356,7 +395,9 @@ Callers use `errors.Is` with the sentinel errors:
 - `ErrNotSupported`
 - `ErrInvalidInput`
 - `ErrExpired`
+- `ErrLocked`
 - `ErrAuditUnavailable`
+- `ErrAuditCompromised`
 - `ErrTransactionRejected`
 
 An application HTTP adapter must translate them to RFC 9457 with

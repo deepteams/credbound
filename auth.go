@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/mail"
 	"strings"
+	"time"
 )
 
 func (m *Manager) Bootstrap(ctx context.Context, input BootstrapInput) (_ Authentication, _ Workspace, err error) {
@@ -44,7 +45,7 @@ func (m *Manager) Bootstrap(ctx context.Context, input BootstrapInput) (_ Authen
 	workspace := Workspace{ID: workspaceID, Name: strings.TrimSpace(input.WorkspaceName), CreatedAt: now, UpdatedAt: now}
 	membership := Membership{WorkspaceID: workspace.ID, UserID: user.ID, Role: RoleAdmin, Status: MembershipActive, ProvisioningSource: ProvisioningSourceLocal, CreatedAt: now, UpdatedAt: now}
 	instanceAdmin := InstanceAdministrator{UserID: user.ID, Role: InstanceRoleRoot, CreatedAt: now, UpdatedAt: now}
-	event, err := m.newAudit(user.ID, "instance.bootstrap", "workspace", workspace.ID, workspace.ID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, user.ID, "instance.bootstrap", "workspace", workspace.ID, workspace.ID, AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, Workspace{}, err
 	}
@@ -123,7 +124,7 @@ func (m *Manager) CreateUser(ctx context.Context, actor Authentication, workspac
 	user := User{ID: id, Email: email, DisplayName: strings.TrimSpace(input.DisplayName), CreatedAt: now, UpdatedAt: now}
 	primaryEmail := EmailAddress{ID: emailID, UserID: id, Address: email, Primary: true, VerifiedAt: cloneTime(&now), CreatedAt: now, UpdatedAt: now}
 	membership := Membership{WorkspaceID: workspaceID, UserID: id, Role: role, Status: MembershipActive, ProvisioningSource: ProvisioningSourceLocal, CreatedAt: now, UpdatedAt: now}
-	event, err := m.newAudit(actor.UserID, "user.create", "user", id, workspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "user.create", "user", id, workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return User{}, err
 	}
@@ -151,6 +152,7 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 	user, lookupErr := m.store.UserByEmail(ctx, normalized)
 	hash := m.dummyHash
 	infrastructureErr := error(nil)
+	var throttle LoginThrottle
 	if lookupErr == nil {
 		credential, credentialErr := m.store.PasswordByUserID(ctx, user.ID)
 		if credentialErr != nil {
@@ -158,9 +160,19 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 		} else {
 			hash = credential.Hash
 		}
+		if m.maxFailedLogins > 0 && infrastructureErr == nil {
+			currentThrottle, throttleErr := m.store.LoginThrottleByUserID(ctx, user.ID)
+			if throttleErr == nil {
+				throttle = currentThrottle
+			} else if !errors.Is(throttleErr, ErrNotFound) {
+				infrastructureErr = throttleErr
+			}
+		}
 	} else if !errors.Is(lookupErr, ErrNotFound) {
 		infrastructureErr = lookupErr
 	}
+	// The hash verification always runs, even for unknown or locked
+	// accounts, so the response time never reveals whether they exist.
 	match, rehash, verifyErr := m.passwords.Verify(password, hash)
 	if verifyErr != nil {
 		return Authentication{}, fmt.Errorf("verify password: %w", verifyErr)
@@ -168,8 +180,17 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 	if infrastructureErr != nil {
 		return Authentication{}, infrastructureErr
 	}
+	if throttle.LockedUntil != nil && m.now().Before(*throttle.LockedUntil) {
+		audit, auditErr := m.recordAuthenticationAudit(ctx, user.ID, "auth.password", AuditFailed, "locked")
+		if auditErr != nil {
+			return Authentication{}, auditErr
+		}
+		m.emitAuthenticationFailed(ctx, "auth.password.authenticate", audit, MethodPassword, user.ID, "locked")
+		return Authentication{}, ErrLocked
+	}
 	if lookupErr != nil || !match || user.Disabled {
-		audit, auditErr := m.recordAuthenticationAudit(ctx, user.ID, "auth.password", AuditFailed, "invalid_credentials")
+		countFailure := lookupErr == nil && !user.Disabled && !match
+		audit, auditErr := m.recordAuthenticationFailure(ctx, user.ID, "auth.password", countFailure)
 		if auditErr != nil {
 			return Authentication{}, auditErr
 		}
@@ -181,7 +202,7 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 		if hashErr != nil {
 			return Authentication{}, fmt.Errorf("rehash password: %w", hashErr)
 		}
-		event, eventErr := m.newAudit(user.ID, "password.rehash", "user", user.ID, "", AuditSucceeded, "")
+		event, eventErr := m.newAudit(ctx, user.ID, "password.rehash", "user", user.ID, "", AuditSucceeded, "")
 		if eventErr != nil {
 			return Authentication{}, eventErr
 		}
@@ -242,7 +263,7 @@ func (m *Manager) ChangePassword(ctx context.Context, actor Authentication, curr
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
-	event, err := m.newAudit(actor.UserID, "password.change", "user", actor.UserID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "password.change", "user", actor.UserID, "", AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -336,20 +357,24 @@ func validEmail(value string) (string, error) {
 	return normalized, nil
 }
 
-func (m *Manager) newAudit(actor, action, resourceType, resourceID, workspaceID string, outcome AuditOutcome, reason string) (AuditEvent, error) {
+func (m *Manager) newAudit(ctx context.Context, actor, action, resourceType, resourceID, workspaceID string, outcome AuditOutcome, reason string) (AuditEvent, error) {
 	id, err := m.newID()
 	if err != nil {
 		return AuditEvent{}, err
 	}
+	metadata := requestMetadataFromContext(ctx)
+	// Timestamps are truncated to microseconds so the audit hash chain
+	// recomputes identically after a PostgreSQL round trip.
 	return AuditEvent{
-		ID: id, OccurredAt: m.now(), ActorKind: ActorUser, ActorID: actor, Action: action,
+		ID: id, OccurredAt: m.now().Truncate(time.Microsecond), ActorKind: ActorUser, ActorID: actor, Action: action,
 		ResourceType: resourceType, ResourceID: resourceID, WorkspaceID: workspaceID,
 		Outcome: outcome, Reason: reason,
+		IPAddress: metadata.IPAddress, UserAgent: metadata.UserAgent,
 	}, nil
 }
 
 func (m *Manager) recordAuthenticationAudit(ctx context.Context, actor, action string, outcome AuditOutcome, reason string) (AuditEvent, error) {
-	event, err := m.newAudit(actor, action, "user", actor, "", outcome, reason)
+	event, err := m.newAudit(ctx, actor, action, "user", actor, "", outcome, reason)
 	if err != nil {
 		return AuditEvent{}, err
 	}
@@ -368,6 +393,52 @@ func (m *Manager) recordAuthenticationAudit(ctx context.Context, actor, action s
 func (m *Manager) appendAuthenticationAudit(ctx context.Context, actor, action string, outcome AuditOutcome, reason string) error {
 	_, err := m.recordAuthenticationAudit(ctx, actor, action, outcome, reason)
 	return err
+}
+
+// recordAuthenticationFailure audits a failed credential check and, when the
+// failure is attributable to an existing enabled account, counts it toward
+// the lockout threshold within the same transaction.
+func (m *Manager) recordAuthenticationFailure(ctx context.Context, userID, action string, countFailure bool) (AuditEvent, error) {
+	if !countFailure || m.maxFailedLogins <= 0 {
+		return m.recordAuthenticationAudit(ctx, userID, action, AuditFailed, "invalid_credentials")
+	}
+	event, err := m.newAudit(ctx, userID, action, "user", userID, "", AuditFailed, "invalid_credentials")
+	if err != nil {
+		return AuditEvent{}, err
+	}
+	throttle, err := m.store.RecordLoginFailure(ctx, userID, m.now(), m.maxFailedLogins, m.now().Add(m.lockoutDuration), Commit{Audit: event})
+	if err != nil {
+		return AuditEvent{}, m.mapStoreError(ctx, action, err)
+	}
+	if throttle.LockedUntil != nil && throttle.FailedAttempts == m.maxFailedLogins {
+		if meta, metaErr := m.newEventMeta(EventUserLocked, action, userID, "", event); metaErr == nil {
+			locked := UserLockedEvent{EventMeta: meta, UserID: userID, LockedUntil: *throttle.LockedUntil}
+			m.events.emit(ctx, EventUserLocked, func(listener EventListener) error { return listener.OnUserLocked(ctx, locked) })
+		}
+	}
+	return event, nil
+}
+
+// requireUnlocked rejects a second-factor attempt while the account lockout
+// is active.
+func (m *Manager) requireUnlocked(ctx context.Context, userID, action string) error {
+	if m.maxFailedLogins <= 0 {
+		return nil
+	}
+	throttle, err := m.store.LoginThrottleByUserID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if throttle.LockedUntil != nil && m.now().Before(*throttle.LockedUntil) {
+		if auditErr := m.appendAuthenticationAudit(ctx, userID, action, AuditFailed, "locked"); auditErr != nil {
+			return auditErr
+		}
+		return ErrLocked
+	}
+	return nil
 }
 
 func mapAuditError(err error) error {

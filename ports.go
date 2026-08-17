@@ -18,7 +18,29 @@ type Store interface {
 	Users(context.Context, PageRequest) iter.Seq2[PageEvent[User], error]
 	PasswordByUserID(context.Context, string) (PasswordCredential, error)
 	ReplacePassword(context.Context, PasswordCredential, Commit) error
+	// RecordAuthentication updates last_seen_at and clears the user's login
+	// throttle in the same transaction as its audit event.
 	RecordAuthentication(context.Context, string, time.Time, Commit) error
+	LoginThrottleByUserID(context.Context, string) (LoginThrottle, error)
+	// RecordLoginFailure atomically increments the failure counter and, once
+	// the counter reaches the threshold, persists the lockout deadline. It
+	// returns the updated throttle.
+	RecordLoginFailure(ctx context.Context, userID string, at time.Time, threshold int64, lockedUntil time.Time, commit Commit) (LoginThrottle, error)
+
+	CreatePasswordReset(context.Context, PasswordResetCredential, Commit) error
+	PasswordResetByID(context.Context, string) (PasswordResetCredential, error)
+	// CompletePasswordReset atomically consumes the single-use reset,
+	// replaces the password, deletes the user's other pending resets,
+	// revokes the user's PATs and OAuth grants, and clears the login
+	// throttle. It returns ErrConflict when the reset was already consumed.
+	CompletePasswordReset(ctx context.Context, resetID string, password PasswordCredential, at time.Time, commit Commit) error
+
+	CreateEmailAuthentication(context.Context, EmailAuthenticationCredential, Commit) error
+	EmailAuthenticationByID(context.Context, string) (EmailAuthenticationCredential, error)
+	// ConsumeEmailAuthentication atomically marks the single-use magic-link
+	// token as used, updates last_seen_at and clears the login throttle. It
+	// returns ErrConflict when the token was already consumed.
+	ConsumeEmailAuthentication(ctx context.Context, tokenID, userID string, at time.Time, commit Commit) error
 
 	SaveEmail(context.Context, EmailAddress, EmailVerificationCredential, Commit) error
 	EmailVerificationByID(context.Context, string) (EmailAddress, EmailVerificationCredential, error)
@@ -32,6 +54,7 @@ type Store interface {
 	ActivateTOTP(context.Context, TOTPFactor, []RecoveryCode, Commit) error
 	UseTOTP(context.Context, string, int64, Commit) (bool, error)
 	ConsumeRecoveryCode(context.Context, string, []byte, time.Time, Commit) (bool, error)
+	CountUnusedRecoveryCodes(context.Context, string) (int64, error)
 	DisableTOTP(context.Context, string, Commit) error
 
 	Passkeys(context.Context, string) iter.Seq2[Passkey, error]
@@ -44,6 +67,25 @@ type Store interface {
 	TouchPAT(context.Context, string, time.Time, Commit) error
 	RevokePAT(context.Context, string, string, time.Time, Commit) error
 	PATs(context.Context, string, PageRequest) iter.Seq2[PageEvent[PAT], error]
+	// RevokeUserCredentials atomically revokes every active PAT of the user
+	// and, when the store has the OAuth capability, every OAuth grant and its
+	// tokens. Interactive sessions are host-owned and unaffected.
+	RevokeUserCredentials(context.Context, string, time.Time, Commit) error
+
+	CreateWorkspaceInvitation(context.Context, WorkspaceInvitation, Commit) error
+	WorkspaceInvitationByID(context.Context, string) (WorkspaceInvitation, error)
+	PendingWorkspaceInvitation(ctx context.Context, workspaceID, email string) (WorkspaceInvitation, error)
+	// AcceptWorkspaceInvitation atomically marks the pending invitation
+	// accepted by the user and upserts the membership. It returns
+	// ErrConflict when the invitation was already accepted or revoked.
+	AcceptWorkspaceInvitation(ctx context.Context, invitationID, userID string, at time.Time, membership Membership, commit Commit) error
+	// RegisterInvitedUser atomically creates the invited account (user,
+	// verified email, password, membership) and marks the invitation
+	// accepted. It returns ErrConflict when the invitation was already
+	// accepted or revoked.
+	RegisterInvitedUser(ctx context.Context, invitationID string, user User, email EmailAddress, password PasswordCredential, membership Membership, at time.Time, commit Commit) error
+	RevokeWorkspaceInvitation(ctx context.Context, workspaceID, invitationID string, at time.Time, commit Commit) error
+	WorkspaceInvitations(context.Context, string, PageRequest) iter.Seq2[PageEvent[WorkspaceInvitation], error]
 
 	CreateWorkspace(context.Context, Workspace, Membership, Commit) error
 	WorkspaceByID(context.Context, string) (Workspace, error)
@@ -68,6 +110,12 @@ type Store interface {
 	AppendAudit(context.Context, Commit) error
 	AuditEvents(context.Context, string, PageRequest) iter.Seq2[PageEvent[AuditEvent], error]
 	InstanceAuditEvents(context.Context, PageRequest) iter.Seq2[PageEvent[AuditEvent], error]
+	// AuditChainHead returns the sequence and hash of the latest chained
+	// audit event; sequence 0 with a 32-zero-byte hash for an empty chain.
+	AuditChainHead(context.Context) (int64, []byte, error)
+	// ChainedAuditEvents streams every chained audit event in ascending
+	// sequence order so the chain can be recomputed and verified.
+	ChainedAuditEvents(context.Context) iter.Seq2[AuditEvent, error]
 }
 
 // SCIMStore is an optional persistence capability. Custom stores that do not

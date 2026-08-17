@@ -1,9 +1,83 @@
 package credbound
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"fmt"
+	"io"
 	"iter"
+	"strconv"
 )
+
+// auditChainGenesis is the previous hash of the first chained audit event.
+var auditChainGenesis = make([]byte, sha256.Size)
+
+// ComputeAuditHash returns the SHA-256 hash that chains an audit event to its
+// predecessor. Every field is length-prefixed so no two distinct events share
+// a canonical encoding. Stores call it inside the commit transaction; hosts
+// and auditors can recompute it to verify exported audit logs.
+func ComputeAuditHash(previous []byte, event AuditEvent) []byte {
+	if len(previous) == 0 {
+		previous = auditChainGenesis
+	}
+	h := sha256.New()
+	h.Write(previous)
+	write := func(value string) {
+		_, _ = io.WriteString(h, strconv.Itoa(len(value)))
+		h.Write([]byte{':'})
+		_, _ = io.WriteString(h, value)
+		h.Write([]byte{';'})
+	}
+	write(strconv.FormatInt(event.Sequence, 10))
+	write(event.ID)
+	write(strconv.FormatInt(event.OccurredAt.UTC().UnixMicro(), 10))
+	write(string(event.ActorKind))
+	write(event.ActorID)
+	write(event.Action)
+	write(event.ResourceType)
+	write(event.ResourceID)
+	write(event.WorkspaceID)
+	write(string(event.Outcome))
+	write(event.Reason)
+	write(event.IPAddress)
+	write(event.UserAgent)
+	return h.Sum(nil)
+}
+
+// VerifyAuditChain recomputes the whole audit hash chain and compares it with
+// the persisted chain head. Any edited, deleted or reordered chained event
+// yields ErrAuditCompromised.
+func (m *Manager) VerifyAuditChain(ctx context.Context, actor Authentication) (_ AuditChainReport, err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "audit.chain.verify", started, err) }()
+	if err := m.AuthorizeAdmin(ctx, actor, PermissionAuditRead); err != nil {
+		return AuditChainReport{}, err
+	}
+	previous := auditChainGenesis
+	sequence := int64(0)
+	for event, iterErr := range m.store.ChainedAuditEvents(ctx) {
+		if iterErr != nil {
+			return AuditChainReport{}, iterErr
+		}
+		sequence++
+		if event.Sequence != sequence {
+			return AuditChainReport{}, fmt.Errorf("%w: expected sequence %d, found %d (%s)", ErrAuditCompromised, sequence, event.Sequence, event.ID)
+		}
+		if !bytes.Equal(event.PreviousHash, previous) || !bytes.Equal(event.Hash, ComputeAuditHash(previous, event)) {
+			return AuditChainReport{}, fmt.Errorf("%w: audit event %s does not extend its predecessor", ErrAuditCompromised, event.ID)
+		}
+		previous = event.Hash
+	}
+	headSequence, headHash, err := m.store.AuditChainHead(ctx)
+	if err != nil {
+		return AuditChainReport{}, err
+	}
+	if headSequence != sequence || !bytes.Equal(headHash, previous) {
+		return AuditChainReport{}, fmt.Errorf("%w: chain head does not match the last chained event", ErrAuditCompromised)
+	}
+	return AuditChainReport{Events: sequence, HeadSequence: headSequence, HeadHash: headHash}, nil
+}
 
 func (m *Manager) AuditEvents(ctx context.Context, actor Authentication, workspaceID string, page PageRequest) iter.Seq2[PageEvent[AuditEvent], error] {
 	if err := m.requireStepUp(ctx, actor, "audit.workspace.list"); err != nil {

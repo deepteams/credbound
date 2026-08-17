@@ -36,7 +36,7 @@ func (m *Manager) BeginEmailAddition(ctx context.Context, actor Authentication, 
 	verification := EmailVerificationCredential{
 		EmailID: id, Digest: digest(m.secretKey, "email-verification:"+raw), ExpiresAt: now.Add(m.emailVerificationTTL),
 	}
-	event, err := m.newAudit(actor.UserID, "email.add", "email", id, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "email.add", "email", id, "", AuditSucceeded, "")
 	if err != nil {
 		return IssuedEmailVerification{}, err
 	}
@@ -86,7 +86,7 @@ func (m *Manager) ConfirmEmail(ctx context.Context, raw string) (_ EmailAddress,
 		return EmailAddress{}, ErrInvalidCredentials
 	}
 	verifiedAt := m.now()
-	event, err := m.newAudit(email.UserID, "email.verify", "email", email.ID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, email.UserID, "email.verify", "email", email.ID, "", AuditSucceeded, "")
 	if err != nil {
 		return EmailAddress{}, err
 	}
@@ -117,7 +117,7 @@ func (m *Manager) SetPrimaryEmail(ctx context.Context, actor Authentication, ema
 	if !validUUIDv7(emailID) {
 		return fmt.Errorf("%w: invalid email id", ErrInvalidInput)
 	}
-	event, err := m.newAudit(actor.UserID, "email.primary.set", "email", emailID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "email.primary.set", "email", emailID, "", AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -146,7 +146,7 @@ func (m *Manager) RemoveEmail(ctx context.Context, actor Authentication, emailID
 	if !validUUIDv7(emailID) {
 		return fmt.Errorf("%w: invalid email id", ErrInvalidInput)
 	}
-	event, err := m.newAudit(actor.UserID, "email.remove", "email", emailID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "email.remove", "email", emailID, "", AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -188,8 +188,14 @@ func (m *Manager) Emails(ctx context.Context, actor Authentication, userID strin
 }
 
 func parseEmailVerification(raw string) (string, bool) {
+	return parseSecretToken(emailVerificationPrefix, raw)
+}
+
+// parseSecretToken validates the shared `<prefix>_<uuidv7>_<43 chars>` token
+// shape and returns the embedded identifier.
+func parseSecretToken(prefix, raw string) (string, bool) {
 	parts := strings.SplitN(raw, "_", 3)
-	if len(parts) != 3 || parts[0] != emailVerificationPrefix || !validUUIDv7(parts[1]) || len(parts[2]) != 43 {
+	if len(parts) != 3 || parts[0] != prefix || !validUUIDv7(parts[1]) || len(parts[2]) != 43 {
 		return "", false
 	}
 	secret, err := base64.RawURLEncoding.DecodeString(parts[2])

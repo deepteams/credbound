@@ -57,8 +57,14 @@ type Store struct {
 	oauthAccessKeys    map[string]string
 	oauthRefreshTokens map[string]credbound.OAuthRefreshToken
 	oauthRefreshKeys   map[string]string
+	throttles          map[string]credbound.LoginThrottle
+	passwordResets     map[string]credbound.PasswordResetCredential
+	emailAuths         map[string]credbound.EmailAuthenticationCredential
+	invitations        map[string]credbound.WorkspaceInvitation
 	audits             []credbound.AuditEvent
 	auditIDs           map[string]struct{}
+	auditSequence      int64
+	auditHead          []byte
 	auditFailure       error
 }
 
@@ -106,7 +112,11 @@ func New() *Store {
 		totp: make(map[string]credbound.TOTPFactor), recovery: make(map[string][]credbound.RecoveryCode),
 		passkeys: make(map[string]map[string]credbound.Passkey), pats: make(map[string]credbound.PAT),
 		patPrefixes: make(map[string]string), auditIDs: make(map[string]struct{}),
-		ssoIdentities: make(map[string]credbound.SSOIdentity), ssoKeys: make(map[string]string),
+		auditHead: make([]byte, 32), throttles: make(map[string]credbound.LoginThrottle),
+		passwordResets: make(map[string]credbound.PasswordResetCredential),
+		emailAuths:     make(map[string]credbound.EmailAuthenticationCredential),
+		invitations:    make(map[string]credbound.WorkspaceInvitation),
+		ssoIdentities:  make(map[string]credbound.SSOIdentity), ssoKeys: make(map[string]string),
 		scimConfigurations: make(map[string]credbound.SCIMConfiguration),
 		scimCredentials:    make(map[string]credbound.SCIMCredential), scimCredentialKeys: make(map[string]string),
 		scimUsers: make(map[string]credbound.SCIMUser), scimUserNames: make(map[string]string), scimExternalIDs: make(map[string]string),
@@ -332,6 +342,191 @@ func (s *Store) RecordAuthentication(ctx context.Context, userID string, seenAt 
 		return err
 	}
 	s.touchLastSeenLocked(userID, seenAt)
+	delete(s.throttles, userID)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) LoginThrottleByUserID(ctx context.Context, userID string) (credbound.LoginThrottle, error) {
+	if err := ctx.Err(); err != nil {
+		return credbound.LoginThrottle{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	throttle, ok := s.throttles[userID]
+	if !ok {
+		return credbound.LoginThrottle{}, credbound.ErrNotFound
+	}
+	return cloneThrottle(throttle), nil
+}
+
+func (s *Store) RecordLoginFailure(ctx context.Context, userID string, at time.Time, threshold int64, lockedUntil time.Time, commit credbound.Commit) (credbound.LoginThrottle, error) {
+	if err := ctx.Err(); err != nil {
+		return credbound.LoginThrottle{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.users[userID]; !ok {
+		return credbound.LoginThrottle{}, credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return credbound.LoginThrottle{}, err
+	}
+	throttle := s.throttles[userID]
+	if throttle.LockedUntil != nil && !at.Before(*throttle.LockedUntil) {
+		// The previous lockout has expired: the failure window restarts.
+		throttle = credbound.LoginThrottle{}
+	}
+	throttle.UserID = userID
+	throttle.FailedAttempts++
+	throttle.UpdatedAt = at
+	if threshold > 0 && throttle.FailedAttempts >= threshold {
+		throttle.LockedUntil = cloneTime(&lockedUntil)
+	}
+	s.throttles[userID] = throttle
+	if err := s.finishCommitLocked(ctx, commit, previous); err != nil {
+		return credbound.LoginThrottle{}, err
+	}
+	return cloneThrottle(throttle), nil
+}
+
+func cloneThrottle(value credbound.LoginThrottle) credbound.LoginThrottle {
+	value.LockedUntil = cloneTime(value.LockedUntil)
+	return value
+}
+
+func clonePasswordReset(value credbound.PasswordResetCredential) credbound.PasswordResetCredential {
+	value.Digest = slices.Clone(value.Digest)
+	value.UsedAt = cloneTime(value.UsedAt)
+	return value
+}
+
+func cloneEmailAuthentication(value credbound.EmailAuthenticationCredential) credbound.EmailAuthenticationCredential {
+	value.Digest = slices.Clone(value.Digest)
+	value.UsedAt = cloneTime(value.UsedAt)
+	return value
+}
+
+func (s *Store) CreatePasswordReset(ctx context.Context, credential credbound.PasswordResetCredential, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.users[credential.UserID]; !ok {
+		return credbound.ErrNotFound
+	}
+	if _, exists := s.passwordResets[credential.ID]; exists {
+		return credbound.ErrConflict
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	s.passwordResets[credential.ID] = clonePasswordReset(credential)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) PasswordResetByID(ctx context.Context, resetID string) (credbound.PasswordResetCredential, error) {
+	if err := ctx.Err(); err != nil {
+		return credbound.PasswordResetCredential{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	credential, ok := s.passwordResets[resetID]
+	if !ok {
+		return credbound.PasswordResetCredential{}, credbound.ErrNotFound
+	}
+	return clonePasswordReset(credential), nil
+}
+
+func (s *Store) CompletePasswordReset(ctx context.Context, resetID string, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	credential, ok := s.passwordResets[resetID]
+	if !ok {
+		return credbound.ErrNotFound
+	}
+	if credential.UsedAt != nil {
+		return credbound.ErrConflict
+	}
+	if _, ok := s.users[password.UserID]; !ok {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	credential.UsedAt = cloneTime(&at)
+	s.passwordResets[resetID] = credential
+	for id, other := range s.passwordResets {
+		if id != resetID && other.UserID == password.UserID {
+			delete(s.passwordResets, id)
+		}
+	}
+	s.passwords[password.UserID] = password
+	s.revokeUserCredentialsLocked(password.UserID, "", at)
+	delete(s.throttles, password.UserID)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) CreateEmailAuthentication(ctx context.Context, credential credbound.EmailAuthenticationCredential, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.users[credential.UserID]; !ok {
+		return credbound.ErrNotFound
+	}
+	if _, exists := s.emailAuths[credential.ID]; exists {
+		return credbound.ErrConflict
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	s.emailAuths[credential.ID] = cloneEmailAuthentication(credential)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) EmailAuthenticationByID(ctx context.Context, tokenID string) (credbound.EmailAuthenticationCredential, error) {
+	if err := ctx.Err(); err != nil {
+		return credbound.EmailAuthenticationCredential{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	credential, ok := s.emailAuths[tokenID]
+	if !ok {
+		return credbound.EmailAuthenticationCredential{}, credbound.ErrNotFound
+	}
+	return cloneEmailAuthentication(credential), nil
+}
+
+func (s *Store) ConsumeEmailAuthentication(ctx context.Context, tokenID, userID string, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	credential, ok := s.emailAuths[tokenID]
+	if !ok || credential.UserID != userID {
+		return credbound.ErrNotFound
+	}
+	if credential.UsedAt != nil {
+		return credbound.ErrConflict
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	credential.UsedAt = cloneTime(&at)
+	s.emailAuths[tokenID] = credential
+	s.touchLastSeenLocked(userID, at)
+	delete(s.throttles, userID)
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
@@ -581,6 +776,7 @@ func (s *Store) UseTOTP(ctx context.Context, userID string, step int64, commit c
 	factor.UpdatedAt = commit.Audit.OccurredAt
 	s.totp[userID] = factor
 	s.touchLastSeenLocked(userID, commit.Audit.OccurredAt)
+	delete(s.throttles, userID)
 	if err := s.finishCommitLocked(ctx, commit, previous); err != nil {
 		return false, err
 	}
@@ -603,6 +799,7 @@ func (s *Store) ConsumeRecoveryCode(ctx context.Context, userID string, digest [
 			codes[index].UsedAt = cloneTime(&usedAt)
 			s.recovery[userID] = codes
 			s.touchLastSeenLocked(userID, usedAt)
+			delete(s.throttles, userID)
 			if err := s.finishCommitLocked(ctx, commit, previous); err != nil {
 				return false, err
 			}
@@ -610,6 +807,21 @@ func (s *Store) ConsumeRecoveryCode(ctx context.Context, userID string, digest [
 		}
 	}
 	return false, nil
+}
+
+func (s *Store) CountUnusedRecoveryCodes(ctx context.Context, userID string) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := int64(0)
+	for _, code := range s.recovery[userID] {
+		if code.UsedAt == nil {
+			count++
+		}
+	}
+	return count, nil
 }
 
 func (s *Store) DisableTOTP(ctx context.Context, userID string, commit credbound.Commit) error {
@@ -802,6 +1014,23 @@ func (s *Store) RevokePAT(ctx context.Context, userID, id string, revokedAt time
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+func (s *Store) RevokeUserCredentials(ctx context.Context, userID string, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.users[userID]; !ok {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	s.revokeUserCredentialsLocked(userID, "", at)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
 func (s *Store) PATs(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.PAT], error] {
 	return func(yield func(credbound.PageEvent[credbound.PAT], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
@@ -977,6 +1206,198 @@ func (s *Store) Membership(ctx context.Context, workspaceID, userID string) (cre
 		return credbound.Membership{}, credbound.ErrNotFound
 	}
 	return normalizeMembership(membership), nil
+}
+
+func cloneInvitation(value credbound.WorkspaceInvitation) credbound.WorkspaceInvitation {
+	value.Digest = slices.Clone(value.Digest)
+	value.AcceptedAt = cloneTime(value.AcceptedAt)
+	value.RevokedAt = cloneTime(value.RevokedAt)
+	return value
+}
+
+func (s *Store) CreateWorkspaceInvitation(ctx context.Context, invitation credbound.WorkspaceInvitation, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.workspaces[invitation.WorkspaceID]; !exists {
+		return credbound.ErrNotFound
+	}
+	if _, exists := s.invitations[invitation.ID]; exists {
+		return credbound.ErrConflict
+	}
+	for _, other := range s.invitations {
+		if other.WorkspaceID == invitation.WorkspaceID && other.Email == invitation.Email && other.AcceptedAt == nil && other.RevokedAt == nil {
+			return credbound.ErrConflict
+		}
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	s.invitations[invitation.ID] = cloneInvitation(invitation)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) WorkspaceInvitationByID(ctx context.Context, invitationID string) (credbound.WorkspaceInvitation, error) {
+	if err := ctx.Err(); err != nil {
+		return credbound.WorkspaceInvitation{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	invitation, ok := s.invitations[invitationID]
+	if !ok {
+		return credbound.WorkspaceInvitation{}, credbound.ErrNotFound
+	}
+	return cloneInvitation(invitation), nil
+}
+
+func (s *Store) PendingWorkspaceInvitation(ctx context.Context, workspaceID, email string) (credbound.WorkspaceInvitation, error) {
+	if err := ctx.Err(); err != nil {
+		return credbound.WorkspaceInvitation{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, invitation := range s.invitations {
+		if invitation.WorkspaceID == workspaceID && invitation.Email == email && invitation.AcceptedAt == nil && invitation.RevokedAt == nil {
+			return cloneInvitation(invitation), nil
+		}
+	}
+	return credbound.WorkspaceInvitation{}, credbound.ErrNotFound
+}
+
+func (s *Store) AcceptWorkspaceInvitation(ctx context.Context, invitationID, userID string, at time.Time, membership credbound.Membership, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	invitation, ok := s.invitations[invitationID]
+	if !ok {
+		return credbound.ErrNotFound
+	}
+	if invitation.AcceptedAt != nil || invitation.RevokedAt != nil {
+		return credbound.ErrConflict
+	}
+	if _, exists := s.users[userID]; !exists {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	invitation.AcceptedAt = cloneTime(&at)
+	invitation.AcceptedUserID = userID
+	s.invitations[invitationID] = invitation
+	if s.memberships[membership.WorkspaceID] == nil {
+		s.memberships[membership.WorkspaceID] = make(map[string]credbound.Membership)
+	}
+	s.memberships[membership.WorkspaceID][userID] = normalizeMembership(membership)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) RegisterInvitedUser(ctx context.Context, invitationID string, user credbound.User, email credbound.EmailAddress, password credbound.PasswordCredential, membership credbound.Membership, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	invitation, ok := s.invitations[invitationID]
+	if !ok {
+		return credbound.ErrNotFound
+	}
+	if invitation.AcceptedAt != nil || invitation.RevokedAt != nil {
+		return credbound.ErrConflict
+	}
+	if _, exists := s.users[user.ID]; exists {
+		return credbound.ErrConflict
+	}
+	if _, exists := s.emailIDs[email.Address]; exists {
+		return credbound.ErrConflict
+	}
+	if _, exists := s.workspaces[membership.WorkspaceID]; !exists {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	invitation.AcceptedAt = cloneTime(&at)
+	invitation.AcceptedUserID = user.ID
+	s.invitations[invitationID] = invitation
+	s.users[user.ID] = cloneUser(user)
+	s.emails[email.Address] = user.ID
+	s.emailAddresses[email.ID] = cloneEmail(email)
+	s.emailIDs[email.Address] = email.ID
+	s.passwords[user.ID] = password
+	if s.memberships[membership.WorkspaceID] == nil {
+		s.memberships[membership.WorkspaceID] = make(map[string]credbound.Membership)
+	}
+	s.memberships[membership.WorkspaceID][user.ID] = normalizeMembership(membership)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) RevokeWorkspaceInvitation(ctx context.Context, workspaceID, invitationID string, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	invitation, ok := s.invitations[invitationID]
+	if !ok || invitation.WorkspaceID != workspaceID {
+		return credbound.ErrNotFound
+	}
+	if invitation.AcceptedAt != nil || invitation.RevokedAt != nil {
+		return credbound.ErrConflict
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	invitation.RevokedAt = cloneTime(&at)
+	s.invitations[invitationID] = invitation
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) WorkspaceInvitations(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.WorkspaceInvitation], error] {
+	return func(yield func(credbound.PageEvent[credbound.WorkspaceInvitation], error) bool) {
+		cursor, err := decodeCursor(page.Cursor)
+		if err != nil {
+			yield(credbound.PageEvent[credbound.WorkspaceInvitation]{}, err)
+			return
+		}
+		if err := ctx.Err(); err != nil {
+			yield(credbound.PageEvent[credbound.WorkspaceInvitation]{}, err)
+			return
+		}
+		s.mu.RLock()
+		values := make([]credbound.WorkspaceInvitation, 0)
+		for _, invitation := range s.invitations {
+			if invitation.WorkspaceID == workspaceID && afterCursor(invitation.CreatedAt, invitation.ID, cursor) {
+				values = append(values, cloneInvitation(invitation))
+			}
+		}
+		s.mu.RUnlock()
+		sort.Slice(values, func(i, j int) bool {
+			return newer(values[i].CreatedAt, values[i].ID, values[j].CreatedAt, values[j].ID)
+		})
+		hasMore := len(values) > page.Limit
+		if hasMore {
+			values = values[:page.Limit]
+		}
+		for _, value := range values {
+			if !yield(credbound.ItemEvent(value), nil) {
+				return
+			}
+		}
+		end := credbound.PageEnd{HasMore: hasMore}
+		if hasMore {
+			last := values[len(values)-1]
+			end.NextCursor = encodeCursor(last.CreatedAt, last.ID)
+		}
+		yield(credbound.EndEvent[credbound.WorkspaceInvitation](end), nil)
+	}
 }
 
 func (s *Store) UpsertMembership(ctx context.Context, membership credbound.Membership, commit credbound.Commit) error {
@@ -1294,7 +1715,7 @@ func (s *Store) auditEvents(ctx context.Context, page credbound.PageRequest, inc
 		values := make([]credbound.AuditEvent, 0)
 		for _, event := range s.audits {
 			if include(event) && afterCursor(event.OccurredAt, event.ID, cursor) {
-				values = append(values, event)
+				values = append(values, cloneAuditEvent(event))
 			}
 		}
 		s.mu.RUnlock()
@@ -1358,8 +1779,14 @@ type storeState struct {
 	oauthAccessKeys    map[string]string
 	oauthRefreshTokens map[string]credbound.OAuthRefreshToken
 	oauthRefreshKeys   map[string]string
+	throttles          map[string]credbound.LoginThrottle
+	passwordResets     map[string]credbound.PasswordResetCredential
+	emailAuths         map[string]credbound.EmailAuthenticationCredential
+	invitations        map[string]credbound.WorkspaceInvitation
 	audits             []credbound.AuditEvent
 	auditIDs           map[string]struct{}
+	auditSequence      int64
+	auditHead          []byte
 }
 
 func (s *Store) snapshotLocked() storeState {
@@ -1373,6 +1800,11 @@ func (s *Store) snapshotLocked() storeState {
 		totp: make(map[string]credbound.TOTPFactor, len(s.totp)), recovery: make(map[string][]credbound.RecoveryCode, len(s.recovery)),
 		passkeys: make(map[string]map[string]credbound.Passkey, len(s.passkeys)), pats: make(map[string]credbound.PAT, len(s.pats)),
 		patPrefixes: make(map[string]string, len(s.patPrefixes)), audits: slices.Clone(s.audits), auditIDs: make(map[string]struct{}, len(s.auditIDs)),
+		auditSequence: s.auditSequence, auditHead: slices.Clone(s.auditHead),
+		throttles:          make(map[string]credbound.LoginThrottle, len(s.throttles)),
+		passwordResets:     make(map[string]credbound.PasswordResetCredential, len(s.passwordResets)),
+		emailAuths:         make(map[string]credbound.EmailAuthenticationCredential, len(s.emailAuths)),
+		invitations:        make(map[string]credbound.WorkspaceInvitation, len(s.invitations)),
 		scimConfigurations: make(map[string]credbound.SCIMConfiguration, len(s.scimConfigurations)),
 		scimCredentials:    make(map[string]credbound.SCIMCredential, len(s.scimCredentials)), scimCredentialKeys: make(map[string]string, len(s.scimCredentialKeys)),
 		scimUsers: make(map[string]credbound.SCIMUser, len(s.scimUsers)), scimUserNames: make(map[string]string, len(s.scimUserNames)), scimExternalIDs: make(map[string]string, len(s.scimExternalIDs)),
@@ -1435,6 +1867,18 @@ func (s *Store) snapshotLocked() storeState {
 	}
 	for key, value := range s.pats {
 		state.pats[key] = clonePAT(value)
+	}
+	for key, value := range s.throttles {
+		state.throttles[key] = cloneThrottle(value)
+	}
+	for key, value := range s.passwordResets {
+		state.passwordResets[key] = clonePasswordReset(value)
+	}
+	for key, value := range s.emailAuths {
+		state.emailAuths[key] = cloneEmailAuthentication(value)
+	}
+	for key, value := range s.invitations {
+		state.invitations[key] = cloneInvitation(value)
 	}
 	for key, value := range s.patPrefixes {
 		state.patPrefixes[key] = value
@@ -1532,6 +1976,10 @@ func (s *Store) restoreLocked(state storeState) {
 	s.oauthAccessTokens, s.oauthAccessKeys = state.oauthAccessTokens, state.oauthAccessKeys
 	s.oauthRefreshTokens, s.oauthRefreshKeys = state.oauthRefreshTokens, state.oauthRefreshKeys
 	s.audits, s.auditIDs = state.audits, state.auditIDs
+	s.auditSequence, s.auditHead = state.auditSequence, state.auditHead
+	s.throttles = state.throttles
+	s.passwordResets, s.emailAuths = state.passwordResets, state.emailAuths
+	s.invitations = state.invitations
 }
 
 func (s *Store) prepareCommitLocked(commit credbound.Commit) (storeState, error) {
@@ -1575,8 +2023,51 @@ func (s *Store) commitAudit(event credbound.AuditEvent) {
 	if event.ActorKind == "" {
 		event.ActorKind = credbound.ActorUser
 	}
+	event.Sequence = s.auditSequence + 1
+	event.PreviousHash = slices.Clone(s.auditHead)
+	event.Hash = credbound.ComputeAuditHash(event.PreviousHash, event)
+	s.auditSequence = event.Sequence
+	s.auditHead = slices.Clone(event.Hash)
 	s.audits = append(s.audits, event)
 	s.auditIDs[event.ID] = struct{}{}
+}
+
+func (s *Store) AuditChainHead(ctx context.Context) (int64, []byte, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.auditSequence, slices.Clone(s.auditHead), nil
+}
+
+func (s *Store) ChainedAuditEvents(ctx context.Context) iter.Seq2[credbound.AuditEvent, error] {
+	return func(yield func(credbound.AuditEvent, error) bool) {
+		if err := ctx.Err(); err != nil {
+			yield(credbound.AuditEvent{}, err)
+			return
+		}
+		s.mu.RLock()
+		chained := make([]credbound.AuditEvent, 0, len(s.audits))
+		for _, event := range s.audits {
+			if event.Sequence > 0 {
+				chained = append(chained, cloneAuditEvent(event))
+			}
+		}
+		s.mu.RUnlock()
+		sort.Slice(chained, func(i, j int) bool { return chained[i].Sequence < chained[j].Sequence })
+		for _, event := range chained {
+			if !yield(event, nil) {
+				return
+			}
+		}
+	}
+}
+
+func cloneAuditEvent(event credbound.AuditEvent) credbound.AuditEvent {
+	event.PreviousHash = slices.Clone(event.PreviousHash)
+	event.Hash = slices.Clone(event.Hash)
+	return event
 }
 
 func (s *Store) touchLastSeenLocked(userID string, seenAt time.Time) {

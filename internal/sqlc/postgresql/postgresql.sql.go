@@ -12,6 +12,24 @@ import (
 	"time"
 )
 
+const acceptWorkspaceInvitation = `-- name: AcceptWorkspaceInvitation :execrows
+UPDATE credbound_workspace_invitations SET accepted_at = $2, accepted_user_id = $3 WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL
+`
+
+type AcceptWorkspaceInvitationParams struct {
+	ID             string         `json:"id"`
+	AcceptedAt     sql.NullTime   `json:"accepted_at"`
+	AcceptedUserID sql.NullString `json:"accepted_user_id"`
+}
+
+func (q *Queries) AcceptWorkspaceInvitation(ctx context.Context, arg AcceptWorkspaceInvitationParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, acceptWorkspaceInvitation, arg.ID, arg.AcceptedAt, arg.AcceptedUserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const activateTOTP = `-- name: ActivateTOTP :execrows
 UPDATE credbound_totp_factors SET encrypted_secret = $2, active = true, last_used_step = $3, updated_at = $4 WHERE user_id = $1 AND NOT active
 `
@@ -45,6 +63,15 @@ func (q *Queries) ClaimBootstrap(ctx context.Context, initializedAt time.Time) e
 	return err
 }
 
+const clearLoginThrottle = `-- name: ClearLoginThrottle :exec
+DELETE FROM credbound_login_throttles WHERE user_id = $1
+`
+
+func (q *Queries) ClearLoginThrottle(ctx context.Context, userID string) error {
+	_, err := q.db.ExecContext(ctx, clearLoginThrottle, userID)
+	return err
+}
+
 const clearPrimaryEmails = `-- name: ClearPrimaryEmails :exec
 UPDATE credbound_user_emails SET is_primary = false, updated_at = $2 WHERE user_id = $1 AND is_primary
 `
@@ -57,6 +84,41 @@ type ClearPrimaryEmailsParams struct {
 func (q *Queries) ClearPrimaryEmails(ctx context.Context, arg ClearPrimaryEmailsParams) error {
 	_, err := q.db.ExecContext(ctx, clearPrimaryEmails, arg.UserID, arg.UpdatedAt)
 	return err
+}
+
+const consumeEmailAuthentication = `-- name: ConsumeEmailAuthentication :execrows
+UPDATE credbound_email_authentications SET used_at = $3 WHERE id = $1 AND user_id = $2 AND used_at IS NULL
+`
+
+type ConsumeEmailAuthenticationParams struct {
+	ID     string       `json:"id"`
+	UserID string       `json:"user_id"`
+	UsedAt sql.NullTime `json:"used_at"`
+}
+
+func (q *Queries) ConsumeEmailAuthentication(ctx context.Context, arg ConsumeEmailAuthenticationParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, consumeEmailAuthentication, arg.ID, arg.UserID, arg.UsedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const consumePasswordReset = `-- name: ConsumePasswordReset :execrows
+UPDATE credbound_password_resets SET used_at = $2 WHERE id = $1 AND used_at IS NULL
+`
+
+type ConsumePasswordResetParams struct {
+	ID     string       `json:"id"`
+	UsedAt sql.NullTime `json:"used_at"`
+}
+
+func (q *Queries) ConsumePasswordReset(ctx context.Context, arg ConsumePasswordResetParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, consumePasswordReset, arg.ID, arg.UsedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const consumeRecoveryCode = `-- name: ConsumeRecoveryCode :execrows
@@ -110,6 +172,17 @@ SELECT count(*) FROM credbound_instance_administrators WHERE role = 'root'
 
 func (q *Queries) CountRootAdministrators(ctx context.Context) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countRootAdministrators)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countUnusedRecoveryCodes = `-- name: CountUnusedRecoveryCodes :one
+SELECT COUNT(*) FROM credbound_recovery_codes WHERE user_id = $1 AND used_at IS NULL
+`
+
+func (q *Queries) CountUnusedRecoveryCodes(ctx context.Context, userID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countUnusedRecoveryCodes, userID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -193,6 +266,20 @@ func (q *Queries) DeleteMembership(ctx context.Context, arg DeleteMembershipPara
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const deleteOtherPasswordResets = `-- name: DeleteOtherPasswordResets :exec
+DELETE FROM credbound_password_resets WHERE user_id = $1 AND id != $2
+`
+
+type DeleteOtherPasswordResetsParams struct {
+	UserID string `json:"user_id"`
+	ID     string `json:"id"`
+}
+
+func (q *Queries) DeleteOtherPasswordResets(ctx context.Context, arg DeleteOtherPasswordResetsParams) error {
+	_, err := q.db.ExecContext(ctx, deleteOtherPasswordResets, arg.UserID, arg.ID)
+	return err
 }
 
 const deletePasskey = `-- name: DeletePasskey :execrows
@@ -291,6 +378,41 @@ func (q *Queries) DisableSCIMConfiguration(ctx context.Context, arg DisableSCIMC
 	return result.RowsAffected()
 }
 
+const getAuditChainHead = `-- name: GetAuditChainHead :one
+SELECT sequence, head_hash FROM credbound_audit_chain WHERE singleton = 1 FOR UPDATE
+`
+
+type GetAuditChainHeadRow struct {
+	Sequence int64  `json:"sequence"`
+	HeadHash []byte `json:"head_hash"`
+}
+
+func (q *Queries) GetAuditChainHead(ctx context.Context) (GetAuditChainHeadRow, error) {
+	row := q.db.QueryRowContext(ctx, getAuditChainHead)
+	var i GetAuditChainHeadRow
+	err := row.Scan(&i.Sequence, &i.HeadHash)
+	return i, err
+}
+
+const getEmailAuthentication = `-- name: GetEmailAuthentication :one
+SELECT id, user_id, email_id, digest, created_at, expires_at, used_at FROM credbound_email_authentications WHERE id = $1
+`
+
+func (q *Queries) GetEmailAuthentication(ctx context.Context, id string) (CredboundEmailAuthentication, error) {
+	row := q.db.QueryRowContext(ctx, getEmailAuthentication, id)
+	var i CredboundEmailAuthentication
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.EmailID,
+		&i.Digest,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.UsedAt,
+	)
+	return i, err
+}
+
 const getEmailVerification = `-- name: GetEmailVerification :one
 SELECT id, user_id, address, is_primary, verified_at, verification_digest, verification_expires_at, created_at, updated_at
 FROM credbound_user_emails WHERE id = $1
@@ -324,6 +446,22 @@ func (q *Queries) GetInstanceAdministrator(ctx context.Context, userID string) (
 		&i.UserID,
 		&i.Role,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getLoginThrottle = `-- name: GetLoginThrottle :one
+SELECT user_id, failed_attempts, locked_until, updated_at FROM credbound_login_throttles WHERE user_id = $1
+`
+
+func (q *Queries) GetLoginThrottle(ctx context.Context, userID string) (CredboundLoginThrottle, error) {
+	row := q.db.QueryRowContext(ctx, getLoginThrottle, userID)
+	var i CredboundLoginThrottle
+	err := row.Scan(
+		&i.UserID,
+		&i.FailedAttempts,
+		&i.LockedUntil,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -409,6 +547,53 @@ func (q *Queries) GetPassword(ctx context.Context, userID string) (CredboundPass
 	row := q.db.QueryRowContext(ctx, getPassword, userID)
 	var i CredboundPasswordCredential
 	err := row.Scan(&i.UserID, &i.Hash, &i.UpdatedAt)
+	return i, err
+}
+
+const getPasswordReset = `-- name: GetPasswordReset :one
+SELECT id, user_id, digest, created_at, expires_at, used_at FROM credbound_password_resets WHERE id = $1
+`
+
+func (q *Queries) GetPasswordReset(ctx context.Context, id string) (CredboundPasswordReset, error) {
+	row := q.db.QueryRowContext(ctx, getPasswordReset, id)
+	var i CredboundPasswordReset
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Digest,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.UsedAt,
+	)
+	return i, err
+}
+
+const getPendingWorkspaceInvitation = `-- name: GetPendingWorkspaceInvitation :one
+SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
+FROM credbound_workspace_invitations WHERE workspace_id = $1 AND email = $2 AND accepted_at IS NULL AND revoked_at IS NULL
+`
+
+type GetPendingWorkspaceInvitationParams struct {
+	WorkspaceID string `json:"workspace_id"`
+	Email       string `json:"email"`
+}
+
+func (q *Queries) GetPendingWorkspaceInvitation(ctx context.Context, arg GetPendingWorkspaceInvitationParams) (CredboundWorkspaceInvitation, error) {
+	row := q.db.QueryRowContext(ctx, getPendingWorkspaceInvitation, arg.WorkspaceID, arg.Email)
+	var i CredboundWorkspaceInvitation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Email,
+		&i.Role,
+		&i.InvitedBy,
+		&i.Digest,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.AcceptedAt,
+		&i.AcceptedUserID,
+		&i.RevokedAt,
+	)
 	return i, err
 }
 
@@ -760,7 +945,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, e
 }
 
 const getWorkspace = `-- name: GetWorkspace :one
-SELECT id, name, created_at, updated_at, disabled_at FROM credbound_workspaces WHERE id = $1
+SELECT id, name, created_at, updated_at, disabled_at, require_mfa FROM credbound_workspaces WHERE id = $1
 `
 
 func (q *Queries) GetWorkspace(ctx context.Context, id string) (CredboundWorkspace, error) {
@@ -772,13 +957,38 @@ func (q *Queries) GetWorkspace(ctx context.Context, id string) (CredboundWorkspa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DisabledAt,
+		&i.RequireMfa,
+	)
+	return i, err
+}
+
+const getWorkspaceInvitation = `-- name: GetWorkspaceInvitation :one
+SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
+FROM credbound_workspace_invitations WHERE id = $1
+`
+
+func (q *Queries) GetWorkspaceInvitation(ctx context.Context, id string) (CredboundWorkspaceInvitation, error) {
+	row := q.db.QueryRowContext(ctx, getWorkspaceInvitation, id)
+	var i CredboundWorkspaceInvitation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Email,
+		&i.Role,
+		&i.InvitedBy,
+		&i.Digest,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.AcceptedAt,
+		&i.AcceptedUserID,
+		&i.RevokedAt,
 	)
 	return i, err
 }
 
 const insertAudit = `-- name: InsertAudit :exec
-INSERT INTO credbound_audit_events (id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO credbound_audit_events (id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 `
 
 type InsertAuditParams struct {
@@ -792,6 +1002,11 @@ type InsertAuditParams struct {
 	WorkspaceID  sql.NullString `json:"workspace_id"`
 	Outcome      string         `json:"outcome"`
 	Reason       string         `json:"reason"`
+	IpAddress    string         `json:"ip_address"`
+	UserAgent    string         `json:"user_agent"`
+	Sequence     sql.NullInt64  `json:"sequence"`
+	PreviousHash []byte         `json:"previous_hash"`
+	Hash         []byte         `json:"hash"`
 }
 
 func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error {
@@ -806,6 +1021,36 @@ func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error 
 		arg.WorkspaceID,
 		arg.Outcome,
 		arg.Reason,
+		arg.IpAddress,
+		arg.UserAgent,
+		arg.Sequence,
+		arg.PreviousHash,
+		arg.Hash,
+	)
+	return err
+}
+
+const insertEmailAuthentication = `-- name: InsertEmailAuthentication :exec
+INSERT INTO credbound_email_authentications (id, user_id, email_id, digest, created_at, expires_at, used_at) VALUES ($1, $2, $3, $4, $5, $6, NULL)
+`
+
+type InsertEmailAuthenticationParams struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	EmailID   string    `json:"email_id"`
+	Digest    []byte    `json:"digest"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func (q *Queries) InsertEmailAuthentication(ctx context.Context, arg InsertEmailAuthenticationParams) error {
+	_, err := q.db.ExecContext(ctx, insertEmailAuthentication,
+		arg.ID,
+		arg.UserID,
+		arg.EmailID,
+		arg.Digest,
+		arg.CreatedAt,
+		arg.ExpiresAt,
 	)
 	return err
 }
@@ -879,6 +1124,29 @@ type InsertPasswordParams struct {
 
 func (q *Queries) InsertPassword(ctx context.Context, arg InsertPasswordParams) error {
 	_, err := q.db.ExecContext(ctx, insertPassword, arg.UserID, arg.Hash, arg.UpdatedAt)
+	return err
+}
+
+const insertPasswordReset = `-- name: InsertPasswordReset :exec
+INSERT INTO credbound_password_resets (id, user_id, digest, created_at, expires_at, used_at) VALUES ($1, $2, $3, $4, $5, NULL)
+`
+
+type InsertPasswordResetParams struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	Digest    []byte    `json:"digest"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func (q *Queries) InsertPasswordReset(ctx context.Context, arg InsertPasswordResetParams) error {
+	_, err := q.db.ExecContext(ctx, insertPasswordReset,
+		arg.ID,
+		arg.UserID,
+		arg.Digest,
+		arg.CreatedAt,
+		arg.ExpiresAt,
+	)
 	return err
 }
 
@@ -1084,7 +1352,7 @@ func (q *Queries) InsertUserEmail(ctx context.Context, arg InsertUserEmailParams
 }
 
 const insertWorkspace = `-- name: InsertWorkspace :exec
-INSERT INTO credbound_workspaces (id, name, created_at, updated_at, disabled_at) VALUES ($1, $2, $3, $4, $5)
+INSERT INTO credbound_workspaces (id, name, created_at, updated_at, disabled_at, require_mfa) VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type InsertWorkspaceParams struct {
@@ -1093,6 +1361,7 @@ type InsertWorkspaceParams struct {
 	CreatedAt  time.Time    `json:"created_at"`
 	UpdatedAt  time.Time    `json:"updated_at"`
 	DisabledAt sql.NullTime `json:"disabled_at"`
+	RequireMfa bool         `json:"require_mfa"`
 }
 
 func (q *Queries) InsertWorkspace(ctx context.Context, arg InsertWorkspaceParams) error {
@@ -1102,8 +1371,56 @@ func (q *Queries) InsertWorkspace(ctx context.Context, arg InsertWorkspaceParams
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.DisabledAt,
+		arg.RequireMfa,
 	)
 	return err
+}
+
+const insertWorkspaceInvitation = `-- name: InsertWorkspaceInvitation :exec
+INSERT INTO credbound_workspace_invitations (id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL, NULL)
+`
+
+type InsertWorkspaceInvitationParams struct {
+	ID          string    `json:"id"`
+	WorkspaceID string    `json:"workspace_id"`
+	Email       string    `json:"email"`
+	Role        string    `json:"role"`
+	InvitedBy   string    `json:"invited_by"`
+	Digest      []byte    `json:"digest"`
+	CreatedAt   time.Time `json:"created_at"`
+	ExpiresAt   time.Time `json:"expires_at"`
+}
+
+func (q *Queries) InsertWorkspaceInvitation(ctx context.Context, arg InsertWorkspaceInvitationParams) error {
+	_, err := q.db.ExecContext(ctx, insertWorkspaceInvitation,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.Email,
+		arg.Role,
+		arg.InvitedBy,
+		arg.Digest,
+		arg.CreatedAt,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
+const lockLoginThrottle = `-- name: LockLoginThrottle :execrows
+UPDATE credbound_login_throttles SET locked_until = $2 WHERE user_id = $1
+`
+
+type LockLoginThrottleParams struct {
+	UserID      string       `json:"user_id"`
+	LockedUntil sql.NullTime `json:"locked_until"`
+}
+
+func (q *Queries) LockLoginThrottle(ctx context.Context, arg LockLoginThrottleParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, lockLoginThrottle, arg.UserID, arg.LockedUntil)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const lockRootAdministrators = `-- name: LockRootAdministrators :many
@@ -2065,6 +2382,24 @@ func (q *Queries) RevokeUserPATs(ctx context.Context, arg RevokeUserPATsParams) 
 	return err
 }
 
+const revokeWorkspaceInvitation = `-- name: RevokeWorkspaceInvitation :execrows
+UPDATE credbound_workspace_invitations SET revoked_at = $3 WHERE id = $2 AND workspace_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL
+`
+
+type RevokeWorkspaceInvitationParams struct {
+	WorkspaceID string       `json:"workspace_id"`
+	ID          string       `json:"id"`
+	RevokedAt   sql.NullTime `json:"revoked_at"`
+}
+
+func (q *Queries) RevokeWorkspaceInvitation(ctx context.Context, arg RevokeWorkspaceInvitationParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, revokeWorkspaceInvitation, arg.WorkspaceID, arg.ID, arg.RevokedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const revokeWorkspacePATs = `-- name: RevokeWorkspacePATs :exec
 UPDATE credbound_personal_access_tokens SET revoked_at = $3 WHERE user_id = $1 AND workspace_id = $2 AND revoked_at IS NULL
 `
@@ -2255,6 +2590,23 @@ func (q *Queries) TouchUserLastSeen(ctx context.Context, arg TouchUserLastSeenPa
 	return result.RowsAffected()
 }
 
+const updateAuditChainHead = `-- name: UpdateAuditChainHead :execrows
+UPDATE credbound_audit_chain SET sequence = $1, head_hash = $2 WHERE singleton = 1
+`
+
+type UpdateAuditChainHeadParams struct {
+	Sequence int64  `json:"sequence"`
+	HeadHash []byte `json:"head_hash"`
+}
+
+func (q *Queries) UpdateAuditChainHead(ctx context.Context, arg UpdateAuditChainHeadParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateAuditChainHead, arg.Sequence, arg.HeadHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const updateSCIMConfiguration = `-- name: UpdateSCIMConfiguration :execrows
 UPDATE credbound_scim_configurations
 SET default_role = $2, trust_directory_emails = $3, group_role_mappings_json = $4, updated_at = $5
@@ -2323,17 +2675,23 @@ func (q *Queries) UpdateSCIMUser(ctx context.Context, arg UpdateSCIMUserParams) 
 }
 
 const updateWorkspace = `-- name: UpdateWorkspace :execrows
-UPDATE credbound_workspaces SET name = $2, updated_at = $3 WHERE id = $1
+UPDATE credbound_workspaces SET name = $2, updated_at = $3, require_mfa = $4 WHERE id = $1
 `
 
 type UpdateWorkspaceParams struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	RequireMfa bool      `json:"require_mfa"`
 }
 
 func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, updateWorkspace, arg.ID, arg.Name, arg.UpdatedAt)
+	result, err := q.db.ExecContext(ctx, updateWorkspace,
+		arg.ID,
+		arg.Name,
+		arg.UpdatedAt,
+		arg.RequireMfa,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -2361,6 +2719,24 @@ func (q *Queries) UpsertInstanceAdministrator(ctx context.Context, arg UpsertIns
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const upsertLoginFailure = `-- name: UpsertLoginFailure :one
+INSERT INTO credbound_login_throttles (user_id, failed_attempts, locked_until, updated_at) VALUES ($1, 1, NULL, $2)
+ON CONFLICT (user_id) DO UPDATE SET failed_attempts = credbound_login_throttles.failed_attempts + 1, updated_at = excluded.updated_at
+RETURNING failed_attempts
+`
+
+type UpsertLoginFailureParams struct {
+	UserID    string    `json:"user_id"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (q *Queries) UpsertLoginFailure(ctx context.Context, arg UpsertLoginFailureParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, upsertLoginFailure, arg.UserID, arg.UpdatedAt)
+	var failed_attempts int64
+	err := row.Scan(&failed_attempts)
+	return failed_attempts, err
 }
 
 const upsertMembership = `-- name: UpsertMembership :exec

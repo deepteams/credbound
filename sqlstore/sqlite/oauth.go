@@ -481,8 +481,8 @@ func (s *Store) oauthMutate(ctx context.Context, commit credbound.Commit, fn fun
 			return err
 		}
 	}
-	if err := q.InsertAudit(ctx, auditParams(commit.Audit)); err != nil {
-		return fmt.Errorf("%w: %v", credbound.ErrAuditUnavailable, err)
+	if err := chainAudit(ctx, q, commit.Audit); err != nil {
+		return err
 	}
 	return mapError(tx.Commit())
 }

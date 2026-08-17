@@ -27,9 +27,9 @@ func (m *Manager) CreateWorkspace(ctx context.Context, actor Authentication, inp
 		return Workspace{}, err
 	}
 	now := m.now()
-	workspace := Workspace{ID: id, Name: name, CreatedAt: now, UpdatedAt: now}
+	workspace := Workspace{ID: id, Name: name, RequireMFA: input.RequireMFA, CreatedAt: now, UpdatedAt: now}
 	owner := Membership{WorkspaceID: id, UserID: actor.UserID, Role: RoleAdmin, Status: MembershipActive, ProvisioningSource: ProvisioningSourceLocal, CreatedAt: now, UpdatedAt: now}
-	audit, err := m.newAudit(actor.UserID, "workspace.create", "workspace", id, id, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "workspace.create", "workspace", id, id, AuditSucceeded, "")
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -84,8 +84,11 @@ func (m *Manager) updateWorkspace(ctx context.Context, actor Authentication, wor
 	}
 	workspace := previous
 	workspace.Name = name
+	if input.RequireMFA != nil {
+		workspace.RequireMFA = *input.RequireMFA
+	}
 	workspace.UpdatedAt = m.now()
-	audit, err := m.newAudit(actor.UserID, operation, "workspace", workspaceID, workspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, operation, "workspace", workspaceID, workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -160,7 +163,7 @@ func (m *Manager) setWorkspaceDisabled(ctx context.Context, actor Authentication
 		workspace.DisabledAt = cloneTime(&now)
 	}
 	workspace.UpdatedAt = now
-	audit, err := m.newAudit(actor.UserID, action, "workspace", workspaceID, workspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, action, "workspace", workspaceID, workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -212,7 +215,7 @@ func (m *Manager) setUserDisabled(ctx context.Context, actor Authentication, req
 	if user.Disabled == disabled {
 		return nil
 	}
-	audit, err := m.newAudit(actor.UserID, action, "user", userID, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, action, "user", userID, "", AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -294,7 +297,7 @@ func (m *Manager) upsertLocalMembership(ctx context.Context, actor Authenticatio
 	if previous != nil {
 		membership.CreatedAt = previous.CreatedAt
 	}
-	audit, err := m.newAudit(actor.UserID, operation, "membership", userID, workspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, operation, "membership", userID, workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return Membership{}, err
 	}
@@ -326,7 +329,7 @@ func (m *Manager) RemoveMembership(ctx context.Context, actor Authentication, wo
 	if previous.ProvisioningSource != ProvisioningSourceLocal {
 		return ErrConflict
 	}
-	audit, err := m.newAudit(actor.UserID, "membership.remove", "membership", userID, workspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "membership.remove", "membership", userID, workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}

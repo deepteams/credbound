@@ -53,7 +53,7 @@ func (m *Manager) CreatePAT(ctx context.Context, actor Authentication, input Cre
 		Digest: digest(m.patPepper, raw), WorkspaceID: input.WorkspaceID,
 		Scopes: scopes, CreatedAt: now, ExpiresAt: cloneTime(input.ExpiresAt),
 	}
-	event, err := m.newAudit(actor.UserID, "pat.create", "pat", id, input.WorkspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "pat.create", "pat", id, input.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return IssuedPAT{}, err
 	}
@@ -128,7 +128,7 @@ func (m *Manager) AuthenticatePAT(ctx context.Context, raw string) (_ Authentica
 			return Authentication{}, ErrInvalidCredentials
 		}
 	}
-	event, err := m.newAudit(pat.UserID, "auth.pat", "pat", pat.ID, pat.WorkspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, pat.UserID, "auth.pat", "pat", pat.ID, pat.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, err
 	}
@@ -156,7 +156,7 @@ func (m *Manager) RevokePAT(ctx context.Context, actor Authentication, patID str
 	if patID == "" {
 		return fmt.Errorf("%w: PAT id is required", ErrInvalidInput)
 	}
-	event, err := m.newAudit(actor.UserID, "pat.revoke", "pat", patID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "pat.revoke", "pat", patID, "", AuditSucceeded, "")
 	if err != nil {
 		return err
 	}

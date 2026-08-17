@@ -87,6 +87,7 @@ const (
 	MethodPasskey  AuthMethod = "passkey"
 	MethodPAT      AuthMethod = "pat"
 	MethodSSO      AuthMethod = "sso"
+	MethodEmail    AuthMethod = "email"
 )
 
 type AssuranceLevel uint8
@@ -127,9 +128,51 @@ type IssuedEmailVerification struct {
 	Token string
 }
 
+type PasswordResetCredential struct {
+	ID        string
+	UserID    string
+	Digest    []byte
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+}
+
+// IssuedPasswordReset carries the single-use reset token exactly once. The
+// host service delivers it to the address that requested the reset and never
+// stores it.
+type IssuedPasswordReset struct {
+	UserID    string
+	Token     string
+	ExpiresAt time.Time
+}
+
+type EmailAuthenticationCredential struct {
+	ID        string
+	UserID    string
+	EmailID   string
+	Digest    []byte
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+}
+
+// IssuedEmailAuthentication carries the single-use magic-link token exactly
+// once. The host service delivers it to the verified address and never
+// stores it.
+type IssuedEmailAuthentication struct {
+	UserID    string
+	EmailID   string
+	Token     string
+	ExpiresAt time.Time
+}
+
 type Workspace struct {
-	ID         string
-	Name       string
+	ID   string
+	Name string
+	// RequireMFA rejects interactive access below AAL2 for every member of
+	// the workspace. Non-interactive credentials such as PATs, whose
+	// creation already required a step-up, are not affected.
+	RequireMFA bool
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	DisabledAt *time.Time
@@ -176,6 +219,58 @@ type Passkey struct {
 	LastUsedAt     *time.Time
 }
 
+// WorkspaceInvitation invites an email address into a workspace with a
+// pre-assigned role. The digest is stored server-side only; the single-use
+// token is returned once at creation for the host to deliver.
+type WorkspaceInvitation struct {
+	ID             string
+	WorkspaceID    string
+	Email          string
+	Role           Role
+	InvitedBy      string
+	Digest         []byte
+	CreatedAt      time.Time
+	ExpiresAt      time.Time
+	AcceptedAt     *time.Time
+	AcceptedUserID string
+	RevokedAt      *time.Time
+}
+
+type IssuedWorkspaceInvitation struct {
+	Invitation WorkspaceInvitation
+	Token      string
+}
+
+type InviteToWorkspaceInput struct {
+	Email string
+	Role  Role
+}
+
+type RegisterFromInvitationInput struct {
+	DisplayName string
+	Password    string
+}
+
+// LoginThrottle tracks consecutive authentication failures for one user. It
+// backs the built-in account lockout and is reset by any successful
+// authentication.
+type LoginThrottle struct {
+	UserID         string
+	FailedAttempts int64
+	LockedUntil    *time.Time
+	UpdatedAt      time.Time
+}
+
+// TOTPStatus is the read-only state of a user's TOTP factor. It never
+// contains the secret, the otpauth URI or any recovery code material.
+type TOTPStatus struct {
+	Enrolled            bool
+	Active              bool
+	UnusedRecoveryCodes int
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
 type PAT struct {
 	ID          string
 	UserID      string
@@ -206,7 +301,7 @@ type Authentication struct {
 }
 
 func (a Authentication) Interactive() bool {
-	return a.Method == MethodPassword || a.Method == MethodTOTP || a.Method == MethodPasskey || a.Method == MethodSSO
+	return a.Method == MethodPassword || a.Method == MethodTOTP || a.Method == MethodPasskey || a.Method == MethodSSO || a.Method == MethodEmail
 }
 
 func (a Authentication) HasScope(required string) bool {
@@ -236,6 +331,15 @@ const (
 	ActorSystem  ActorKind = "system"
 )
 
+// RequestMetadata carries the client network context of the request being
+// served. The host service extracts it from its trusted proxy headers and
+// attaches it with WithRequestMetadata; Credbound never reads transport
+// headers itself. Both fields are sanitized and bounded before being audited.
+type RequestMetadata struct {
+	IPAddress string
+	UserAgent string
+}
+
 type AuditEvent struct {
 	ID           string
 	OccurredAt   time.Time
@@ -247,6 +351,21 @@ type AuditEvent struct {
 	WorkspaceID  string
 	Outcome      AuditOutcome
 	Reason       string
+	IPAddress    string
+	UserAgent    string
+	// Sequence, PreviousHash and Hash are assigned by the store inside the
+	// commit transaction and chain every event to its predecessor. A zero
+	// Sequence marks an event recorded before the chain existed.
+	Sequence     int64
+	PreviousHash []byte
+	Hash         []byte
+}
+
+// AuditChainReport summarizes a successful audit chain verification.
+type AuditChainReport struct {
+	Events       int64
+	HeadSequence int64
+	HeadHash     []byte
 }
 
 type SCIMGroupRoleMapping struct {
@@ -448,11 +567,14 @@ type CreateUserInput struct {
 }
 
 type CreateWorkspaceInput struct {
-	Name string
+	Name       string
+	RequireMFA bool
 }
 
 type UpdateWorkspaceInput struct {
 	Name string
+	// RequireMFA toggles the workspace MFA policy; nil leaves it unchanged.
+	RequireMFA *bool
 }
 
 type TOTPEnrollment struct {

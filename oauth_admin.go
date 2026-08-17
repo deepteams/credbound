@@ -41,7 +41,7 @@ func (m *Manager) setOAuthIssuerDisabled(ctx context.Context, actor Authenticati
 	if (issuer.DisabledAt != nil) == disabled {
 		return nil
 	}
-	audit, err := m.newAudit(actor.UserID, action, "oauth_issuer", issuerID, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, action, "oauth_issuer", issuerID, "", AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func (m *Manager) setOAuthProtectedResourceDisabled(ctx context.Context, actor A
 	if (resource.DisabledAt != nil) == disabled {
 		return nil
 	}
-	audit, err := m.newAudit(actor.UserID, action, "oauth_resource", resourceID, workspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, action, "oauth_resource", resourceID, workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -140,7 +140,7 @@ func (m *Manager) setOAuthClientDisabled(ctx context.Context, actor Authenticati
 	if (client.DisabledAt != nil) == disabled {
 		return nil
 	}
-	audit, err := m.newAudit(actor.UserID, action, "oauth_client", clientID, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, action, "oauth_client", clientID, "", AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -180,7 +180,7 @@ func (m *Manager) RevokeOAuthGrant(ctx context.Context, actor Authentication, gr
 	if err != nil {
 		return err
 	}
-	audit, err := m.newAudit(actor.UserID, "oauth.consent.revoke", "oauth_grant", grantID, grant.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.consent.revoke", "oauth_grant", grantID, grant.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}

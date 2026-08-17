@@ -73,7 +73,7 @@ func (m *Manager) AuthorizeAdmin(ctx context.Context, actor Authentication, perm
 		outcome = AuditSucceeded
 		reason = ""
 	}
-	event, eventErr := m.newAudit(actor.UserID, "admin.access", "permission", string(permission), "", outcome, reason)
+	event, eventErr := m.newAudit(ctx, actor.UserID, "admin.access", "permission", string(permission), "", outcome, reason)
 	if eventErr != nil {
 		return eventErr
 	}
@@ -141,7 +141,7 @@ func (m *Manager) SetInstanceRole(ctx context.Context, actor Authentication, req
 	}
 	now := m.now()
 	admin := InstanceAdministrator{UserID: userID, Role: role, CreatedAt: now, UpdatedAt: now}
-	event, err := m.newAudit(actor.UserID, "admin.instance_role.set", "user", userID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "admin.instance_role.set", "user", userID, "", AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -173,7 +173,7 @@ func (m *Manager) RemoveInstanceRole(ctx context.Context, actor Authentication, 
 	if userID == actor.UserID {
 		return fmt.Errorf("%w: a root administrator cannot remove itself", ErrForbidden)
 	}
-	event, err := m.newAudit(actor.UserID, "admin.instance_role.remove", "user", userID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "admin.instance_role.remove", "user", userID, "", AuditSucceeded, "")
 	if err != nil {
 		return err
 	}

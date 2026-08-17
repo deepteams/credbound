@@ -47,7 +47,7 @@ func (m *Manager) CreateSCIMConfiguration(ctx context.Context, actor Authenticat
 		TrustDirectoryEmails: input.TrustDirectoryEmails, GroupRoleMappings: mappings,
 		CreatedAt: now, UpdatedAt: now,
 	}
-	audit, err := m.newAudit(actor.UserID, "scim.configuration.create", "scim_configuration", configuration.ID, workspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "scim.configuration.create", "scim_configuration", configuration.ID, workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return IssuedSCIMCredential{}, err
 	}
@@ -110,7 +110,7 @@ func (m *Manager) UpdateSCIMConfiguration(ctx context.Context, actor Authenticat
 		membership.Role, membership.UpdatedAt = role, configuration.UpdatedAt
 		memberships = append(memberships, membership)
 	}
-	audit, err := m.newAudit(actor.UserID, "scim.configuration.update", "scim_configuration", configurationID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "scim.configuration.update", "scim_configuration", configurationID, configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return SCIMConfiguration{}, err
 	}
@@ -134,7 +134,7 @@ func (m *Manager) RotateSCIMCredential(ctx context.Context, actor Authentication
 	if err != nil {
 		return IssuedSCIMCredential{}, err
 	}
-	audit, err := m.newAudit(actor.UserID, "scim.credential.rotate", "scim_configuration", configurationID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "scim.credential.rotate", "scim_configuration", configurationID, configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return IssuedSCIMCredential{}, err
 	}
@@ -153,7 +153,7 @@ func (m *Manager) RevokeSCIMCredential(ctx context.Context, actor Authentication
 	if err != nil {
 		return err
 	}
-	audit, err := m.newAudit(actor.UserID, "scim.credential.revoke", "scim_credential", credentialID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "scim.credential.revoke", "scim_credential", credentialID, configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func (m *Manager) DisableSCIMConfiguration(ctx context.Context, actor Authentica
 	if err != nil {
 		return err
 	}
-	audit, err := m.newAudit(actor.UserID, "scim.configuration.disable", "scim_configuration", configurationID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "scim.configuration.disable", "scim_configuration", configurationID, configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -203,7 +203,7 @@ func (m *Manager) AuthenticateSCIM(ctx context.Context, raw string) (_ SCIMAuthe
 	if workspaceErr != nil || workspace.DisabledAt != nil {
 		return SCIMAuthentication{}, ErrInvalidCredentials
 	}
-	audit, err := m.newServiceAudit(credential.ID, "auth.scim", "scim_configuration", configuration.ID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newServiceAudit(ctx, credential.ID, "auth.scim", "scim_configuration", configuration.ID, configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return SCIMAuthentication{}, err
 	}
@@ -259,7 +259,7 @@ func (m *Manager) ProvisionSCIMUser(ctx context.Context, principal SCIMAuthentic
 		Schemas: slices.Clone(input.Schemas), UserName: input.UserName, DisplayName: input.DisplayName, Emails: cloneSCIMEmails(input.Emails), Attributes: cloneRawAttributes(input.Attributes),
 		Active: input.Active, CreatedAt: now, UpdatedAt: now,
 	}
-	audit, err := m.newServiceAudit(principal.CredentialID, "scim.user.provision", "scim_user", link.ID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newServiceAudit(ctx, principal.CredentialID, "scim.user.provision", "scim_user", link.ID, configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return SCIMUser{}, err
 	}
@@ -315,7 +315,7 @@ func (m *Manager) AdoptSCIMUser(ctx context.Context, actor Authentication, confi
 		membership.Status = MembershipActive
 	}
 	membership.UpdatedAt = now
-	audit, err := m.newAudit(actor.UserID, "scim.user.adopt", "scim_user", link.ID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "scim.user.adopt", "scim_user", link.ID, configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return SCIMUser{}, err
 	}
@@ -472,7 +472,7 @@ func (m *Manager) UpsertSCIMGroup(ctx context.Context, principal SCIMAuthenticat
 	if created {
 		name = EventSCIMGroupCreated
 	}
-	audit, err := m.newServiceAudit(principal.CredentialID, "scim.group.upsert", "scim_group", group.ID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newServiceAudit(ctx, principal.CredentialID, "scim.group.upsert", "scim_group", group.ID, configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return SCIMGroup{}, err
 	}
@@ -516,7 +516,7 @@ func (m *Manager) DeleteSCIMGroup(ctx context.Context, principal SCIMAuthenticat
 	}
 	now := m.now()
 	group.DeletedAt, group.UpdatedAt = cloneTime(&now), now
-	audit, err := m.newServiceAudit(principal.CredentialID, "scim.group.delete", "scim_group", group.ID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newServiceAudit(ctx, principal.CredentialID, "scim.group.delete", "scim_group", group.ID, configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -564,7 +564,7 @@ func (m *Manager) commitSCIMUserUpdate(ctx context.Context, principal SCIMAuthen
 	if name == EventSCIMUserDeprovisioned {
 		action = "scim.user.deprovision"
 	}
-	audit, err := m.newServiceAudit(principal.CredentialID, action, "scim_user", user.ID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newServiceAudit(ctx, principal.CredentialID, action, "scim_user", user.ID, configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return SCIMUser{}, err
 	}
@@ -872,8 +872,8 @@ func validSCIMFilter(filter SCIMFilter, user bool) bool {
 	}
 }
 
-func (m *Manager) newServiceAudit(actor, action, resourceType, resourceID, workspaceID string, outcome AuditOutcome, reason string) (AuditEvent, error) {
-	event, err := m.newAudit(actor, action, resourceType, resourceID, workspaceID, outcome, reason)
+func (m *Manager) newServiceAudit(ctx context.Context, actor, action, resourceType, resourceID, workspaceID string, outcome AuditOutcome, reason string) (AuditEvent, error) {
+	event, err := m.newAudit(ctx, actor, action, resourceType, resourceID, workspaceID, outcome, reason)
 	if err == nil {
 		event.ActorKind = ActorService
 	}

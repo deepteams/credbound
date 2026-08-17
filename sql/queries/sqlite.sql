@@ -46,6 +46,41 @@ UPDATE credbound_personal_access_tokens SET revoked_at = ?2 WHERE user_id = ?1 A
 -- name: TouchUserLastSeen :execrows
 UPDATE credbound_users SET last_seen_at = ?2 WHERE id = ?1;
 
+-- name: GetLoginThrottle :one
+SELECT user_id, failed_attempts, locked_until, updated_at FROM credbound_login_throttles WHERE user_id = ?1;
+
+-- name: UpsertLoginFailure :one
+INSERT INTO credbound_login_throttles (user_id, failed_attempts, locked_until, updated_at) VALUES (?1, 1, NULL, ?2)
+ON CONFLICT (user_id) DO UPDATE SET failed_attempts = credbound_login_throttles.failed_attempts + 1, updated_at = excluded.updated_at
+RETURNING failed_attempts;
+
+-- name: LockLoginThrottle :execrows
+UPDATE credbound_login_throttles SET locked_until = ?2 WHERE user_id = ?1;
+
+-- name: ClearLoginThrottle :exec
+DELETE FROM credbound_login_throttles WHERE user_id = ?1;
+
+-- name: InsertPasswordReset :exec
+INSERT INTO credbound_password_resets (id, user_id, digest, created_at, expires_at, used_at) VALUES (?1, ?2, ?3, ?4, ?5, NULL);
+
+-- name: GetPasswordReset :one
+SELECT id, user_id, digest, created_at, expires_at, used_at FROM credbound_password_resets WHERE id = ?1;
+
+-- name: ConsumePasswordReset :execrows
+UPDATE credbound_password_resets SET used_at = ?2 WHERE id = ?1 AND used_at IS NULL;
+
+-- name: DeleteOtherPasswordResets :exec
+DELETE FROM credbound_password_resets WHERE user_id = ?1 AND id != ?2;
+
+-- name: InsertEmailAuthentication :exec
+INSERT INTO credbound_email_authentications (id, user_id, email_id, digest, created_at, expires_at, used_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL);
+
+-- name: GetEmailAuthentication :one
+SELECT id, user_id, email_id, digest, created_at, expires_at, used_at FROM credbound_email_authentications WHERE id = ?1;
+
+-- name: ConsumeEmailAuthentication :execrows
+UPDATE credbound_email_authentications SET used_at = ?3 WHERE id = ?1 AND user_id = ?2 AND used_at IS NULL;
+
 -- name: InsertUserEmail :exec
 INSERT INTO credbound_user_emails (id, user_id, address, is_primary, verified_at, verification_digest, verification_expires_at, created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);
@@ -82,19 +117,37 @@ SELECT user_id, hash, updated_at FROM credbound_password_credentials WHERE user_
 UPDATE credbound_password_credentials SET hash = ?2, updated_at = ?3 WHERE user_id = ?1;
 
 -- name: InsertWorkspace :exec
-INSERT INTO credbound_workspaces (id, name, created_at, updated_at, disabled_at) VALUES (?1, ?2, ?3, ?4, ?5);
+INSERT INTO credbound_workspaces (id, name, created_at, updated_at, disabled_at, require_mfa) VALUES (?1, ?2, ?3, ?4, ?5, ?6);
 
 -- name: GetWorkspace :one
-SELECT id, name, created_at, updated_at, disabled_at FROM credbound_workspaces WHERE id = ?1;
+SELECT id, name, created_at, updated_at, disabled_at, require_mfa FROM credbound_workspaces WHERE id = ?1;
 
 -- name: UpdateWorkspace :execrows
-UPDATE credbound_workspaces SET name = ?2, updated_at = ?3 WHERE id = ?1;
+UPDATE credbound_workspaces SET name = ?2, updated_at = ?3, require_mfa = ?4 WHERE id = ?1;
 
 -- name: SetWorkspaceDisabled :execrows
 UPDATE credbound_workspaces SET disabled_at = ?2, updated_at = ?3 WHERE id = ?1;
 
 -- name: RevokeAllWorkspacePATs :exec
 UPDATE credbound_personal_access_tokens SET revoked_at = ?2 WHERE workspace_id = ?1 AND revoked_at IS NULL;
+
+-- name: InsertWorkspaceInvitation :exec
+INSERT INTO credbound_workspace_invitations (id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, NULL);
+
+-- name: GetWorkspaceInvitation :one
+SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
+FROM credbound_workspace_invitations WHERE id = ?1;
+
+-- name: GetPendingWorkspaceInvitation :one
+SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
+FROM credbound_workspace_invitations WHERE workspace_id = ?1 AND email = ?2 AND accepted_at IS NULL AND revoked_at IS NULL;
+
+-- name: AcceptWorkspaceInvitation :execrows
+UPDATE credbound_workspace_invitations SET accepted_at = ?2, accepted_user_id = ?3 WHERE id = ?1 AND accepted_at IS NULL AND revoked_at IS NULL;
+
+-- name: RevokeWorkspaceInvitation :execrows
+UPDATE credbound_workspace_invitations SET revoked_at = ?3 WHERE id = ?2 AND workspace_id = ?1 AND accepted_at IS NULL AND revoked_at IS NULL;
 
 -- name: UpsertMembership :exec
 INSERT INTO credbound_memberships (workspace_id, user_id, role, status, provisioning_source, created_at, updated_at)
@@ -172,6 +225,9 @@ INSERT INTO credbound_recovery_codes (user_id, digest, used_at) VALUES (?1, ?2, 
 -- name: ConsumeRecoveryCode :execrows
 UPDATE credbound_recovery_codes SET used_at = ?3 WHERE user_id = ?1 AND digest = ?2 AND used_at IS NULL;
 
+-- name: CountUnusedRecoveryCodes :one
+SELECT COUNT(*) FROM credbound_recovery_codes WHERE user_id = ?1 AND used_at IS NULL;
+
 -- name: InsertPasskey :exec
 INSERT INTO credbound_passkeys (id, user_id, name, credential_id, credential_json, created_at, last_used_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL);
 
@@ -200,8 +256,14 @@ UPDATE credbound_personal_access_tokens SET last_used_at = ?2 WHERE id = ?1;
 UPDATE credbound_personal_access_tokens SET revoked_at = ?3 WHERE user_id = ?1 AND id = ?2;
 
 -- name: InsertAudit :exec
-INSERT INTO credbound_audit_events (id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10);
+INSERT INTO credbound_audit_events (id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15);
+
+-- name: GetAuditChainHead :one
+SELECT sequence, head_hash FROM credbound_audit_chain WHERE singleton = 1;
+
+-- name: UpdateAuditChainHead :execrows
+UPDATE credbound_audit_chain SET sequence = ?1, head_hash = ?2 WHERE singleton = 1;
 
 -- name: InsertSCIMConfiguration :exec
 INSERT INTO credbound_scim_configurations (id, workspace_id, enabled, default_role, trust_directory_emails, group_role_mappings_json, created_at, updated_at)

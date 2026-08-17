@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"fmt"
+	"iter"
 	"strings"
 )
 
@@ -80,7 +81,7 @@ func (m *Manager) FinishPasskeyRegistration(ctx context.Context, actor Authentic
 		CredentialID:   append([]byte(nil), credentialID...),
 		CredentialJSON: sealedCredential, CreatedAt: m.now(),
 	}
-	event, err := m.newAudit(actor.UserID, "passkey.create", "passkey", id, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "passkey.create", "passkey", id, "", AuditSucceeded, "")
 	if err != nil {
 		return Passkey{}, err
 	}
@@ -146,7 +147,7 @@ func (m *Manager) FinishPasskeyAuthentication(ctx context.Context, continuation 
 		m.emitAuthenticationFailed(ctx, "auth.passkey.authentication.finish", audit, MethodPasskey, state.UserID, "invalid_credentials")
 		return Authentication{}, ErrInvalidCredentials
 	}
-	event, err := m.newAudit(state.UserID, "auth.passkey", "user", state.UserID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, state.UserID, "auth.passkey", "user", state.UserID, "", AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, err
 	}
@@ -177,7 +178,7 @@ func (m *Manager) DeletePasskey(ctx context.Context, actor Authentication, passk
 	if passkeyID == "" {
 		return fmt.Errorf("%w: passkey id is required", ErrInvalidInput)
 	}
-	event, err := m.newAudit(actor.UserID, "passkey.delete", "passkey", passkeyID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "passkey.delete", "passkey", passkeyID, "", AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -195,6 +196,37 @@ func (m *Manager) DeletePasskey(ctx context.Context, actor Authentication, passk
 	deleted := PasskeyDeletedEvent{EventMeta: meta, PasskeyID: passkeyID, UserID: actor.UserID}
 	m.events.emit(ctx, EventPasskeyDeleted, func(listener EventListener) error { return listener.OnPasskeyDeleted(ctx, deleted) })
 	return nil
+}
+
+// Passkeys streams the metadata of a user's registered passkeys so the host
+// can render a credential-management page. The sealed credential material is
+// never exposed. Reading another user requires admin users read permission.
+func (m *Manager) Passkeys(ctx context.Context, actor Authentication, userID string) iter.Seq2[Passkey, error] {
+	if actor.UserID == "" {
+		return errorSeq[Passkey](ErrUnauthorized)
+	}
+	if userID == "" {
+		userID = actor.UserID
+	}
+	if userID == actor.UserID {
+		if err := m.requireRecentInteractive(ctx, actor); err != nil {
+			return errorSeq[Passkey](err)
+		}
+	} else if err := m.AuthorizeAdmin(ctx, actor, PermissionUsersRead); err != nil {
+		return errorSeq[Passkey](err)
+	}
+	return func(yield func(Passkey, error) bool) {
+		for passkey, err := range m.store.Passkeys(ctx, userID) {
+			if err != nil {
+				yield(Passkey{}, err)
+				return
+			}
+			passkey.CredentialJSON = nil
+			if !yield(passkey, nil) {
+				return
+			}
+		}
+	}
 }
 
 func (m *Manager) passkeyIDByCredential(ctx context.Context, userID string, credentialID []byte) string {
