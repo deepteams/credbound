@@ -320,7 +320,13 @@ after `VerifyTOTP` (or any AAL change) and revoke the previous one.
 user's sessions in the same transaction when the store supports sessions.
 `SignOut` revokes a single session by possession of its raw token — the
 ordinary logout, deliberately requiring no step-up so an AAL1 deployment can
-sign out immediately; it is idempotent on already-revoked sessions.
+sign out immediately; it is idempotent on already-revoked sessions. Sessions
+are global, not workspace-scoped: a SCIM deprovisioning suspends the
+membership (denying tenant authorization) without ending them; directory
+offboarding that must end sessions everywhere uses `DisableUser` or
+`RevokeUserSessions`. Every successful `AuthenticateSession` performs one
+write transaction (last-seen touch plus audit); high-traffic hosts may cache
+the result per token for a short, bounded interval.
 
 Workspace domains require a `DomainStore`-capable store. `CreateWorkspaceDomain`
 returns a DNS challenge value; the host proves control of the domain (for

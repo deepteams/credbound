@@ -12,6 +12,8 @@ import (
 	"github.com/deepteams/credbound"
 )
 
+// CreateSCIMConfiguration stores a workspace's SCIM configuration together
+// with its first bearer credential.
 func (s *Store) CreateSCIMConfiguration(ctx context.Context, configuration credbound.SCIMConfiguration, credential credbound.SCIMCredential, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -37,6 +39,7 @@ func (s *Store) CreateSCIMConfiguration(ctx context.Context, configuration credb
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// SCIMConfiguration returns the configuration with the given ID.
 func (s *Store) SCIMConfiguration(ctx context.Context, id string) (credbound.SCIMConfiguration, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.SCIMConfiguration{}, err
@@ -50,6 +53,8 @@ func (s *Store) SCIMConfiguration(ctx context.Context, id string) (credbound.SCI
 	return cloneSCIMConfiguration(configuration), nil
 }
 
+// UpdateSCIMConfiguration persists the configuration's settings and applies
+// the recomputed memberships in the same commit.
 func (s *Store) UpdateSCIMConfiguration(ctx context.Context, configuration credbound.SCIMConfiguration, memberships []credbound.Membership, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -74,6 +79,8 @@ func (s *Store) UpdateSCIMConfiguration(ctx context.Context, configuration credb
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// SCIMConfigurationByCredentialPrefix resolves the configuration and
+// credential addressed by a bearer token's lookup prefix.
 func (s *Store) SCIMConfigurationByCredentialPrefix(ctx context.Context, prefix string) (credbound.SCIMConfiguration, credbound.SCIMCredential, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.SCIMConfiguration{}, credbound.SCIMCredential{}, err
@@ -92,6 +99,8 @@ func (s *Store) SCIMConfigurationByCredentialPrefix(ctx context.Context, prefix 
 	return cloneSCIMConfiguration(configuration), cloneSCIMCredential(credential), nil
 }
 
+// SaveSCIMCredential stores an additional bearer credential for a
+// configuration.
 func (s *Store) SaveSCIMCredential(ctx context.Context, credential credbound.SCIMCredential, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -116,6 +125,7 @@ func (s *Store) SaveSCIMCredential(ctx context.Context, credential credbound.SCI
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// RevokeSCIMCredential marks the configuration's credential revoked.
 func (s *Store) RevokeSCIMCredential(ctx context.Context, configurationID, id string, revokedAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -135,6 +145,7 @@ func (s *Store) RevokeSCIMCredential(ctx context.Context, configurationID, id st
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// TouchSCIMCredential records a successful use of the credential.
 func (s *Store) TouchSCIMCredential(ctx context.Context, id string, usedAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -154,6 +165,8 @@ func (s *Store) TouchSCIMCredential(ctx context.Context, id string, usedAt time.
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// DisableSCIMConfiguration marks the configuration disabled so its
+// credentials stop authenticating.
 func (s *Store) DisableSCIMConfiguration(ctx context.Context, id string, disabledAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -179,6 +192,8 @@ func (s *Store) DisableSCIMConfiguration(ctx context.Context, id string, disable
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// CreateSCIMUser atomically creates the Credbound user, email and membership
+// for a directory user and links them to the SCIM record.
 func (s *Store) CreateSCIMUser(ctx context.Context, user credbound.User, email credbound.EmailAddress, membership credbound.Membership, link credbound.SCIMUser, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -213,6 +228,8 @@ func (s *Store) CreateSCIMUser(ctx context.Context, user credbound.User, email c
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// AdoptSCIMUser links a directory user to an existing Credbound account,
+// installing the membership in the same commit.
 func (s *Store) AdoptSCIMUser(ctx context.Context, membership credbound.Membership, link credbound.SCIMUser, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -241,6 +258,7 @@ func (s *Store) AdoptSCIMUser(ctx context.Context, membership credbound.Membersh
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// SCIMUser returns the configuration's SCIM user with the given ID.
 func (s *Store) SCIMUser(ctx context.Context, configurationID, id string) (credbound.SCIMUser, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.SCIMUser{}, err
@@ -254,10 +272,14 @@ func (s *Store) SCIMUser(ctx context.Context, configurationID, id string) (credb
 	return cloneSCIMUser(link), nil
 }
 
+// SCIMUserByExternalID resolves the configuration's SCIM user by its
+// directory external ID.
 func (s *Store) SCIMUserByExternalID(ctx context.Context, configurationID, externalID string) (credbound.SCIMUser, error) {
 	return s.scimUserByKey(ctx, s.scimExternalIDs, scimKey(configurationID, strings.TrimSpace(externalID)))
 }
 
+// SCIMUserByUserName resolves the configuration's SCIM user by normalized
+// userName.
 func (s *Store) SCIMUserByUserName(ctx context.Context, configurationID, userName string) (credbound.SCIMUser, error) {
 	return s.scimUserByKey(ctx, s.scimUserNames, scimKey(configurationID, strings.ToLower(strings.TrimSpace(userName))))
 }
@@ -275,6 +297,8 @@ func (s *Store) scimUserByKey(ctx context.Context, index map[string]string, key 
 	return cloneSCIMUser(s.scimUsers[id]), nil
 }
 
+// UpdateSCIMUser persists the directory record and membership change,
+// optionally revoking the user's workspace PATs on deactivation.
 func (s *Store) UpdateSCIMUser(ctx context.Context, link credbound.SCIMUser, membership credbound.Membership, revokeWorkspacePATs bool, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -306,6 +330,8 @@ func (s *Store) UpdateSCIMUser(ctx context.Context, link credbound.SCIMUser, mem
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// SCIMUsers streams the configuration's users matching the filter, newest
+// first, as one cursor page.
 func (s *Store) SCIMUsers(ctx context.Context, configurationID string, filter credbound.SCIMFilter, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.SCIMUser], error] {
 	return func(yield func(credbound.PageEvent[credbound.SCIMUser], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
@@ -329,6 +355,8 @@ func (s *Store) SCIMUsers(ctx context.Context, configurationID string, filter cr
 	}
 }
 
+// UpsertSCIMGroup inserts or replaces a directory group and applies the
+// recomputed memberships in the same commit.
 func (s *Store) UpsertSCIMGroup(ctx context.Context, group credbound.SCIMGroup, memberships []credbound.Membership, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -364,6 +392,7 @@ func (s *Store) UpsertSCIMGroup(ctx context.Context, group credbound.SCIMGroup, 
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// SCIMGroup returns the configuration's group with the given ID.
 func (s *Store) SCIMGroup(ctx context.Context, configurationID, id string) (credbound.SCIMGroup, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.SCIMGroup{}, err
@@ -377,6 +406,8 @@ func (s *Store) SCIMGroup(ctx context.Context, configurationID, id string) (cred
 	return cloneSCIMGroup(group), nil
 }
 
+// SCIMGroupByExternalID resolves the configuration's group by its directory
+// external ID.
 func (s *Store) SCIMGroupByExternalID(ctx context.Context, configurationID, externalID string) (credbound.SCIMGroup, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.SCIMGroup{}, err
@@ -394,6 +425,8 @@ func (s *Store) SCIMGroupByExternalID(ctx context.Context, configurationID, exte
 	return cloneSCIMGroup(group), nil
 }
 
+// DeleteSCIMGroup soft-deletes the group and applies the recomputed
+// memberships in the same commit.
 func (s *Store) DeleteSCIMGroup(ctx context.Context, group credbound.SCIMGroup, memberships []credbound.Membership, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -418,6 +451,8 @@ func (s *Store) DeleteSCIMGroup(ctx context.Context, group credbound.SCIMGroup, 
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// SCIMGroups streams the configuration's groups matching the filter, newest
+// first, as one cursor page.
 func (s *Store) SCIMGroups(ctx context.Context, configurationID string, filter credbound.SCIMFilter, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.SCIMGroup], error] {
 	return func(yield func(credbound.PageEvent[credbound.SCIMGroup], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)

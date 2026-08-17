@@ -1,3 +1,20 @@
+// Package webauthnadapter implements the credbound.PasskeyProvider port on
+// top of github.com/go-webauthn/webauthn. Every ceremony requires user
+// verification, so passkey authentication yields AAL2 directly, and user
+// handles are HMAC-derived from the account ID so authenticators never
+// learn stable Credbound identifiers.
+//
+// Wire it into credbound.Config.Passkeys:
+//
+//	passkeys, err := webauthnadapter.New(webauthnadapter.Config{
+//		RPID:          "example.com",
+//		RPDisplayName: "Example",
+//		RPOrigins:     []string{"https://app.example.com"},
+//		UserHandleKey: key, // at least 32 secret bytes
+//	})
+//
+// Credbound seals the ceremony session into its continuation; the host only
+// shuttles the JSON options and browser responses.
 package webauthnadapter
 
 import (
@@ -14,14 +31,32 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 )
 
+// Config identifies the WebAuthn relying party and the key material used to
+// derive user handles.
 type Config struct {
-	RPID           string
-	RPDisplayName  string
-	RPOrigins      []string
-	UserHandleKey  []byte
+	// RPID is the relying-party identifier, normally the registrable
+	// domain (e.g. "example.com"). Changing it invalidates every
+	// registered passkey.
+	RPID string
+	// RPDisplayName is the human-readable relying-party name shown by
+	// authenticators during ceremonies.
+	RPDisplayName string
+	// RPOrigins lists the exact web origins allowed to complete
+	// ceremonies (e.g. "https://app.example.com"). Responses from any
+	// other origin are rejected.
+	RPOrigins []string
+	// UserHandleKey is a secret of at least 32 bytes used to HMAC user IDs
+	// into WebAuthn user handles. Keep it stable — rotating it orphans
+	// discoverable credentials — and never reuse another Credbound key.
+	UserHandleKey []byte
+	// MaxCredentials caps how many stored passkeys one user may present in
+	// a ceremony, 1 through 100. Zero defaults to 20.
 	MaxCredentials int
 }
 
+// Provider runs WebAuthn registration and authentication ceremonies with
+// mandatory user verification. It is safe for concurrent use and implements
+// credbound.PasskeyProvider.
 type Provider struct {
 	webAuthn       engine
 	userHandleKey  []byte
@@ -37,6 +72,9 @@ type engine interface {
 	ValidateLogin(webauthn.User, webauthn.SessionData, *protocol.ParsedCredentialAssertionData) (*webauthn.Credential, error)
 }
 
+// New validates config and returns a Provider. A user handle key shorter
+// than 32 bytes, an out-of-range credential cap or an invalid relying-party
+// configuration is rejected.
 func New(config Config) (*Provider, error) {
 	if len(config.UserHandleKey) < 32 {
 		return nil, errors.New("webauthn: user handle key must contain at least 32 bytes")
@@ -64,6 +102,9 @@ func New(config Config) (*Provider, error) {
 	}, nil
 }
 
+// BeginRegistration starts a passkey registration ceremony and returns the
+// browser creation options plus the opaque session Credbound seals into the
+// continuation.
 func (p *Provider) BeginRegistration(ctx context.Context, input credbound.PasskeyUser) (json.RawMessage, []byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
@@ -85,6 +126,9 @@ func (p *Provider) BeginRegistration(ctx context.Context, input credbound.Passke
 	return marshalCeremony(creation, session)
 }
 
+// FinishRegistration validates the browser's attestation response against
+// the sealed session and returns the new credential ID and its JSON
+// encoding for storage.
 func (p *Provider) FinishRegistration(ctx context.Context, input credbound.PasskeyUser, rawSession, response []byte) ([]byte, []byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
@@ -112,6 +156,9 @@ func (p *Provider) FinishRegistration(ctx context.Context, input credbound.Passk
 	return slices.Clone(credential.ID), encoded, nil
 }
 
+// BeginAuthentication starts an assertion ceremony over the user's stored
+// passkeys and returns the browser request options plus the opaque session.
+// It fails when the user has no passkey.
 func (p *Provider) BeginAuthentication(ctx context.Context, input credbound.PasskeyUser) (json.RawMessage, []byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
@@ -130,6 +177,9 @@ func (p *Provider) BeginAuthentication(ctx context.Context, input credbound.Pass
 	return marshalCeremony(assertion, session)
 }
 
+// FinishAuthentication validates the browser's assertion response against
+// the sealed session and returns the matched credential ID and its updated
+// JSON encoding (sign counter, flags) for persistence via TouchPasskey.
 func (p *Provider) FinishAuthentication(ctx context.Context, input credbound.PasskeyUser, rawSession, response []byte) ([]byte, []byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err

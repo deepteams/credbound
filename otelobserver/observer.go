@@ -1,3 +1,15 @@
+// Package otelobserver implements the credbound.Observer port with
+// OpenTelemetry: every observed operation becomes a span, a
+// "credbound.operations" counter increment, a
+// "credbound.operation.duration" histogram sample and a log record, all
+// attributed with the operation name and outcome. Operation records carry
+// no secrets, so the telemetry is safe to export.
+//
+// Wire it into credbound.Config.Observer:
+//
+//	observer, err := otelobserver.New(otelobserver.Config{})
+//
+// A zero Config uses the process-global OTEL providers.
 package otelobserver
 
 import (
@@ -15,12 +27,23 @@ import (
 
 const instrumentationName = "github.com/deepteams/credbound"
 
+// Config selects the OpenTelemetry providers to emit through. Each nil
+// field falls back to the corresponding process-global provider.
 type Config struct {
+	// TracerProvider produces the per-operation spans. Defaults to
+	// otel.GetTracerProvider().
 	TracerProvider trace.TracerProvider
-	MeterProvider  metric.MeterProvider
+	// MeterProvider backs the operation counter and duration histogram.
+	// Defaults to otel.GetMeterProvider().
+	MeterProvider metric.MeterProvider
+	// LoggerProvider receives one log record per operation. Defaults to
+	// the global log provider.
 	LoggerProvider logapi.LoggerProvider
 }
 
+// Observer forwards credbound.Operation records to OpenTelemetry traces,
+// metrics and logs. It is safe for concurrent use and implements
+// credbound.Observer.
 type Observer struct {
 	tracer   trace.Tracer
 	counter  metric.Int64Counter
@@ -28,6 +51,8 @@ type Observer struct {
 	logger   logapi.Logger
 }
 
+// New builds an Observer, creating its instruments on the configured (or
+// global) providers. It fails only when an instrument cannot be created.
 func New(config Config) (*Observer, error) {
 	if config.TracerProvider == nil {
 		config.TracerProvider = otel.GetTracerProvider()
@@ -53,6 +78,9 @@ func New(config Config) (*Observer, error) {
 	}, nil
 }
 
+// Observe records one completed operation: a span back-dated by the
+// operation's duration, a counter increment, a histogram sample and a log
+// record (error severity for the "error" outcome).
 func (o *Observer) Observe(ctx context.Context, operation credbound.Operation) {
 	attributes := []attribute.KeyValue{
 		attribute.String("credbound.operation", operation.Name),

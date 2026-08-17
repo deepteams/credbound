@@ -255,7 +255,10 @@ timestamp.
 Embedded Goose migrations are available through `migrations.SQLite()` and
 `migrations.PostgreSQL()`. Versions are timestamps so they interleave with the
 host service's own migrations, and on PostgreSQL every table lives in the
-dedicated `credbound` schema. The first `Bootstrap` call atomically creates the
+dedicated `credbound` schema. Hosts without a migration tool call
+`migrations.ApplySQLite(ctx, db)` or `migrations.ApplyPostgreSQL(ctx, db)`
+instead — idempotent, one transaction per migration; pick goose or the
+helpers for a given database, never both. The first `Bootstrap` call atomically creates the
 first user, their workspace, their `admin` membership, and their instance-level
 `root` role.
 

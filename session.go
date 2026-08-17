@@ -92,6 +92,12 @@ func (m *Manager) CreateSession(ctx context.Context, actor Authentication, _ Cre
 // verification. Validation happens on every request, so it deliberately emits
 // no authentication.succeeded (or any other) event; the audit log is the
 // record of session activity.
+//
+// Cost note: every successful validation performs one write transaction (the
+// last-seen touch committed with its audit event). High-traffic hosts should
+// budget for that, and may cache the (Authentication, Session) result for a
+// short, bounded interval per token — accepting that a revocation takes
+// effect at the end of the cache window rather than instantly.
 func (m *Manager) AuthenticateSession(ctx context.Context, raw string) (_ Authentication, _ Session, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.session.authenticate", started, err) }()

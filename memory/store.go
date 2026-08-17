@@ -1,3 +1,16 @@
+// Package memory provides an in-memory implementation of every Credbound
+// persistence port — Store plus the optional SessionStore, SignupStore,
+// DomainStore, SCIMStore and OAuthStore capabilities — including the
+// hash-chained audit log and its atomic commit semantics.
+//
+// It exists for tests, examples and prototypes: nothing is persisted beyond
+// the process, so it must never back a production deployment. Wire it into
+// credbound.Config.Store:
+//
+//	store := memory.New()
+//
+// The store is safe for concurrent use. Method semantics, sentinel errors
+// and pagination behavior are specified on the credbound port interfaces.
 package memory
 
 import (
@@ -16,6 +29,10 @@ import (
 	"github.com/deepteams/credbound"
 )
 
+// Store keeps all Credbound state in process-local maps guarded by one
+// RWMutex. Reads return defensive copies, and every mutation commits its
+// audit event atomically with the change, mirroring the SQL stores. The
+// contract for each method is documented on the credbound port interfaces.
 type Store struct {
 	mu                 sync.RWMutex
 	users              map[string]credbound.User
@@ -85,10 +102,14 @@ func newTx(audit credbound.AuditEvent) *Tx {
 	return tx
 }
 
+// Kind reports credbound.StoreMemory.
 func (t *Tx) Kind() credbound.StoreKind { return credbound.StoreMemory }
 
+// Audit returns the audit event being committed with this transaction.
 func (t *Tx) Audit() credbound.AuditEvent { return t.audit }
 
+// Active reports whether the hook callback owning this handle is still
+// running; it is false once the commit has completed.
 func (t *Tx) Active() bool { return t != nil && t.active.Load() }
 
 func (t *Tx) close() {
@@ -97,6 +118,9 @@ func (t *Tx) close() {
 	}
 }
 
+// TxFrom converts a generic Credbound transaction into the in-memory
+// capability. It returns false for another store's transaction or a handle
+// whose hook callback has already returned.
 func TxFrom(tx credbound.Tx) (*Tx, bool) {
 	handle, ok := tx.(*Tx)
 	if !ok || !handle.Active() {
@@ -105,6 +129,7 @@ func TxFrom(tx credbound.Tx) (*Tx, bool) {
 	return handle, true
 }
 
+// New returns an empty Store ready to be passed as credbound.Config.Store.
 func New() *Store {
 	return &Store{
 		users: make(map[string]credbound.User), emails: make(map[string]string),
@@ -143,6 +168,9 @@ func (s *Store) SetAuditFailure(err error) {
 	s.auditFailure = err
 }
 
+// Bootstrap atomically creates the first user with its primary email,
+// password, workspace, admin membership and root administrator; once the
+// instance is populated it reports credbound.ErrConflict.
 func (s *Store) Bootstrap(ctx context.Context, user credbound.User, email credbound.EmailAddress, password credbound.PasswordCredential, workspace credbound.Workspace, membership credbound.Membership, admin credbound.InstanceAdministrator, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -167,6 +195,9 @@ func (s *Store) Bootstrap(ctx context.Context, user credbound.User, email credbo
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// CreateUser inserts a user with a primary email, password credential and
+// initial membership in an existing workspace; a duplicate user ID or email
+// address reports credbound.ErrConflict.
 func (s *Store) CreateUser(ctx context.Context, user credbound.User, email credbound.EmailAddress, password credbound.PasswordCredential, membership credbound.Membership, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -198,6 +229,10 @@ func (s *Store) CreateUser(ctx context.Context, user credbound.User, email credb
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// CreateSignup atomically creates a self-service user, its primary email
+// (with the optional pending verification), password credential and fresh
+// workspace; an unverified address stays excluded from sign-in lookup until
+// VerifyEmail.
 func (s *Store) CreateSignup(ctx context.Context, user credbound.User, email credbound.EmailAddress, verification *credbound.EmailVerificationCredential, password credbound.PasswordCredential, workspace credbound.Workspace, membership credbound.Membership, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -234,6 +269,7 @@ func (s *Store) CreateSignup(ctx context.Context, user credbound.User, email cre
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// UserByEmail resolves a user by verified email address.
 func (s *Store) UserByEmail(ctx context.Context, email string) (credbound.User, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.User{}, err
@@ -247,6 +283,7 @@ func (s *Store) UserByEmail(ctx context.Context, email string) (credbound.User, 
 	return cloneUser(s.users[id]), nil
 }
 
+// UserByID returns the user with the given ID.
 func (s *Store) UserByID(ctx context.Context, id string) (credbound.User, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.User{}, err
@@ -260,6 +297,9 @@ func (s *Store) UserByID(ctx context.Context, id string) (credbound.User, error)
 	return cloneUser(user), nil
 }
 
+// SetUserDisabled enables or disables a user; disabling refuses to orphan
+// the last enabled root administrator or a workspace's last active admin
+// (credbound.ErrConflict) and revokes the user's tokens and sessions.
 func (s *Store) SetUserDisabled(ctx context.Context, userID string, disabled bool, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -313,6 +353,7 @@ func (s *Store) SetUserDisabled(ctx context.Context, userID string, disabled boo
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// Users streams all users, newest first, as one cursor page.
 func (s *Store) Users(ctx context.Context, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.User], error] {
 	return func(yield func(credbound.PageEvent[credbound.User], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
@@ -339,6 +380,7 @@ func (s *Store) Users(ctx context.Context, page credbound.PageRequest) iter.Seq2
 	}
 }
 
+// PasswordByUserID returns the user's stored password credential.
 func (s *Store) PasswordByUserID(ctx context.Context, userID string) (credbound.PasswordCredential, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.PasswordCredential{}, err
@@ -352,6 +394,7 @@ func (s *Store) PasswordByUserID(ctx context.Context, userID string) (credbound.
 	return password, nil
 }
 
+// ReplacePassword swaps the user's password credential.
 func (s *Store) ReplacePassword(ctx context.Context, password credbound.PasswordCredential, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -369,6 +412,8 @@ func (s *Store) ReplacePassword(ctx context.Context, password credbound.Password
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// RecordAuthentication marks a successful login, updating the user's last-
+// seen time and clearing any login throttle.
 func (s *Store) RecordAuthentication(ctx context.Context, userID string, seenAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -387,6 +432,7 @@ func (s *Store) RecordAuthentication(ctx context.Context, userID string, seenAt 
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// LoginThrottleByUserID returns the user's current login throttle state.
 func (s *Store) LoginThrottleByUserID(ctx context.Context, userID string) (credbound.LoginThrottle, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.LoginThrottle{}, err
@@ -400,6 +446,9 @@ func (s *Store) LoginThrottleByUserID(ctx context.Context, userID string) (credb
 	return cloneThrottle(throttle), nil
 }
 
+// RecordLoginFailure counts a failed login (restarting the window after an
+// expired lockout) and applies lockedUntil once the failure threshold is
+// reached, returning the updated throttle.
 func (s *Store) RecordLoginFailure(ctx context.Context, userID string, at time.Time, threshold int64, lockedUntil time.Time, commit credbound.Commit) (credbound.LoginThrottle, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.LoginThrottle{}, err
@@ -448,6 +497,7 @@ func cloneEmailAuthentication(value credbound.EmailAuthenticationCredential) cre
 	return value
 }
 
+// CreatePasswordReset stores a single-use password reset credential.
 func (s *Store) CreatePasswordReset(ctx context.Context, credential credbound.PasswordResetCredential, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -468,6 +518,7 @@ func (s *Store) CreatePasswordReset(ctx context.Context, credential credbound.Pa
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// PasswordResetByID returns the password reset credential with the given ID.
 func (s *Store) PasswordResetByID(ctx context.Context, resetID string) (credbound.PasswordResetCredential, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.PasswordResetCredential{}, err
@@ -481,6 +532,9 @@ func (s *Store) PasswordResetByID(ctx context.Context, resetID string) (credboun
 	return clonePasswordReset(credential), nil
 }
 
+// CompletePasswordReset consumes the reset and installs the new password,
+// revoking the user's other pending resets, tokens, sessions and throttle in
+// the same commit; a reused reset reports credbound.ErrConflict.
 func (s *Store) CompletePasswordReset(ctx context.Context, resetID string, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -515,6 +569,8 @@ func (s *Store) CompletePasswordReset(ctx context.Context, resetID string, passw
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// CreateEmailAuthentication stores a single-use magic-link or email OTP
+// credential.
 func (s *Store) CreateEmailAuthentication(ctx context.Context, credential credbound.EmailAuthenticationCredential, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -535,6 +591,8 @@ func (s *Store) CreateEmailAuthentication(ctx context.Context, credential credbo
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// EmailAuthenticationByID returns the email authentication credential with
+// the given token ID.
 func (s *Store) EmailAuthenticationByID(ctx context.Context, tokenID string) (credbound.EmailAuthenticationCredential, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.EmailAuthenticationCredential{}, err
@@ -548,6 +606,9 @@ func (s *Store) EmailAuthenticationByID(ctx context.Context, tokenID string) (cr
 	return cloneEmailAuthentication(credential), nil
 }
 
+// ConsumeEmailAuthentication marks the user's credential used, updating
+// last-seen and clearing the login throttle; reuse reports
+// credbound.ErrConflict.
 func (s *Store) ConsumeEmailAuthentication(ctx context.Context, tokenID, userID string, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -572,6 +633,8 @@ func (s *Store) ConsumeEmailAuthentication(ctx context.Context, tokenID, userID 
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// SaveEmail adds an additional email address with its pending verification
+// credential; a duplicate address reports credbound.ErrConflict.
 func (s *Store) SaveEmail(ctx context.Context, email credbound.EmailAddress, verification credbound.EmailVerificationCredential, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -597,6 +660,8 @@ func (s *Store) SaveEmail(ctx context.Context, email credbound.EmailAddress, ver
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// EmailVerificationByID returns the email address and its pending
+// verification credential.
 func (s *Store) EmailVerificationByID(ctx context.Context, emailID string) (credbound.EmailAddress, credbound.EmailVerificationCredential, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.EmailAddress{}, credbound.EmailVerificationCredential{}, err
@@ -611,6 +676,9 @@ func (s *Store) EmailVerificationByID(ctx context.Context, emailID string) (cred
 	return cloneEmail(email), cloneEmailVerification(verification), nil
 }
 
+// VerifyEmail marks the address verified, makes it usable for sign-in and
+// discards the verification credential; an already-verified address reports
+// credbound.ErrConflict.
 func (s *Store) VerifyEmail(ctx context.Context, emailID string, verifiedAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -636,6 +704,8 @@ func (s *Store) VerifyEmail(ctx context.Context, emailID string, verifiedAt time
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// SetPrimaryEmail promotes a verified address to primary and demotes the
+// previous one; an unverified target reports credbound.ErrConflict.
 func (s *Store) SetPrimaryEmail(ctx context.Context, userID, emailID string, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -670,6 +740,8 @@ func (s *Store) SetPrimaryEmail(ctx context.Context, userID, emailID string, com
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// RemoveEmail deletes a non-primary address, refusing to remove the user's
+// last verified one (credbound.ErrConflict).
 func (s *Store) RemoveEmail(ctx context.Context, userID, emailID string, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -705,6 +777,8 @@ func (s *Store) RemoveEmail(ctx context.Context, userID, emailID string, commit 
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// Emails streams the user's email addresses, newest first, as one cursor
+// page.
 func (s *Store) Emails(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.EmailAddress], error] {
 	return func(yield func(credbound.PageEvent[credbound.EmailAddress], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
@@ -744,6 +818,7 @@ func (s *Store) Emails(ctx context.Context, userID string, page credbound.PageRe
 	}
 }
 
+// TOTPByUserID returns the user's TOTP factor.
 func (s *Store) TOTPByUserID(ctx context.Context, userID string) (credbound.TOTPFactor, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.TOTPFactor{}, err
@@ -757,6 +832,9 @@ func (s *Store) TOTPByUserID(ctx context.Context, userID string) (credbound.TOTP
 	return cloneTOTP(factor), nil
 }
 
+// SaveTOTPEnrollment stores a pending TOTP factor, replacing any prior
+// pending enrollment; an already-active factor reports
+// credbound.ErrConflict.
 func (s *Store) SaveTOTPEnrollment(ctx context.Context, factor credbound.TOTPFactor, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -778,6 +856,8 @@ func (s *Store) SaveTOTPEnrollment(ctx context.Context, factor credbound.TOTPFac
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// ActivateTOTP activates the pending factor and stores its recovery codes in
+// the same commit.
 func (s *Store) ActivateTOTP(ctx context.Context, factor credbound.TOTPFactor, recovery []credbound.RecoveryCode, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -797,6 +877,8 @@ func (s *Store) ActivateTOTP(ctx context.Context, factor credbound.TOTPFactor, r
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// UseTOTP records a successful code for the given time step, reporting false
+// without error when the step was already consumed (replay).
 func (s *Store) UseTOTP(ctx context.Context, userID string, step int64, commit credbound.Commit) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
@@ -825,6 +907,8 @@ func (s *Store) UseTOTP(ctx context.Context, userID string, step int64, commit c
 	return true, nil
 }
 
+// ConsumeRecoveryCode marks the matching unused recovery code used,
+// reporting false when no unused code matches the digest.
 func (s *Store) ConsumeRecoveryCode(ctx context.Context, userID string, digest []byte, usedAt time.Time, commit credbound.Commit) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
@@ -851,6 +935,8 @@ func (s *Store) ConsumeRecoveryCode(ctx context.Context, userID string, digest [
 	return false, nil
 }
 
+// CountUnusedRecoveryCodes reports how many of the user's recovery codes
+// remain unused.
 func (s *Store) CountUnusedRecoveryCodes(ctx context.Context, userID string) (int64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
@@ -866,6 +952,7 @@ func (s *Store) CountUnusedRecoveryCodes(ctx context.Context, userID string) (in
 	return count, nil
 }
 
+// DisableTOTP removes the user's TOTP factor and recovery codes.
 func (s *Store) DisableTOTP(ctx context.Context, userID string, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -884,6 +971,7 @@ func (s *Store) DisableTOTP(ctx context.Context, userID string, commit credbound
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// Passkeys streams the user's passkeys in creation order.
 func (s *Store) Passkeys(ctx context.Context, userID string) iter.Seq2[credbound.Passkey, error] {
 	return func(yield func(credbound.Passkey, error) bool) {
 		if err := ctx.Err(); err != nil {
@@ -914,6 +1002,8 @@ func (s *Store) Passkeys(ctx context.Context, userID string) iter.Seq2[credbound
 	}
 }
 
+// SavePasskey stores a new passkey; a credential ID already registered to
+// any user reports credbound.ErrConflict.
 func (s *Store) SavePasskey(ctx context.Context, passkey credbound.Passkey, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -941,6 +1031,8 @@ func (s *Store) SavePasskey(ctx context.Context, passkey credbound.Passkey, comm
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// TouchPasskey persists the credential's updated JSON (sign counter) and
+// last-used time after a successful assertion.
 func (s *Store) TouchPasskey(ctx context.Context, userID string, credentialID, credentialJSON []byte, usedAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -963,6 +1055,7 @@ func (s *Store) TouchPasskey(ctx context.Context, userID string, credentialID, c
 	return credbound.ErrNotFound
 }
 
+// DeletePasskey removes one of the user's passkeys.
 func (s *Store) DeletePasskey(ctx context.Context, userID, passkeyID string, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -980,6 +1073,8 @@ func (s *Store) DeletePasskey(ctx context.Context, userID, passkeyID string, com
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// CreatePAT stores a personal access token record; a duplicate ID or prefix
+// reports credbound.ErrConflict.
 func (s *Store) CreatePAT(ctx context.Context, pat credbound.PAT, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1004,6 +1099,7 @@ func (s *Store) CreatePAT(ctx context.Context, pat credbound.PAT, commit credbou
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// PATByPrefix returns the token record addressed by its lookup prefix.
 func (s *Store) PATByPrefix(ctx context.Context, prefix string) (credbound.PAT, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.PAT{}, err
@@ -1017,6 +1113,8 @@ func (s *Store) PATByPrefix(ctx context.Context, prefix string) (credbound.PAT, 
 	return clonePAT(s.pats[id]), nil
 }
 
+// TouchPAT records a token use, updating the token's and user's last-seen
+// times.
 func (s *Store) TouchPAT(ctx context.Context, id string, usedAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1037,6 +1135,7 @@ func (s *Store) TouchPAT(ctx context.Context, id string, usedAt time.Time, commi
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// RevokePAT marks the user's token revoked.
 func (s *Store) RevokePAT(ctx context.Context, userID, id string, revokedAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1056,6 +1155,8 @@ func (s *Store) RevokePAT(ctx context.Context, userID, id string, revokedAt time
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// RevokeUserCredentials revokes all of the user's tokens (PATs and OAuth)
+// and sessions in one commit.
 func (s *Store) RevokeUserCredentials(ctx context.Context, userID string, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1074,6 +1175,8 @@ func (s *Store) RevokeUserCredentials(ctx context.Context, userID string, at tim
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// PATs streams the user's tokens, newest first, as one cursor page with
+// digests omitted.
 func (s *Store) PATs(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.PAT], error] {
 	return func(yield func(credbound.PageEvent[credbound.PAT], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
@@ -1118,6 +1221,8 @@ func (s *Store) PATs(ctx context.Context, userID string, page credbound.PageRequ
 	}
 }
 
+// CreateSession stores a server-side session; a duplicate ID reports
+// credbound.ErrConflict.
 func (s *Store) CreateSession(ctx context.Context, session credbound.Session, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1138,6 +1243,7 @@ func (s *Store) CreateSession(ctx context.Context, session credbound.Session, co
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// SessionByID returns the session with the given ID.
 func (s *Store) SessionByID(ctx context.Context, id string) (credbound.Session, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.Session{}, err
@@ -1151,6 +1257,7 @@ func (s *Store) SessionByID(ctx context.Context, id string) (credbound.Session, 
 	return cloneSession(session), nil
 }
 
+// TouchSession updates the session's and user's last-seen times.
 func (s *Store) TouchSession(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1171,6 +1278,8 @@ func (s *Store) TouchSession(ctx context.Context, id string, at time.Time, commi
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// RevokeSession marks the session revoked; an already-revoked session is
+// left unchanged.
 func (s *Store) RevokeSession(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1192,6 +1301,7 @@ func (s *Store) RevokeSession(ctx context.Context, id string, at time.Time, comm
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// RevokeUserSessions revokes every session of the user.
 func (s *Store) RevokeUserSessions(ctx context.Context, userID string, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1209,6 +1319,8 @@ func (s *Store) RevokeUserSessions(ctx context.Context, userID string, at time.T
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// Sessions streams the user's sessions, newest first, as one cursor page
+// with digests omitted.
 func (s *Store) Sessions(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Session], error] {
 	return func(yield func(credbound.PageEvent[credbound.Session], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
@@ -1253,6 +1365,8 @@ func (s *Store) Sessions(ctx context.Context, userID string, page credbound.Page
 	}
 }
 
+// CreateWorkspaceDomain stores an unconfirmed domain claim; a domain already
+// claimed by any workspace reports credbound.ErrConflict.
 func (s *Store) CreateWorkspaceDomain(ctx context.Context, domain credbound.WorkspaceDomain, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1277,6 +1391,7 @@ func (s *Store) CreateWorkspaceDomain(ctx context.Context, domain credbound.Work
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// WorkspaceDomainByID returns the domain record with the given ID.
 func (s *Store) WorkspaceDomainByID(ctx context.Context, id string) (credbound.WorkspaceDomain, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.WorkspaceDomain{}, err
@@ -1290,6 +1405,8 @@ func (s *Store) WorkspaceDomainByID(ctx context.Context, id string) (credbound.W
 	return cloneWorkspaceDomain(domain), nil
 }
 
+// ConfirmedWorkspaceDomainByName resolves a confirmed domain by name;
+// unknown or unconfirmed domains report credbound.ErrNotFound.
 func (s *Store) ConfirmedWorkspaceDomainByName(ctx context.Context, name string) (credbound.WorkspaceDomain, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.WorkspaceDomain{}, err
@@ -1307,6 +1424,8 @@ func (s *Store) ConfirmedWorkspaceDomainByName(ctx context.Context, name string)
 	return cloneWorkspaceDomain(domain), nil
 }
 
+// ConfirmWorkspaceDomain marks the domain verified; confirming twice reports
+// credbound.ErrConflict.
 func (s *Store) ConfirmWorkspaceDomain(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1330,6 +1449,9 @@ func (s *Store) ConfirmWorkspaceDomain(ctx context.Context, id string, at time.T
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// UpdateWorkspaceDomainPolicy replaces the auto-join and SSO-enforcement
+// policy of a confirmed domain; an unconfirmed domain reports
+// credbound.ErrConflict.
 func (s *Store) UpdateWorkspaceDomainPolicy(ctx context.Context, id string, policy credbound.WorkspaceDomainPolicyInput, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1354,6 +1476,7 @@ func (s *Store) UpdateWorkspaceDomainPolicy(ctx context.Context, id string, poli
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// DeleteWorkspaceDomain removes the domain claim.
 func (s *Store) DeleteWorkspaceDomain(ctx context.Context, id string, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1373,6 +1496,8 @@ func (s *Store) DeleteWorkspaceDomain(ctx context.Context, id string, commit cre
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// WorkspaceDomains streams the workspace's domains, newest first, as one
+// cursor page.
 func (s *Store) WorkspaceDomains(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.WorkspaceDomain], error] {
 	return func(yield func(credbound.PageEvent[credbound.WorkspaceDomain], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
@@ -1416,6 +1541,9 @@ func (s *Store) WorkspaceDomains(ctx context.Context, workspaceID string, page c
 	}
 }
 
+// JITProvisionSSOUser atomically creates a user with a verified email,
+// workspace membership and linked SSO identity for domain-based just-in-time
+// provisioning.
 func (s *Store) JITProvisionSSOUser(ctx context.Context, user credbound.User, email credbound.EmailAddress, membership credbound.Membership, identity credbound.SSOIdentity, _ time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1455,6 +1583,7 @@ func (s *Store) JITProvisionSSOUser(ctx context.Context, user credbound.User, em
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// CreateWorkspace inserts a workspace together with its owning membership.
 func (s *Store) CreateWorkspace(ctx context.Context, workspace credbound.Workspace, owner credbound.Membership, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1476,6 +1605,7 @@ func (s *Store) CreateWorkspace(ctx context.Context, workspace credbound.Workspa
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// WorkspaceByID returns the workspace with the given ID.
 func (s *Store) WorkspaceByID(ctx context.Context, workspaceID string) (credbound.Workspace, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.Workspace{}, err
@@ -1489,6 +1619,7 @@ func (s *Store) WorkspaceByID(ctx context.Context, workspaceID string) (credboun
 	return cloneWorkspace(workspace), nil
 }
 
+// UpdateWorkspace persists the workspace's mutable attributes.
 func (s *Store) UpdateWorkspace(ctx context.Context, workspace credbound.Workspace, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1508,6 +1639,8 @@ func (s *Store) UpdateWorkspace(ctx context.Context, workspace credbound.Workspa
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// SetWorkspaceDisabled enables or disables the workspace; disabling revokes
+// the members' workspace-scoped tokens.
 func (s *Store) SetWorkspaceDisabled(ctx context.Context, workspaceID string, disabled bool, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1536,10 +1669,13 @@ func (s *Store) SetWorkspaceDisabled(ctx context.Context, workspaceID string, di
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// Workspaces streams all workspaces, newest first, as one cursor page.
 func (s *Store) Workspaces(ctx context.Context, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Workspace], error] {
 	return s.workspacesPage(ctx, "", page)
 }
 
+// UserWorkspaces streams the workspaces the user belongs to, newest first,
+// as one cursor page.
 func (s *Store) UserWorkspaces(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Workspace], error] {
 	return s.workspacesPage(ctx, userID, page)
 }
@@ -1575,6 +1711,7 @@ func (s *Store) workspacesPage(ctx context.Context, userID string, page credboun
 	}
 }
 
+// Membership returns the user's membership in the workspace.
 func (s *Store) Membership(ctx context.Context, workspaceID, userID string) (credbound.Membership, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.Membership{}, err
@@ -1595,6 +1732,8 @@ func cloneInvitation(value credbound.WorkspaceInvitation) credbound.WorkspaceInv
 	return value
 }
 
+// CreateWorkspaceInvitation stores an invitation; a pending invitation for
+// the same address in the workspace reports credbound.ErrConflict.
 func (s *Store) CreateWorkspaceInvitation(ctx context.Context, invitation credbound.WorkspaceInvitation, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1620,6 +1759,7 @@ func (s *Store) CreateWorkspaceInvitation(ctx context.Context, invitation credbo
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// WorkspaceInvitationByID returns the invitation with the given ID.
 func (s *Store) WorkspaceInvitationByID(ctx context.Context, invitationID string) (credbound.WorkspaceInvitation, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.WorkspaceInvitation{}, err
@@ -1633,6 +1773,8 @@ func (s *Store) WorkspaceInvitationByID(ctx context.Context, invitationID string
 	return cloneInvitation(invitation), nil
 }
 
+// PendingWorkspaceInvitation returns the workspace's unaccepted, unrevoked
+// invitation for the email address.
 func (s *Store) PendingWorkspaceInvitation(ctx context.Context, workspaceID, email string) (credbound.WorkspaceInvitation, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.WorkspaceInvitation{}, err
@@ -1647,6 +1789,9 @@ func (s *Store) PendingWorkspaceInvitation(ctx context.Context, workspaceID, ema
 	return credbound.WorkspaceInvitation{}, credbound.ErrNotFound
 }
 
+// AcceptWorkspaceInvitation marks the invitation accepted by the user and
+// installs the resulting membership in the same commit; an accepted or
+// revoked invitation reports credbound.ErrConflict.
 func (s *Store) AcceptWorkspaceInvitation(ctx context.Context, invitationID, userID string, at time.Time, membership credbound.Membership, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1677,6 +1822,8 @@ func (s *Store) AcceptWorkspaceInvitation(ctx context.Context, invitationID, use
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// RegisterInvitedUser atomically creates the invited user with email,
+// password and membership while accepting the invitation.
 func (s *Store) RegisterInvitedUser(ctx context.Context, invitationID string, user credbound.User, email credbound.EmailAddress, password credbound.PasswordCredential, membership credbound.Membership, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1718,6 +1865,8 @@ func (s *Store) RegisterInvitedUser(ctx context.Context, invitationID string, us
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// RevokeWorkspaceInvitation marks the workspace's invitation revoked; an
+// accepted or already-revoked invitation reports credbound.ErrConflict.
 func (s *Store) RevokeWorkspaceInvitation(ctx context.Context, workspaceID, invitationID string, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1740,6 +1889,8 @@ func (s *Store) RevokeWorkspaceInvitation(ctx context.Context, workspaceID, invi
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// WorkspaceInvitations streams the workspace's invitations, newest first, as
+// one cursor page.
 func (s *Store) WorkspaceInvitations(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.WorkspaceInvitation], error] {
 	return func(yield func(credbound.PageEvent[credbound.WorkspaceInvitation], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
@@ -1780,6 +1931,9 @@ func (s *Store) WorkspaceInvitations(ctx context.Context, workspaceID string, pa
 	}
 }
 
+// UpsertMembership inserts or updates a membership, refusing a change that
+// would leave the workspace without an active admin (credbound.ErrConflict);
+// deactivation revokes the member's workspace-scoped tokens.
 func (s *Store) UpsertMembership(ctx context.Context, membership credbound.Membership, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1815,6 +1969,9 @@ func (s *Store) UpsertMembership(ctx context.Context, membership credbound.Membe
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// RemoveMembership deletes the membership, refusing to remove the
+// workspace's last active admin (credbound.ErrConflict) and revoking the
+// member's workspace-scoped tokens.
 func (s *Store) RemoveMembership(ctx context.Context, workspaceID, userID string, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1837,6 +1994,8 @@ func (s *Store) RemoveMembership(ctx context.Context, workspaceID, userID string
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// Memberships streams the workspace's memberships, newest first, as one
+// cursor page.
 func (s *Store) Memberships(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Membership], error] {
 	return func(yield func(credbound.PageEvent[credbound.Membership], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
@@ -1863,6 +2022,7 @@ func (s *Store) Memberships(ctx context.Context, workspaceID string, page credbo
 	}
 }
 
+// InstanceAdministrator returns the user's instance-administration role.
 func (s *Store) InstanceAdministrator(ctx context.Context, userID string) (credbound.InstanceAdministrator, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.InstanceAdministrator{}, err
@@ -1876,6 +2036,8 @@ func (s *Store) InstanceAdministrator(ctx context.Context, userID string) (credb
 	return admin, nil
 }
 
+// SetInstanceRole grants or changes a user's instance role, refusing to
+// demote the last root administrator (credbound.ErrConflict).
 func (s *Store) SetInstanceRole(ctx context.Context, admin credbound.InstanceAdministrator, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1907,6 +2069,8 @@ func (s *Store) SetInstanceRole(ctx context.Context, admin credbound.InstanceAdm
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// RemoveInstanceRole revokes the user's instance role, refusing to remove
+// the last root administrator (credbound.ErrConflict).
 func (s *Store) RemoveInstanceRole(ctx context.Context, userID string, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1936,6 +2100,8 @@ func (s *Store) RemoveInstanceRole(ctx context.Context, userID string, commit cr
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// SSOIdentity resolves a linked identity by provider configuration, issuer
+// and subject.
 func (s *Store) SSOIdentity(ctx context.Context, providerConfigurationID, issuer, subject string) (credbound.SSOIdentity, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.SSOIdentity{}, err
@@ -1949,6 +2115,8 @@ func (s *Store) SSOIdentity(ctx context.Context, providerConfigurationID, issuer
 	return cloneSSOIdentity(s.ssoIdentities[id]), nil
 }
 
+// LinkSSO stores a new SSO identity link; an identity already linked to any
+// user reports credbound.ErrConflict.
 func (s *Store) LinkSSO(ctx context.Context, identity credbound.SSOIdentity, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1977,6 +2145,8 @@ func (s *Store) LinkSSO(ctx context.Context, identity credbound.SSOIdentity, com
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// TouchSSO updates the identity's last-used time and the user's last-seen
+// time after a successful SSO login.
 func (s *Store) TouchSSO(ctx context.Context, userID, identityID string, usedAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1997,6 +2167,7 @@ func (s *Store) TouchSSO(ctx context.Context, userID, identityID string, usedAt 
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// UnlinkSSO removes the user's SSO identity link.
 func (s *Store) UnlinkSSO(ctx context.Context, userID, identityID string, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -2016,6 +2187,8 @@ func (s *Store) UnlinkSSO(ctx context.Context, userID, identityID string, commit
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// SSOIdentities streams the user's SSO identity links, newest first, as one
+// cursor page.
 func (s *Store) SSOIdentities(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.SSOIdentity], error] {
 	return func(yield func(credbound.PageEvent[credbound.SSOIdentity], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
@@ -2059,6 +2232,8 @@ func (s *Store) SSOIdentities(ctx context.Context, userID string, page credbound
 	}
 }
 
+// AppendAudit commits a standalone audit event (and any transactional hook)
+// without another mutation.
 func (s *Store) AppendAudit(ctx context.Context, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -2072,10 +2247,14 @@ func (s *Store) AppendAudit(ctx context.Context, commit credbound.Commit) error 
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// AuditEvents streams the workspace's audit events, newest first, as one
+// cursor page.
 func (s *Store) AuditEvents(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.AuditEvent], error] {
 	return s.auditEvents(ctx, page, func(event credbound.AuditEvent) bool { return event.WorkspaceID == workspaceID })
 }
 
+// InstanceAuditEvents streams audit events across the whole instance, newest
+// first, as one cursor page.
 func (s *Store) InstanceAuditEvents(ctx context.Context, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.AuditEvent], error] {
 	return s.auditEvents(ctx, page, func(credbound.AuditEvent) bool { return true })
 }
@@ -2428,6 +2607,8 @@ func (s *Store) commitAudit(event credbound.AuditEvent) {
 	s.auditIDs[event.ID] = struct{}{}
 }
 
+// AuditChainHead returns the sequence number and hash of the latest chained
+// audit event.
 func (s *Store) AuditChainHead(ctx context.Context) (int64, []byte, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, nil, err
@@ -2437,6 +2618,8 @@ func (s *Store) AuditChainHead(ctx context.Context) (int64, []byte, error) {
 	return s.auditSequence, slices.Clone(s.auditHead), nil
 }
 
+// ChainedAuditEvents streams every chained audit event in sequence order for
+// verification with credbound.VerifyAuditChain.
 func (s *Store) ChainedAuditEvents(ctx context.Context) iter.Seq2[credbound.AuditEvent, error] {
 	return func(yield func(credbound.AuditEvent, error) bool) {
 		if err := ctx.Err(); err != nil {

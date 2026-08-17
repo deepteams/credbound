@@ -20,12 +20,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/deepteams/credbound"
 	"github.com/deepteams/credbound/migrations"
@@ -57,11 +54,10 @@ func main() {
 	}
 	defer database.Close()
 
-	// The embedded migrations must be applied before the store is used. Their
-	// filenames are goose timestamps, so lexical order is application order; a
-	// host already using goose points it at migrations.SQLite() instead of
-	// reimplementing this loop.
-	if err := applyMigrations(database); err != nil {
+	// The embedded migrations must be applied before the store is used.
+	// ApplySQLite is idempotent across restarts; a host already using goose
+	// points it at migrations.SQLite() instead.
+	if err := migrations.ApplySQLite(context.Background(), database); err != nil {
 		log.Fatalf("apply migrations: %v", err)
 	}
 
@@ -184,43 +180,6 @@ func secretFromEnv(name string, size int) []byte {
 	}
 	log.Printf("warning: %s is unset; using a random development value, e.g. %s=%s", name, name, hex.EncodeToString(value))
 	return value
-}
-
-// applyMigrations executes the Up section of every embedded SQLite migration
-// in filename order, remembering applied files in a bookkeeping table so
-// restarts are idempotent. Production hosts typically hand migrations.SQLite()
-// to goose, whose version table serves the same purpose.
-func applyMigrations(database *sql.DB) error {
-	if _, err := database.Exec(`CREATE TABLE IF NOT EXISTS example_migrations (filename TEXT PRIMARY KEY)`); err != nil {
-		return err
-	}
-	migrationFS := migrations.SQLite()
-	entries, err := fs.ReadDir(migrationFS, ".") // sorted by filename
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		var applied int
-		if err := database.QueryRow(`SELECT COUNT(*) FROM example_migrations WHERE filename = ?`, entry.Name()).Scan(&applied); err != nil {
-			return err
-		}
-		if applied > 0 {
-			continue
-		}
-		migration, err := fs.ReadFile(migrationFS, entry.Name())
-		if err != nil {
-			return err
-		}
-		up, _, _ := strings.Cut(string(migration), "-- +goose Down")
-		if _, err := database.Exec(up); err != nil {
-			return fmt.Errorf("%s: %w", entry.Name(), err)
-		}
-		if _, err := database.Exec(`INSERT INTO example_migrations (filename) VALUES (?)`, entry.Name()); err != nil {
-			return err
-		}
-		log.Printf("applied migration %s", entry.Name())
-	}
-	return nil
 }
 
 // bootstrap creates the first user and workspace once and tolerates every

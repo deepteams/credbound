@@ -15,18 +15,40 @@ import (
 
 const maxProtocolBody = 64 << 10
 
+// HandlerConfig wires a Handler to one issuer and to the host's session and
+// consent machinery.
 type HandlerConfig struct {
-	Issuer         string
-	Resource       string
-	Authenticate   func(*http.Request) (credbound.Authentication, error)
+	// Issuer is the authorization server's canonical https:// URL, without
+	// trailing slash, query, fragment or userinfo. Required; endpoint
+	// paths are derived from it.
+	Issuer string
+	// Resource optionally enables the protected-resource metadata
+	// endpoint for this https:// resource URL.
+	Resource string
+	// Authenticate resolves the host's own browser session into the
+	// server-side Authentication acting on /authorize. It must come from
+	// the host session — never from client-supplied fields. Nil disables
+	// the authorization endpoint.
+	Authenticate func(*http.Request) (credbound.Authentication, error)
+	// PresentConsent renders the consent (or auto-approval) UI for a
+	// validated authorization request; the host later completes it with
+	// Manager.ApproveOAuthAuthorization. Nil disables the authorization
+	// endpoint.
 	PresentConsent func(http.ResponseWriter, *http.Request, credbound.OAuthConsent)
 }
 
+// Handler serves the OAuth 2.1/OIDC protocol endpoints for one issuer:
+// discovery, protected-resource metadata, JWKS, authorize, token, revoke,
+// dynamic client registration and userinfo. Mount it on the host mux; TLS,
+// sessions and rate limiting remain the host's responsibility.
 type Handler struct {
 	manager *credbound.Manager
 	config  HandlerConfig
 }
 
+// New validates config and returns a Handler for the given Manager. The
+// manager is required, Issuer must be a canonical https:// URL, and
+// Resource, when set, must be one too.
 func New(manager *credbound.Manager, config HandlerConfig) (*Handler, error) {
 	if manager == nil || !validHandlerURL(config.Issuer, true) || config.Resource != "" && !validHandlerURL(config.Resource, false) {
 		return nil, fmt.Errorf("%w: OAuth manager and issuer are required", credbound.ErrInvalidInput)
@@ -45,6 +67,8 @@ func validHandlerURL(raw string, issuer bool) bool {
 	return !issuer || !strings.HasSuffix(raw, "/")
 }
 
+// ServeHTTP routes the well-known discovery documents and the protocol
+// endpoints beneath the issuer path; every other path answers 404.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	issuerPath := endpointPath(h.config.Issuer)
@@ -354,10 +378,17 @@ func Protect(manager *credbound.Manager, resource, requiredScope, metadataURL st
 
 type authenticationKey struct{}
 
+// WithAuthentication returns a context carrying a verified OAuth
+// authentication, as installed by Protect for its wrapped handler. Only
+// attach values produced by Credbound's token authentication — downstream
+// authorization decisions trust them.
 func WithAuthentication(ctx context.Context, authentication credbound.OAuthAuthentication) context.Context {
 	return context.WithValue(ctx, authenticationKey{}, authentication)
 }
 
+// AuthenticationFromContext extracts the verified OAuth authentication that
+// Protect attached to the request, reporting false when the request did not
+// pass through Protect.
 func AuthenticationFromContext(r *http.Request) (credbound.OAuthAuthentication, bool) {
 	value, ok := r.Context().Value(authenticationKey{}).(credbound.OAuthAuthentication)
 	return value, ok

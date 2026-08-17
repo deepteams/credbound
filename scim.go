@@ -426,6 +426,12 @@ func (m *Manager) ReplaceSCIMUser(ctx context.Context, principal SCIMAuthenticat
 // global account and the SCIM link for auditing and restoration, atomically
 // with the transactional hook and audit. Deprovisioning an unknown or
 // already deprovisioned user is a no-op.
+//
+// Server-side sessions are global, not workspace-scoped, so they survive a
+// SCIM deprovisioning: the suspended membership already denies every
+// tenant-scoped authorization on the next check. A host that wants IdP
+// offboarding to also end sessions everywhere calls DisableUser or
+// RevokeUserSessions from its own directory-event handling.
 func (m *Manager) DeprovisionSCIMUser(ctx context.Context, principal SCIMAuthentication, id string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.user.deprovision", started, err) }()

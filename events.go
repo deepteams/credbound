@@ -373,6 +373,11 @@ type OAuthChange struct {
 	Scopes       []string
 }
 
+// Listener event payloads mirror the committed fact they announce: the
+// embedded EventMeta identifies the event, the remaining fields are a
+// scrubbed snapshot of the affected records. Like transaction payloads, they
+// never carry passwords, hashes, raw tokens, secrets, or digests; fields that
+// are not otherwise documented are exactly the persisted values.
 type BootstrapCompletedEvent struct {
 	EventMeta
 	User      User

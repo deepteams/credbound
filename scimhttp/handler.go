@@ -1,6 +1,16 @@
-// Package scimhttp exposes Credbound's optional SCIM 2.0 adapter. It does not
-// start a server; hosts normally mount Handler below /scim/v2 with
-// http.StripPrefix.
+// Package scimhttp exposes Credbound's optional SCIM 2.0 provisioning
+// adapter (RFC 7643/7644): Users, Groups, /.search, PATCH, discovery
+// endpoints and SCIM-shaped errors, all delegated to a Manager whose store
+// implements credbound.SCIMStore.
+//
+// It does not start a server; hosts normally mount Handler below /scim/v2
+// with http.StripPrefix:
+//
+//	scim, err := scimhttp.New(manager)
+//	mux.Handle("/scim/v2/", http.StripPrefix("/scim/v2", scim))
+//
+// Every request must carry a SCIM bearer credential issued by Credbound;
+// TLS and request throttling remain the host's responsibility.
 package scimhttp
 
 import (
@@ -29,10 +39,15 @@ const (
 	defaultPageLimit = 50
 )
 
+// Handler serves the SCIM 2.0 endpoints for identity-provider directory
+// sync. Authentication, workspace scoping and audit are enforced by the
+// Manager per request; the handler only speaks the protocol.
 type Handler struct {
 	manager *credbound.Manager
 }
 
+// New returns a Handler backed by manager, which is required and must have
+// been built over a store with SCIM capability for requests to succeed.
 func New(manager *credbound.Manager) (*Handler, error) {
 	if manager == nil {
 		return nil, fmt.Errorf("%w: SCIM manager is required", credbound.ErrInvalidInput)
@@ -40,6 +55,9 @@ func New(manager *credbound.Manager) (*Handler, error) {
 	return &Handler{manager: manager}, nil
 }
 
+// ServeHTTP authenticates the SCIM bearer token, then routes the request to
+// the discovery, Users or Groups endpoints relative to the mount point.
+// Failures are answered as application/scim+json error documents.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/scim+json")
 	principal, err := h.authenticate(r)

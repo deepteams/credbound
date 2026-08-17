@@ -14,6 +14,8 @@ type MemoryReplayStore struct {
 	now     func() time.Time
 }
 
+// NewMemoryReplayStore returns an empty replay store. A nil clock defaults
+// to time.Now; override it only in tests.
 func NewMemoryReplayStore(clock func() time.Time) *MemoryReplayStore {
 	if clock == nil {
 		clock = time.Now
@@ -21,6 +23,9 @@ func NewMemoryReplayStore(clock func() time.Time) *MemoryReplayStore {
 	return &MemoryReplayStore{entries: make(map[string]time.Time), now: func() time.Time { return clock().UTC() }}
 }
 
+// Use atomically records the (clientID, jwtID) pair until expiresAt,
+// pruning expired entries as a side effect. It reports false when the pair
+// was already recorded, i.e. the assertion is a replay.
 func (s *MemoryReplayStore) Use(ctx context.Context, clientID, jwtID string, expiresAt time.Time) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err

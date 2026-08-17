@@ -1,3 +1,14 @@
+// Package password implements the credbound.PasswordHasher port with
+// Argon2id (RFC 9106). Hashes are self-describing PHC strings
+// ($argon2id$v=19$...), so parameters can be raised later and existing
+// hashes transparently renew on the next successful login.
+//
+// Wire it into credbound.Config.Passwords:
+//
+//	hasher, err := password.New(password.DefaultParams())
+//
+// New rejects parameters below the OWASP-recommended floor; there is no
+// weak fallback.
 package password
 
 import (
@@ -13,23 +24,41 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
+// Params are the Argon2id cost and encoding parameters used for new hashes.
+// New validates every bound; use DefaultParams unless a security review
+// calls for different costs.
 type Params struct {
-	Memory      uint32
-	Iterations  uint32
+	// Memory is the Argon2id memory cost in KiB. New requires 19 MiB
+	// (19*1024) through 1 GiB.
+	Memory uint32
+	// Iterations is the time cost (passes over memory), 2 through 20.
+	Iterations uint32
+	// Parallelism is the number of lanes, 1 through 16.
 	Parallelism uint8
-	SaltLength  uint32
-	KeyLength   uint32
-	Random      io.Reader
+	// SaltLength is the random salt size in bytes, 16 through 64.
+	SaltLength uint32
+	// KeyLength is the derived key size in bytes, 16 through 64.
+	KeyLength uint32
+	// Random supplies salt entropy and defaults to crypto/rand.Reader.
+	// Override it only in tests.
+	Random io.Reader
 }
 
+// Hasher hashes and verifies passwords with Argon2id. It is stateless and
+// safe for concurrent use. It implements credbound.PasswordHasher.
 type Hasher struct {
 	params Params
 }
 
+// DefaultParams returns the recommended production parameters: 64 MiB of
+// memory, 3 iterations, 2 lanes, a 16 byte salt and a 32 byte key.
 func DefaultParams() Params {
 	return Params{Memory: 64 * 1024, Iterations: 3, Parallelism: 2, SaltLength: 16, KeyLength: 32, Random: rand.Reader}
 }
 
+// New validates params and returns a Hasher. Parameters outside the safe
+// bounds documented on Params are rejected outright — there is no silent
+// weakening. A nil Random falls back to crypto/rand.Reader.
 func New(params Params) (*Hasher, error) {
 	if params.Random == nil {
 		params.Random = rand.Reader
@@ -42,6 +71,8 @@ func New(params Params) (*Hasher, error) {
 	return &Hasher{params: params}, nil
 }
 
+// Hash derives an Argon2id hash of password under the configured parameters
+// with a fresh random salt and returns it as a PHC-formatted string.
 func (h *Hasher) Hash(password string) (string, error) {
 	salt := make([]byte, h.params.SaltLength)
 	if _, err := io.ReadFull(h.params.Random, salt); err != nil {
@@ -53,6 +84,11 @@ func (h *Hasher) Hash(password string) (string, error) {
 		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(hash)), nil
 }
 
+// Verify recomputes the hash under the parameters embedded in encoded and
+// compares it in constant time. It reports match, plus rehash when the match
+// succeeded but the stored parameters differ from the Hasher's current
+// policy, so the caller can renew the hash. Encodings outside the safety
+// bounds (below 8 MiB of memory) are rejected as malformed, not verified.
 func (h *Hasher) Verify(password, encoded string) (bool, bool, error) {
 	params, salt, expected, err := parse(encoded)
 	if err != nil {

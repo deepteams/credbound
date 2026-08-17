@@ -10,6 +10,8 @@ import (
 	db "github.com/deepteams/credbound/internal/sqlc/sqlite"
 )
 
+// CreateSession stores a server-side session; a duplicate ID reports
+// credbound.ErrConflict.
 func (s *Store) CreateSession(ctx context.Context, session credbound.Session, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		if _, err := q.GetUserByID(ctx, session.UserID); err != nil {
@@ -24,6 +26,7 @@ func (s *Store) CreateSession(ctx context.Context, session credbound.Session, co
 	})
 }
 
+// SessionByID returns the session with the given ID.
 func (s *Store) SessionByID(ctx context.Context, id string) (credbound.Session, error) {
 	row, err := s.queries.GetSession(ctx, id)
 	if err != nil {
@@ -32,6 +35,7 @@ func (s *Store) SessionByID(ctx context.Context, id string) (credbound.Session, 
 	return sessionFromRow(row), nil
 }
 
+// TouchSession updates the session's and user's last-seen times.
 func (s *Store) TouchSession(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		session, err := q.GetSession(ctx, id)
@@ -47,6 +51,8 @@ func (s *Store) TouchSession(ctx context.Context, id string, at time.Time, commi
 	})
 }
 
+// RevokeSession marks the session revoked; an already-revoked session is
+// left unchanged.
 func (s *Store) RevokeSession(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		if _, err := q.GetSession(ctx, id); err != nil {
@@ -58,6 +64,7 @@ func (s *Store) RevokeSession(ctx context.Context, id string, at time.Time, comm
 	})
 }
 
+// RevokeUserSessions revokes every session of the user.
 func (s *Store) RevokeUserSessions(ctx context.Context, userID string, at time.Time, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		if _, err := q.GetUserByID(ctx, userID); err != nil {
@@ -67,6 +74,8 @@ func (s *Store) RevokeUserSessions(ctx context.Context, userID string, at time.T
 	})
 }
 
+// Sessions streams the user's sessions, newest first, as one cursor page
+// with digests omitted.
 func (s *Store) Sessions(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Session], error] {
 	return func(yield func(credbound.PageEvent[credbound.Session], error) bool) {
 		streamCtx, cancel := context.WithTimeout(ctx, s.streamTimeout)

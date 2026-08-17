@@ -9,6 +9,90 @@ import (
 	"strings"
 )
 
+// sqlitePackageDoc is the SQLite package doc comment, replaced wholesale by
+// postgresPackageDoc because the construction and DSN guidance differ per
+// dialect.
+const sqlitePackageDoc = `// Package sqlite implements every Credbound persistence port — Store plus
+// the optional SessionStore, SignupStore, DomainStore, SCIMStore and
+// OAuthStore capabilities — on SQLite through database/sql and
+// sqlc-generated queries, committing each mutation's hash-chained audit
+// event atomically with the change.
+//
+// Open the database with the modernc.org/sqlite driver using a DSN that
+// carries "_pragma=foreign_keys(1)" and "_texttotime=1" (see New for why
+// the store silently relies on both), apply the schema from the module's
+// migrations directory, and wire the store into credbound.Config.Store:
+//
+//	db, err := sql.Open("sqlite", "file:auth.db?_pragma=foreign_keys(1)&_texttotime=1")
+//	store, err := sqlite.New(db)
+//
+// TransactionHook callbacks can regain the raw *sql.Tx through TxFrom to
+// append host writes to a Credbound commit.
+`
+
+const postgresPackageDoc = `// Package postgresql implements every Credbound persistence port — Store
+// plus the optional SessionStore, SignupStore, DomainStore, SCIMStore and
+// OAuthStore capabilities — on PostgreSQL, pairing sqlc-generated
+// database/sql queries for transactional mutations with pgx streaming for
+// paginated reads, and committing each mutation's hash-chained audit event
+// atomically with the change.
+//
+// All objects live in the dedicated "credbound" schema; apply the module's
+// migrations before use. Open one pgx pool and hand the store both views of
+// it, then wire the store into credbound.Config.Store:
+//
+//	pool, err := pgxpool.New(ctx, dsn)
+//	store, err := postgresql.New(stdlib.OpenDBFromPool(pool), pool)
+//
+// TransactionHook callbacks can regain the raw *sql.Tx through TxFrom to
+// append host writes to a Credbound commit.
+`
+
+// sqliteNewDoc is the SQLite-specific doc comment on New; it is deleted
+// because the New replacement below injects the PostgreSQL doc instead.
+const sqliteNewDoc = `// New wraps an already-opened SQLite database. The store issues no PRAGMAs
+// itself and silently relies on the connection being opened with the
+// modernc.org/sqlite driver and a DSN carrying "_pragma=foreign_keys(1)"
+// (referential integrity, which the revocation cascades depend on) and
+// "_texttotime=1" (TEXT timestamp scanning):
+//
+//	sql.Open("sqlite", "file:auth.db?_pragma=foreign_keys(1)&_texttotime=1")
+//
+// Omitting either parameter corrupts behavior quietly rather than failing
+// construction.
+`
+
+// sqliteStoreDecl matches the documented Store declaration so RowQuerier
+// can be inserted above the doc comment without detaching it, and the
+// dialect mention in the doc swapped.
+const sqliteStoreDecl = `// Store is the SQLite-backed implementation of the Credbound persistence
+// ports. It is safe for concurrent use: mutations run inside transactions
+// that commit the audit event atomically with the change, and list
+// operations stream rows under a per-query timeout (WithStreamTimeout).
+// Method semantics, sentinel errors and pagination behavior are specified
+// on the credbound port interfaces.
+type Store struct {
+	db            *sql.DB
+	queries`
+
+const postgresStoreDecl = `// RowQuerier is the pgx query surface the store streams paginated reads
+// through; both *pgxpool.Pool and *pgx.Conn satisfy it, but only a pool is
+// safe for concurrent use.
+type RowQuerier interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+// Store is the PostgreSQL-backed implementation of the Credbound persistence
+// ports. It is safe for concurrent use: mutations run inside transactions
+// that commit the audit event atomically with the change, and list
+// operations stream rows under a per-query timeout (WithStreamTimeout).
+// Method semantics, sentinel errors and pagination behavior are specified
+// on the credbound port interfaces.
+type Store struct {
+	db *sql.DB
+	rows RowQuerier
+	queries`
+
 func main() {
 	const source = "sqlstore/sqlite/store.go"
 	const target = "sqlstore/postgresql/store.go"
@@ -17,6 +101,8 @@ func main() {
 		panic(err)
 	}
 	code := string(raw)
+	code = strings.Replace(code, sqlitePackageDoc, postgresPackageDoc, 1)
+	code = strings.Replace(code, sqliteNewDoc, "", 1)
 	code = strings.Replace(code, "package sqlite", "package postgresql", 1)
 	code = strings.Replace(code, `db "github.com/deepteams/credbound/internal/sqlc/sqlite"`, `db "github.com/deepteams/credbound/internal/sqlc/postgresql"`, 1)
 	code = strings.ReplaceAll(code, "credbound.StoreSQLite", "credbound.StorePostgreSQL")
@@ -24,7 +110,7 @@ func main() {
 	code = strings.Replace(code, "into the live SQLite", "into the live PostgreSQL", 1)
 	code = strings.Replace(code, `"github.com/deepteams/credbound"`, `"github.com/deepteams/credbound"
 	"github.com/jackc/pgx/v5"`, 1)
-	code = strings.Replace(code, "type Store struct {\n\tdb            *sql.DB\n\tqueries", "type RowQuerier interface {\n\tQuery(context.Context, string, ...any) (pgx.Rows, error)\n}\n\ntype Store struct {\n\tdb *sql.DB\n\trows RowQuerier\n\tqueries", 1)
+	code = strings.Replace(code, sqliteStoreDecl, postgresStoreDecl, 1)
 	code = strings.Replace(code, "func New(database *sql.DB, options ...Option)", `// New builds the PostgreSQL store from two views of the same database: a
 // *sql.DB used by the sqlc-generated queries for transactional mutations
 // (open one with pgx's stdlib.OpenDB or stdlib.OpenDBFromPool), and a pgx
@@ -194,7 +280,7 @@ func nullableString(value string) sql.NullString {`, 1)
 	// PostgreSQL objects live in the dedicated `credbound` schema; every raw
 	// SQL table reference is schema-qualified instead of prefix-namespaced.
 	code = strings.ReplaceAll(code, "credbound_", "credbound.")
-	code = "// Code generated by internal/cmd/genpostgresstore; DO NOT EDIT.\n" + code
+	code = "// Code generated by internal/cmd/genpostgresstore; DO NOT EDIT.\n\n" + code
 	formatted, err := format.Source([]byte(code))
 	if err != nil {
 		panic(fmt.Errorf("format generated PostgreSQL store: %w", err))
@@ -236,7 +322,7 @@ ORDER BY created_at DESC, id DESC LIMIT $6`+"`"+`, workspaceID, cursor.ID != "",
 	// PostgreSQL objects live in the dedicated `credbound` schema; every raw
 	// SQL table reference is schema-qualified instead of prefix-namespaced.
 	code = strings.ReplaceAll(code, "credbound_", "credbound.")
-	code = "// Code generated by internal/cmd/genpostgresstore; DO NOT EDIT.\n" + code
+	code = "// Code generated by internal/cmd/genpostgresstore; DO NOT EDIT.\n\n" + code
 	formatted, err := format.Source([]byte(code))
 	if err != nil {
 		panic(fmt.Errorf("format generated PostgreSQL domain store: %w", err))
@@ -271,7 +357,7 @@ ORDER BY created_at DESC, id DESC LIMIT $6`+"`"+`, userID, cursor.ID != "", curs
 	// PostgreSQL objects live in the dedicated `credbound` schema; every raw
 	// SQL table reference is schema-qualified instead of prefix-namespaced.
 	code = strings.ReplaceAll(code, "credbound_", "credbound.")
-	code = "// Code generated by internal/cmd/genpostgresstore; DO NOT EDIT.\n" + code
+	code = "// Code generated by internal/cmd/genpostgresstore; DO NOT EDIT.\n\n" + code
 	formatted, err := format.Source([]byte(code))
 	if err != nil {
 		panic(fmt.Errorf("format generated PostgreSQL session store: %w", err))
@@ -325,7 +411,7 @@ var _ = strings.Builder{}
 	// PostgreSQL objects live in the dedicated `credbound` schema; every raw
 	// SQL table reference is schema-qualified instead of prefix-namespaced.
 	code = strings.ReplaceAll(code, "credbound_", "credbound.")
-	code = "// Code generated by internal/cmd/genpostgresstore; DO NOT EDIT.\n" + code
+	code = "// Code generated by internal/cmd/genpostgresstore; DO NOT EDIT.\n\n" + code
 	formatted, err := format.Source([]byte(code))
 	if err != nil {
 		panic(fmt.Errorf("format generated PostgreSQL OAuth store: %w", err))
@@ -382,7 +468,7 @@ ORDER BY created_at DESC, id DESC LIMIT $6` + "`" + `, configurationID, cursor.I
 	// PostgreSQL objects live in the dedicated `credbound` schema; every raw
 	// SQL table reference is schema-qualified instead of prefix-namespaced.
 	code = strings.ReplaceAll(code, "credbound_", "credbound.")
-	code = "// Code generated by internal/cmd/genpostgresstore; DO NOT EDIT.\n" + code
+	code = "// Code generated by internal/cmd/genpostgresstore; DO NOT EDIT.\n\n" + code
 	formatted, err := format.Source([]byte(code))
 	if err != nil {
 		panic(fmt.Errorf("format generated PostgreSQL SCIM store: %w", err))
@@ -463,6 +549,8 @@ ORDER BY occurred_at DESC, id DESC LIMIT $6` + "`" + `
 	return s.auditEvents(ctx, page, query, []any{workspaceID})
 }
 
+// InstanceAuditEvents streams audit events across the whole instance,
+// newest first, as one cursor page.
 func (s *Store) InstanceAuditEvents(ctx context.Context, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.AuditEvent], error] {
 	query := ` + "`" + `SELECT id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash
 FROM credbound_audit_events

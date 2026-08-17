@@ -1,5 +1,19 @@
 // Package oauthclientadapter provides hardened OAuth client authentication
-// adapters without coupling Credbound to an HTTP server.
+// adapters without coupling Credbound to an HTTP server: JWTAssertionVerifier
+// validates private_key_jwt client assertions (RFC 7523) against a client's
+// registered JWKS with single-use JWT ID enforcement, and MemoryReplayStore
+// supplies the replay protection for single-process hosts.
+//
+// Wire the verifier into credbound.Config.OAuth.ClientAssertions:
+//
+//	verifier, err := oauthclientadapter.NewJWTAssertionVerifier(
+//		oauthclientadapter.VerifierConfig{
+//			ReplayStore: oauthclientadapter.NewMemoryReplayStore(nil),
+//		})
+//
+// Multi-process hosts must replace MemoryReplayStore with a shared
+// AssertionReplayStore, or a captured assertion could be replayed against a
+// sibling process.
 package oauthclientadapter
 
 import (
@@ -39,18 +53,38 @@ type AssertionReplayStore interface {
 	Use(context.Context, string, string, time.Time) (bool, error)
 }
 
+// Resolver resolves host names for the SSRF guard on JWKS fetches;
+// net.DefaultResolver satisfies it.
 type Resolver interface {
 	LookupIPAddr(context.Context, string) ([]net.IPAddr, error)
 }
 
+// VerifierConfig configures a JWTAssertionVerifier. Only ReplayStore is
+// required; every other field has a safe default.
 type VerifierConfig struct {
-	ReplayStore  AssertionReplayStore
-	Resolver     Resolver
-	Clock        func() time.Time
+	// ReplayStore enforces single use of each assertion's JWT ID.
+	// Required; it must be shared across processes in multi-process hosts.
+	ReplayStore AssertionReplayStore
+	// Resolver is used to vet JWKS hosts before dialing. Defaults to
+	// net.DefaultResolver.
+	Resolver Resolver
+	// Clock supplies the verification time and defaults to time.Now.
+	// Override it only in tests.
+	Clock func() time.Time
+	// FetchTimeout bounds one JWKS fetch. Zero defaults to 5s; values
+	// above 30s are rejected.
 	FetchTimeout time.Duration
-	CacheTTL     time.Duration
+	// CacheTTL is how long a fetched JWKS is reused. Zero defaults to 5
+	// minutes; values above an hour are rejected because a stale cache
+	// delays key revocation.
+	CacheTTL time.Duration
 }
 
+// JWTAssertionVerifier validates private_key_jwt client assertions against
+// the client's registered JWKS or SSRF-guarded HTTPS jwks_uri, enforcing
+// issuer/subject, audience, expiry and single-use JWT IDs. It is safe for
+// concurrent use and implements credbound.OAuthClientAssertionVerifier for
+// credbound.OAuthConfig.ClientAssertions.
 type JWTAssertionVerifier struct {
 	replay       AssertionReplayStore
 	resolver     Resolver
@@ -66,6 +100,8 @@ type cachedJWKS struct {
 	expiresAt time.Time
 }
 
+// NewJWTAssertionVerifier validates config and returns a verifier. A
+// missing replay store or an out-of-bounds fetch/cache policy is rejected.
 func NewJWTAssertionVerifier(config VerifierConfig) (*JWTAssertionVerifier, error) {
 	if config.ReplayStore == nil {
 		return nil, fmt.Errorf("%w: assertion replay store is required", credbound.ErrInvalidInput)
@@ -91,6 +127,11 @@ func NewJWTAssertionVerifier(config VerifierConfig) (*JWTAssertionVerifier, erro
 	}, nil
 }
 
+// Verify checks assertion for client against the expected audience at the
+// given time (zero means the verifier's clock), then consumes its JWT ID in
+// the replay store. Any validation failure — malformed token, wrong
+// signature, expired, replayed — reports credbound.ErrInvalidCredentials
+// without detail, so callers cannot oracle the cause.
 func (v *JWTAssertionVerifier) Verify(ctx context.Context, client credbound.OAuthClient, audience, assertion string, now time.Time) error {
 	header, claims, signingInput, signature, err := parseAssertion(assertion)
 	if err != nil {

@@ -10,6 +10,8 @@ import (
 	db "github.com/deepteams/credbound/internal/sqlc/sqlite"
 )
 
+// CreateWorkspaceDomain stores an unconfirmed domain claim; a domain already
+// claimed by any workspace reports credbound.ErrConflict.
 func (s *Store) CreateWorkspaceDomain(ctx context.Context, domain credbound.WorkspaceDomain, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		if _, err := q.GetWorkspace(ctx, domain.WorkspaceID); err != nil {
@@ -24,6 +26,7 @@ func (s *Store) CreateWorkspaceDomain(ctx context.Context, domain credbound.Work
 	})
 }
 
+// WorkspaceDomainByID returns the domain record with the given ID.
 func (s *Store) WorkspaceDomainByID(ctx context.Context, id string) (credbound.WorkspaceDomain, error) {
 	row, err := s.queries.GetWorkspaceDomain(ctx, id)
 	if err != nil {
@@ -32,6 +35,8 @@ func (s *Store) WorkspaceDomainByID(ctx context.Context, id string) (credbound.W
 	return workspaceDomainFromRow(row), nil
 }
 
+// ConfirmedWorkspaceDomainByName resolves a confirmed domain by name;
+// unknown or unconfirmed domains report credbound.ErrNotFound.
 func (s *Store) ConfirmedWorkspaceDomainByName(ctx context.Context, name string) (credbound.WorkspaceDomain, error) {
 	row, err := s.queries.GetConfirmedWorkspaceDomainByName(ctx, name)
 	if err != nil {
@@ -40,6 +45,8 @@ func (s *Store) ConfirmedWorkspaceDomainByName(ctx context.Context, name string)
 	return workspaceDomainFromRow(row), nil
 }
 
+// ConfirmWorkspaceDomain marks the domain verified; confirming twice reports
+// credbound.ErrConflict.
 func (s *Store) ConfirmWorkspaceDomain(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		if _, err := q.GetWorkspaceDomain(ctx, id); err != nil {
@@ -58,6 +65,9 @@ func (s *Store) ConfirmWorkspaceDomain(ctx context.Context, id string, at time.T
 	})
 }
 
+// UpdateWorkspaceDomainPolicy replaces the auto-join and SSO-enforcement
+// policy of a confirmed domain; an unconfirmed domain reports
+// credbound.ErrConflict.
 func (s *Store) UpdateWorkspaceDomainPolicy(ctx context.Context, id string, policy credbound.WorkspaceDomainPolicyInput, at time.Time, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		if _, err := q.GetWorkspaceDomain(ctx, id); err != nil {
@@ -80,6 +90,7 @@ func (s *Store) UpdateWorkspaceDomainPolicy(ctx context.Context, id string, poli
 	})
 }
 
+// DeleteWorkspaceDomain removes the domain claim.
 func (s *Store) DeleteWorkspaceDomain(ctx context.Context, id string, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		count, err := q.DeleteWorkspaceDomain(ctx, id)
@@ -87,6 +98,8 @@ func (s *Store) DeleteWorkspaceDomain(ctx context.Context, id string, commit cre
 	})
 }
 
+// WorkspaceDomains streams the workspace's domains, newest first, as one
+// cursor page.
 func (s *Store) WorkspaceDomains(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.WorkspaceDomain], error] {
 	return func(yield func(credbound.PageEvent[credbound.WorkspaceDomain], error) bool) {
 		streamCtx, cancel := context.WithTimeout(ctx, s.streamTimeout)
@@ -131,6 +144,9 @@ ORDER BY created_at DESC, id DESC LIMIT ?`, workspaceID, cursor.ID, cursor.Time,
 	}
 }
 
+// JITProvisionSSOUser atomically creates a user with a verified email,
+// workspace membership and linked SSO identity for domain-based just-in-time
+// provisioning.
 func (s *Store) JITProvisionSSOUser(ctx context.Context, user credbound.User, email credbound.EmailAddress, membership credbound.Membership, identity credbound.SSOIdentity, _ time.Time, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		if err := insertUser(ctx, q, user); err != nil {
