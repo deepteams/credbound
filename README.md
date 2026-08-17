@@ -1,8 +1,13 @@
 # Credbound
 
-Credbound is a Go authentication and authorization library for Deepteams
-platforms. It centralizes security invariants that would otherwise be
-reimplemented in every project:
+[![CI](https://github.com/deepteams/credbound/actions/workflows/ci.yml/badge.svg)](https://github.com/deepteams/credbound/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/deepteams/credbound.svg)](https://pkg.go.dev/github.com/deepteams/credbound)
+[![Go Report Card](https://goreportcard.com/badge/github.com/deepteams/credbound)](https://goreportcard.com/report/github.com/deepteams/credbound)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
+Credbound is a Go authentication and authorization library, built at Deepteams
+and open to everyone. It centralizes security invariants that would otherwise
+be reimplemented in every project:
 
 - local password authentication;
 - WebAuthn passkeys;
@@ -216,3 +221,15 @@ make verify
 `make coverage` enforces consolidated coverage strictly above 90% for maintained
 code. Generated sqlc code and the generated PostgreSQL store are excluded from
 this measurement; their reproducibility is checked by `make generate`.
+
+## Contributing
+
+Credbound is specs-first: behavior changes update
+[`specs/PRD.md`](specs/PRD.md) and [`specs/API.md`](specs/API.md) alongside the
+code, and `make verify` must pass. See [CONTRIBUTING.md](CONTRIBUTING.md) and
+the [code of conduct](CODE_OF_CONDUCT.md). Vulnerabilities are reported
+privately per [SECURITY.md](SECURITY.md), never through public issues.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
