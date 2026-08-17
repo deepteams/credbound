@@ -441,7 +441,7 @@ func scanSCIMGroup(row scanner) (credbound.SCIMGroup, error) {
 
 func postgresSCIMUserListQuery(configurationID string, filter credbound.SCIMFilter, cursor cursor, limit int) (string, []any, error) {
 	query := `SELECT id, configuration_id, user_id, external_id, normalized_user_name, display_name, emails_json, profile_json, active, created_at, updated_at, deprovisioned_at
-FROM credbound_scim_users WHERE configuration_id = $1 AND deprovisioned_at IS NULL`
+FROM credbound.scim_users WHERE configuration_id = $1 AND deprovisioned_at IS NULL`
 	args := []any{configurationID}
 	next := 2
 	add := func(fragment string, value any) {
@@ -477,7 +477,7 @@ FROM credbound_scim_users WHERE configuration_id = $1 AND deprovisioned_at IS NU
 
 func postgresSCIMGroupListQuery(configurationID string, filter credbound.SCIMFilter, cursor cursor, limit int) (string, []any, error) {
 	query := `SELECT id, configuration_id, external_id, display_name, member_ids_json, created_at, updated_at, deleted_at
-FROM credbound_scim_groups WHERE configuration_id = $1 AND deleted_at IS NULL`
+FROM credbound.scim_groups WHERE configuration_id = $1 AND deleted_at IS NULL`
 	args := []any{configurationID}
 	next := 2
 	switch filter.Attribute {

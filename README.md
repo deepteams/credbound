@@ -41,7 +41,7 @@ The project follows a _Specs First_ approach. The product contract is defined in
 The core, in-memory store, SQLite store, PostgreSQL store and migrations, and
 security adapters are implemented. Version `v0` may still introduce breaking
 changes before the first stable release. CI applies the PostgreSQL migrations
-to an isolated schema and exercises lifecycle, OAuth, pagination, transactional
+into the dedicated `credbound` schema and exercises lifecycle, OAuth, pagination, transactional
 hooks, and append-only audit behavior against a real PostgreSQL service.
 
 ## Security principles
@@ -195,7 +195,9 @@ To add a business fact to the audit log, the service calls `RecordAudit` with an
 timestamp.
 
 Embedded Goose migrations are available through `migrations.SQLite()` and
-`migrations.PostgreSQL()`. The first `Bootstrap` call atomically creates the
+`migrations.PostgreSQL()`. Versions are timestamps so they interleave with the
+host service's own migrations, and on PostgreSQL every table lives in the
+dedicated `credbound` schema. The first `Bootstrap` call atomically creates the
 first user, their workspace, their `admin` membership, and their instance-level
 `root` role.
 

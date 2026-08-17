@@ -32,18 +32,15 @@ func TestPostgreSQLMigrationsAndStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer admin.Close(ctx)
-	schema := fmt.Sprintf("credbound_test_%d", time.Now().UnixNano())
-	if _, err := admin.Exec(ctx, `CREATE SCHEMA "`+schema+`"`); err != nil {
+	t.Cleanup(func() { _ = admin.Close(context.Background()) })
+	// Every Credbound object lives in the dedicated `credbound` schema, so
+	// isolation is a fresh schema created by the first migration.
+	if _, err := admin.Exec(ctx, `DROP SCHEMA IF EXISTS credbound CASCADE`); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = admin.Exec(context.Background(), `DROP SCHEMA "`+schema+`" CASCADE`) })
+	t.Cleanup(func() { _, _ = admin.Exec(context.Background(), `DROP SCHEMA IF EXISTS credbound CASCADE`) })
 
 	testConfig := adminConfig.Copy()
-	if testConfig.RuntimeParams == nil {
-		testConfig.RuntimeParams = make(map[string]string)
-	}
-	testConfig.RuntimeParams["search_path"] = schema
 	database := stdlib.OpenDB(*testConfig)
 	t.Cleanup(func() { database.Close() })
 	rows, err := pgx.ConnectConfig(ctx, testConfig)

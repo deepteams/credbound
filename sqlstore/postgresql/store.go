@@ -200,8 +200,8 @@ func (s *Store) Users(ctx context.Context, page credbound.PageRequest) iter.Seq2
 			return
 		}
 		rows, err := s.rows.Query(streamCtx, `SELECT u.id, e.address, u.display_name, u.disabled, u.last_seen_at, u.created_at, u.updated_at
-FROM credbound_users u
-JOIN credbound_user_emails e ON e.user_id = u.id AND e.is_primary
+FROM credbound.users u
+JOIN credbound.user_emails e ON e.user_id = u.id AND e.is_primary
 WHERE (NOT $1 OR u.created_at < $2 OR (u.created_at = $3 AND u.id < $4))
 ORDER BY u.created_at DESC, u.id DESC LIMIT $5`, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
 		if err != nil {
@@ -473,7 +473,7 @@ func (s *Store) Emails(ctx context.Context, userID string, page credbound.PageRe
 			return
 		}
 		rows, err := s.rows.Query(streamCtx, `SELECT id, user_id, address, is_primary, verified_at, created_at, updated_at
-FROM credbound_user_emails
+FROM credbound.user_emails
 WHERE user_id = $1 AND (NOT $2 OR created_at < $3 OR (created_at = $4 AND id < $5))
 ORDER BY created_at DESC, id DESC LIMIT $6`, userID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
 		if err != nil {
@@ -620,7 +620,7 @@ func (s *Store) Passkeys(ctx context.Context, userID string) iter.Seq2[credbound
 		streamCtx, cancel := context.WithTimeout(ctx, s.streamTimeout)
 		defer cancel()
 		rows, err := s.rows.Query(streamCtx, `SELECT id, user_id, name, credential_id, credential_json, created_at, last_used_at
-FROM credbound_passkeys WHERE user_id = $1 ORDER BY created_at, id`, userID)
+FROM credbound.passkeys WHERE user_id = $1 ORDER BY created_at, id`, userID)
 		if err != nil {
 			yield(credbound.Passkey{}, mapError(err))
 			return
@@ -738,7 +738,7 @@ func (s *Store) PATs(ctx context.Context, userID string, page credbound.PageRequ
 			return
 		}
 		rows, err := s.rows.Query(streamCtx, `SELECT id, user_id, name, prefix, digest, workspace_id, scopes_json, created_at, expires_at, last_used_at, revoked_at
-FROM credbound_personal_access_tokens
+FROM credbound.personal_access_tokens
 WHERE user_id = $1 AND (NOT $2 OR created_at < $3 OR (created_at = $4 AND id < $5))
 ORDER BY created_at DESC, id DESC LIMIT $6`, userID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
 		if err != nil {
@@ -858,7 +858,7 @@ func (s *Store) WorkspaceInvitations(ctx context.Context, workspaceID string, pa
 			return
 		}
 		rows, err := s.rows.Query(streamCtx, `SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
-FROM credbound_workspace_invitations
+FROM credbound.workspace_invitations
 WHERE workspace_id = $1 AND (NOT $2 OR created_at < $3 OR (created_at = $4 AND id < $5))
 ORDER BY created_at DESC, id DESC LIMIT $6`, workspaceID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
 		if err != nil {
@@ -968,8 +968,8 @@ func (s *Store) workspaces(ctx context.Context, userID string, page credbound.Pa
 			return
 		}
 		query := `SELECT w.id, w.name, w.created_at, w.updated_at, w.disabled_at, w.require_mfa
-FROM credbound_workspaces w
-WHERE (NOT $1 OR EXISTS (SELECT 1 FROM credbound_memberships m WHERE m.workspace_id = w.id AND m.user_id = $2))
+FROM credbound.workspaces w
+WHERE (NOT $1 OR EXISTS (SELECT 1 FROM credbound.memberships m WHERE m.workspace_id = w.id AND m.user_id = $2))
 AND (NOT $3 OR w.created_at < $4 OR (w.created_at = $5 AND w.id < $6))
 ORDER BY w.created_at DESC, w.id DESC LIMIT $7`
 		rows, err := s.rows.Query(streamCtx, query, userID != "", nullableUUID(userID), cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
@@ -1087,7 +1087,7 @@ func (s *Store) Memberships(ctx context.Context, workspaceID string, page credbo
 			return
 		}
 		rows, err := s.rows.Query(streamCtx, `SELECT workspace_id, user_id, role, status, provisioning_source, created_at, updated_at
-FROM credbound_memberships
+FROM credbound.memberships
 WHERE workspace_id = $1 AND (NOT $2 OR created_at < $3 OR (created_at = $4 AND user_id < $5))
 ORDER BY created_at DESC, user_id DESC LIMIT $6`, workspaceID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
 		if err != nil {
@@ -1230,7 +1230,7 @@ func (s *Store) SSOIdentities(ctx context.Context, userID string, page credbound
 			return
 		}
 		rows, err := s.rows.Query(streamCtx, `SELECT id, user_id, provider_configuration_id, provider_kind, issuer, subject, email, created_at, last_used_at
-FROM credbound_sso_identities
+FROM credbound.sso_identities
 WHERE user_id = $1 AND (NOT $2 OR created_at < $3 OR (created_at = $4 AND id < $5))
 ORDER BY created_at DESC, id DESC LIMIT $6`, userID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
 		if err != nil {
@@ -1273,7 +1273,7 @@ func (s *Store) AppendAudit(ctx context.Context, commit credbound.Commit) error 
 
 func (s *Store) AuditEvents(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.AuditEvent], error] {
 	query := `SELECT id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash
-FROM credbound_audit_events
+FROM credbound.audit_events
 WHERE workspace_id = $1 AND (NOT $2 OR occurred_at < $3 OR (occurred_at = $4 AND id < $5))
 ORDER BY occurred_at DESC, id DESC LIMIT $6`
 	return s.auditEvents(ctx, page, query, []any{workspaceID})
@@ -1281,7 +1281,7 @@ ORDER BY occurred_at DESC, id DESC LIMIT $6`
 
 func (s *Store) InstanceAuditEvents(ctx context.Context, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.AuditEvent], error] {
 	query := `SELECT id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash
-FROM credbound_audit_events
+FROM credbound.audit_events
 WHERE (NOT $1 OR occurred_at < $2 OR (occurred_at = $3 AND id < $4))
 ORDER BY occurred_at DESC, id DESC LIMIT $5`
 	return s.auditEvents(ctx, page, query, nil)
@@ -1393,7 +1393,7 @@ func (s *Store) AuditChainHead(ctx context.Context) (int64, []byte, error) {
 }
 
 const chainedAuditQuery = `SELECT id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash
-FROM credbound_audit_events WHERE sequence IS NOT NULL ORDER BY sequence`
+FROM credbound.audit_events WHERE sequence IS NOT NULL ORDER BY sequence`
 
 func (s *Store) ChainedAuditEvents(ctx context.Context) iter.Seq2[credbound.AuditEvent, error] {
 	return func(yield func(credbound.AuditEvent, error) bool) {

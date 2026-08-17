@@ -57,7 +57,7 @@ func (s *Store) OAuthIssuerByURL(ctx context.Context, issuer string) (credbound.
 }
 
 func (s *Store) OAuthIssuers(ctx context.Context, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthIssuer], error] {
-	return oauthPage(s, ctx, `SELECT data_json, created_at, id FROM credbound_oauth_issuers
+	return oauthPage(s, ctx, `SELECT data_json, created_at, id FROM credbound.oauth_issuers
 WHERE (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
 ORDER BY created_at DESC, id DESC LIMIT ?`, nil, page, func(value credbound.OAuthIssuer) credbound.OAuthIssuer { return value })
 }
@@ -98,7 +98,7 @@ func (s *Store) OAuthProtectedResourceByURI(ctx context.Context, resource string
 }
 
 func (s *Store) OAuthProtectedResources(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthProtectedResource], error] {
-	return oauthPage(s, ctx, `SELECT data_json, created_at, id FROM credbound_oauth_resources
+	return oauthPage(s, ctx, `SELECT data_json, created_at, id FROM credbound.oauth_resources
 WHERE workspace_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
 ORDER BY created_at DESC, id DESC LIMIT ?`, []any{workspaceID}, page, func(value credbound.OAuthProtectedResource) credbound.OAuthProtectedResource { return value })
 }
@@ -185,7 +185,7 @@ func (s *Store) OAuthClientByClientID(ctx context.Context, issuerID, clientID st
 }
 
 func (s *Store) OAuthClients(ctx context.Context, issuerID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthClient], error] {
-	return oauthPage(s, ctx, `SELECT data_json, created_at, id FROM credbound_oauth_clients
+	return oauthPage(s, ctx, `SELECT data_json, created_at, id FROM credbound.oauth_clients
 WHERE issuer_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
 ORDER BY created_at DESC, id DESC LIMIT ?`, []any{issuerID}, page, func(value credbound.OAuthClient) credbound.OAuthClient {
 		value.SecretDigest = nil
@@ -234,7 +234,7 @@ func (s *Store) RevokeOAuthGrant(ctx context.Context, id string, at time.Time, c
 }
 
 func (s *Store) OAuthGrants(ctx context.Context, userID, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthGrant], error] {
-	return oauthPage(s, ctx, `SELECT data_json, created_at, id FROM credbound_oauth_grants
+	return oauthPage(s, ctx, `SELECT data_json, created_at, id FROM credbound.oauth_grants
 WHERE (NOT ? OR user_id = ?) AND (NOT ? OR workspace_id = ?)
 AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
 ORDER BY created_at DESC, id DESC LIMIT ?`, []any{userID != "", nullableUUID(userID), workspaceID != "", nullableUUID(workspaceID)}, page, func(value credbound.OAuthGrant) credbound.OAuthGrant { return value })

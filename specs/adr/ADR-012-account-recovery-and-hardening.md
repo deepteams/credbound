@@ -92,6 +92,6 @@ reading another account requires admin users read.
 
 - The `Store` interface grows accordingly; v0 allows this breaking change and
   all bundled stores implement the new contract.
-- Migration `00006_hardening` is additive and seeds the audit chain head.
+- The `hardening` migration (20260817090000) is additive and seeds the audit chain head.
 - Symmetric-key and pepper rotation limitations from OPS-001 apply unchanged
   to the new token digests.

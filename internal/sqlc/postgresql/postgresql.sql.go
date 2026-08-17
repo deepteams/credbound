@@ -13,7 +13,7 @@ import (
 )
 
 const acceptWorkspaceInvitation = `-- name: AcceptWorkspaceInvitation :execrows
-UPDATE credbound_workspace_invitations SET accepted_at = $2, accepted_user_id = $3 WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL
+UPDATE credbound.workspace_invitations SET accepted_at = $2, accepted_user_id = $3 WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL
 `
 
 type AcceptWorkspaceInvitationParams struct {
@@ -31,7 +31,7 @@ func (q *Queries) AcceptWorkspaceInvitation(ctx context.Context, arg AcceptWorks
 }
 
 const activateTOTP = `-- name: ActivateTOTP :execrows
-UPDATE credbound_totp_factors SET encrypted_secret = $2, active = true, last_used_step = $3, updated_at = $4 WHERE user_id = $1 AND NOT active
+UPDATE credbound.totp_factors SET encrypted_secret = $2, active = true, last_used_step = $3, updated_at = $4 WHERE user_id = $1 AND NOT active
 `
 
 type ActivateTOTPParams struct {
@@ -55,7 +55,7 @@ func (q *Queries) ActivateTOTP(ctx context.Context, arg ActivateTOTPParams) (int
 }
 
 const claimBootstrap = `-- name: ClaimBootstrap :exec
-INSERT INTO credbound_instance (singleton, initialized_at) VALUES (true, $1)
+INSERT INTO credbound.instance (singleton, initialized_at) VALUES (true, $1)
 `
 
 func (q *Queries) ClaimBootstrap(ctx context.Context, initializedAt time.Time) error {
@@ -64,7 +64,7 @@ func (q *Queries) ClaimBootstrap(ctx context.Context, initializedAt time.Time) e
 }
 
 const clearLoginThrottle = `-- name: ClearLoginThrottle :exec
-DELETE FROM credbound_login_throttles WHERE user_id = $1
+DELETE FROM credbound.login_throttles WHERE user_id = $1
 `
 
 func (q *Queries) ClearLoginThrottle(ctx context.Context, userID string) error {
@@ -73,7 +73,7 @@ func (q *Queries) ClearLoginThrottle(ctx context.Context, userID string) error {
 }
 
 const clearPrimaryEmails = `-- name: ClearPrimaryEmails :exec
-UPDATE credbound_user_emails SET is_primary = false, updated_at = $2 WHERE user_id = $1 AND is_primary
+UPDATE credbound.user_emails SET is_primary = false, updated_at = $2 WHERE user_id = $1 AND is_primary
 `
 
 type ClearPrimaryEmailsParams struct {
@@ -87,7 +87,7 @@ func (q *Queries) ClearPrimaryEmails(ctx context.Context, arg ClearPrimaryEmails
 }
 
 const consumeEmailAuthentication = `-- name: ConsumeEmailAuthentication :execrows
-UPDATE credbound_email_authentications SET used_at = $3 WHERE id = $1 AND user_id = $2 AND used_at IS NULL
+UPDATE credbound.email_authentications SET used_at = $3 WHERE id = $1 AND user_id = $2 AND used_at IS NULL
 `
 
 type ConsumeEmailAuthenticationParams struct {
@@ -105,7 +105,7 @@ func (q *Queries) ConsumeEmailAuthentication(ctx context.Context, arg ConsumeEma
 }
 
 const consumePasswordReset = `-- name: ConsumePasswordReset :execrows
-UPDATE credbound_password_resets SET used_at = $2 WHERE id = $1 AND used_at IS NULL
+UPDATE credbound.password_resets SET used_at = $2 WHERE id = $1 AND used_at IS NULL
 `
 
 type ConsumePasswordResetParams struct {
@@ -122,7 +122,7 @@ func (q *Queries) ConsumePasswordReset(ctx context.Context, arg ConsumePasswordR
 }
 
 const consumeRecoveryCode = `-- name: ConsumeRecoveryCode :execrows
-UPDATE credbound_recovery_codes SET used_at = $3 WHERE user_id = $1 AND digest = $2 AND used_at IS NULL
+UPDATE credbound.recovery_codes SET used_at = $3 WHERE user_id = $1 AND digest = $2 AND used_at IS NULL
 `
 
 type ConsumeRecoveryCodeParams struct {
@@ -141,8 +141,8 @@ func (q *Queries) ConsumeRecoveryCode(ctx context.Context, arg ConsumeRecoveryCo
 
 const countActiveWorkspaceAdministrators = `-- name: CountActiveWorkspaceAdministrators :one
 SELECT count(*)
-FROM credbound_memberships m
-JOIN credbound_users u ON u.id = m.user_id
+FROM credbound.memberships m
+JOIN credbound.users u ON u.id = m.user_id
 WHERE m.workspace_id = $1 AND m.role = 'admin' AND m.status = 'active' AND NOT u.disabled
 `
 
@@ -154,8 +154,8 @@ func (q *Queries) CountActiveWorkspaceAdministrators(ctx context.Context, worksp
 }
 
 const countEnabledRootAdministrators = `-- name: CountEnabledRootAdministrators :one
-SELECT count(*) FROM credbound_instance_administrators a
-JOIN credbound_users u ON u.id = a.user_id
+SELECT count(*) FROM credbound.instance_administrators a
+JOIN credbound.users u ON u.id = a.user_id
 WHERE a.role = 'root' AND NOT u.disabled
 `
 
@@ -167,7 +167,7 @@ func (q *Queries) CountEnabledRootAdministrators(ctx context.Context) (int64, er
 }
 
 const countRootAdministrators = `-- name: CountRootAdministrators :one
-SELECT count(*) FROM credbound_instance_administrators WHERE role = 'root'
+SELECT count(*) FROM credbound.instance_administrators WHERE role = 'root'
 `
 
 func (q *Queries) CountRootAdministrators(ctx context.Context) (int64, error) {
@@ -178,7 +178,7 @@ func (q *Queries) CountRootAdministrators(ctx context.Context) (int64, error) {
 }
 
 const countUnusedRecoveryCodes = `-- name: CountUnusedRecoveryCodes :one
-SELECT COUNT(*) FROM credbound_recovery_codes WHERE user_id = $1 AND used_at IS NULL
+SELECT COUNT(*) FROM credbound.recovery_codes WHERE user_id = $1 AND used_at IS NULL
 `
 
 func (q *Queries) CountUnusedRecoveryCodes(ctx context.Context, userID string) (int64, error) {
@@ -189,7 +189,7 @@ func (q *Queries) CountUnusedRecoveryCodes(ctx context.Context, userID string) (
 }
 
 const countVerifiedEmails = `-- name: CountVerifiedEmails :one
-SELECT count(*) FROM credbound_user_emails WHERE user_id = $1 AND verified_at IS NOT NULL
+SELECT count(*) FROM credbound.user_emails WHERE user_id = $1 AND verified_at IS NOT NULL
 `
 
 func (q *Queries) CountVerifiedEmails(ctx context.Context, userID string) (int64, error) {
@@ -201,12 +201,12 @@ func (q *Queries) CountVerifiedEmails(ctx context.Context, userID string) (int64
 
 const countWorkspacesOrphanedByUserDisable = `-- name: CountWorkspacesOrphanedByUserDisable :one
 SELECT count(*)
-FROM credbound_memberships target
+FROM credbound.memberships target
 WHERE target.user_id = $1 AND target.role = 'admin' AND target.status = 'active'
   AND NOT EXISTS (
     SELECT 1
-    FROM credbound_memberships other
-    JOIN credbound_users other_user ON other_user.id = other.user_id
+    FROM credbound.memberships other
+    JOIN credbound.users other_user ON other_user.id = other.user_id
     WHERE other.workspace_id = target.workspace_id
       AND other.user_id <> target.user_id
       AND other.role = 'admin'
@@ -223,7 +223,7 @@ func (q *Queries) CountWorkspacesOrphanedByUserDisable(ctx context.Context, user
 }
 
 const deleteEmail = `-- name: DeleteEmail :execrows
-DELETE FROM credbound_user_emails WHERE id = $2 AND user_id = $1 AND NOT is_primary
+DELETE FROM credbound.user_emails WHERE id = $2 AND user_id = $1 AND NOT is_primary
 `
 
 type DeleteEmailParams struct {
@@ -240,7 +240,7 @@ func (q *Queries) DeleteEmail(ctx context.Context, arg DeleteEmailParams) (int64
 }
 
 const deleteInstanceAdministrator = `-- name: DeleteInstanceAdministrator :execrows
-DELETE FROM credbound_instance_administrators WHERE user_id = $1
+DELETE FROM credbound.instance_administrators WHERE user_id = $1
 `
 
 func (q *Queries) DeleteInstanceAdministrator(ctx context.Context, userID string) (int64, error) {
@@ -252,7 +252,7 @@ func (q *Queries) DeleteInstanceAdministrator(ctx context.Context, userID string
 }
 
 const deleteMembership = `-- name: DeleteMembership :execrows
-DELETE FROM credbound_memberships WHERE workspace_id = $1 AND user_id = $2
+DELETE FROM credbound.memberships WHERE workspace_id = $1 AND user_id = $2
 `
 
 type DeleteMembershipParams struct {
@@ -269,7 +269,7 @@ func (q *Queries) DeleteMembership(ctx context.Context, arg DeleteMembershipPara
 }
 
 const deleteOtherPasswordResets = `-- name: DeleteOtherPasswordResets :exec
-DELETE FROM credbound_password_resets WHERE user_id = $1 AND id != $2
+DELETE FROM credbound.password_resets WHERE user_id = $1 AND id != $2
 `
 
 type DeleteOtherPasswordResetsParams struct {
@@ -283,7 +283,7 @@ func (q *Queries) DeleteOtherPasswordResets(ctx context.Context, arg DeleteOther
 }
 
 const deletePasskey = `-- name: DeletePasskey :execrows
-DELETE FROM credbound_passkeys WHERE user_id = $1 AND id = $2
+DELETE FROM credbound.passkeys WHERE user_id = $1 AND id = $2
 `
 
 type DeletePasskeyParams struct {
@@ -300,7 +300,7 @@ func (q *Queries) DeletePasskey(ctx context.Context, arg DeletePasskeyParams) (i
 }
 
 const deleteRecoveryCodes = `-- name: DeleteRecoveryCodes :exec
-DELETE FROM credbound_recovery_codes WHERE user_id = $1
+DELETE FROM credbound.recovery_codes WHERE user_id = $1
 `
 
 func (q *Queries) DeleteRecoveryCodes(ctx context.Context, userID string) error {
@@ -309,7 +309,7 @@ func (q *Queries) DeleteRecoveryCodes(ctx context.Context, userID string) error 
 }
 
 const deleteSCIMGroup = `-- name: DeleteSCIMGroup :execrows
-UPDATE credbound_scim_groups SET deleted_at = $3, updated_at = $4 WHERE configuration_id = $1 AND id = $2 AND deleted_at IS NULL
+UPDATE credbound.scim_groups SET deleted_at = $3, updated_at = $4 WHERE configuration_id = $1 AND id = $2 AND deleted_at IS NULL
 `
 
 type DeleteSCIMGroupParams struct {
@@ -333,7 +333,7 @@ func (q *Queries) DeleteSCIMGroup(ctx context.Context, arg DeleteSCIMGroupParams
 }
 
 const deleteSSOIdentity = `-- name: DeleteSSOIdentity :execrows
-DELETE FROM credbound_sso_identities WHERE id = $2 AND user_id = $1
+DELETE FROM credbound.sso_identities WHERE id = $2 AND user_id = $1
 `
 
 type DeleteSSOIdentityParams struct {
@@ -350,7 +350,7 @@ func (q *Queries) DeleteSSOIdentity(ctx context.Context, arg DeleteSSOIdentityPa
 }
 
 const deleteTOTP = `-- name: DeleteTOTP :execrows
-DELETE FROM credbound_totp_factors WHERE user_id = $1
+DELETE FROM credbound.totp_factors WHERE user_id = $1
 `
 
 func (q *Queries) DeleteTOTP(ctx context.Context, userID string) (int64, error) {
@@ -362,7 +362,7 @@ func (q *Queries) DeleteTOTP(ctx context.Context, userID string) (int64, error) 
 }
 
 const disableSCIMConfiguration = `-- name: DisableSCIMConfiguration :execrows
-UPDATE credbound_scim_configurations SET enabled = false, updated_at = $2 WHERE id = $1
+UPDATE credbound.scim_configurations SET enabled = false, updated_at = $2 WHERE id = $1
 `
 
 type DisableSCIMConfigurationParams struct {
@@ -379,7 +379,7 @@ func (q *Queries) DisableSCIMConfiguration(ctx context.Context, arg DisableSCIMC
 }
 
 const getAuditChainHead = `-- name: GetAuditChainHead :one
-SELECT sequence, head_hash FROM credbound_audit_chain WHERE singleton = 1 FOR UPDATE
+SELECT sequence, head_hash FROM credbound.audit_chain WHERE singleton = 1 FOR UPDATE
 `
 
 type GetAuditChainHeadRow struct {
@@ -395,7 +395,7 @@ func (q *Queries) GetAuditChainHead(ctx context.Context) (GetAuditChainHeadRow, 
 }
 
 const getEmailAuthentication = `-- name: GetEmailAuthentication :one
-SELECT id, user_id, email_id, digest, created_at, expires_at, used_at FROM credbound_email_authentications WHERE id = $1
+SELECT id, user_id, email_id, digest, created_at, expires_at, used_at FROM credbound.email_authentications WHERE id = $1
 `
 
 func (q *Queries) GetEmailAuthentication(ctx context.Context, id string) (CredboundEmailAuthentication, error) {
@@ -415,7 +415,7 @@ func (q *Queries) GetEmailAuthentication(ctx context.Context, id string) (Credbo
 
 const getEmailVerification = `-- name: GetEmailVerification :one
 SELECT id, user_id, address, is_primary, verified_at, verification_digest, verification_expires_at, created_at, updated_at
-FROM credbound_user_emails WHERE id = $1
+FROM credbound.user_emails WHERE id = $1
 `
 
 func (q *Queries) GetEmailVerification(ctx context.Context, id string) (CredboundUserEmail, error) {
@@ -436,7 +436,7 @@ func (q *Queries) GetEmailVerification(ctx context.Context, id string) (Credboun
 }
 
 const getInstanceAdministrator = `-- name: GetInstanceAdministrator :one
-SELECT user_id, role, created_at, updated_at FROM credbound_instance_administrators WHERE user_id = $1
+SELECT user_id, role, created_at, updated_at FROM credbound.instance_administrators WHERE user_id = $1
 `
 
 func (q *Queries) GetInstanceAdministrator(ctx context.Context, userID string) (CredboundInstanceAdministrator, error) {
@@ -452,7 +452,7 @@ func (q *Queries) GetInstanceAdministrator(ctx context.Context, userID string) (
 }
 
 const getLoginThrottle = `-- name: GetLoginThrottle :one
-SELECT user_id, failed_attempts, locked_until, updated_at FROM credbound_login_throttles WHERE user_id = $1
+SELECT user_id, failed_attempts, locked_until, updated_at FROM credbound.login_throttles WHERE user_id = $1
 `
 
 func (q *Queries) GetLoginThrottle(ctx context.Context, userID string) (CredboundLoginThrottle, error) {
@@ -468,7 +468,7 @@ func (q *Queries) GetLoginThrottle(ctx context.Context, userID string) (Credboun
 }
 
 const getMembership = `-- name: GetMembership :one
-SELECT workspace_id, user_id, role, status, provisioning_source, created_at, updated_at FROM credbound_memberships WHERE workspace_id = $1 AND user_id = $2
+SELECT workspace_id, user_id, role, status, provisioning_source, created_at, updated_at FROM credbound.memberships WHERE workspace_id = $1 AND user_id = $2
 `
 
 type GetMembershipParams struct {
@@ -493,7 +493,7 @@ func (q *Queries) GetMembership(ctx context.Context, arg GetMembershipParams) (C
 
 const getPATByID = `-- name: GetPATByID :one
 SELECT id, user_id, name, prefix, digest, workspace_id, scopes_json, created_at, expires_at, last_used_at, revoked_at
-FROM credbound_personal_access_tokens WHERE id = $1
+FROM credbound.personal_access_tokens WHERE id = $1
 `
 
 func (q *Queries) GetPATByID(ctx context.Context, id string) (CredboundPersonalAccessToken, error) {
@@ -517,7 +517,7 @@ func (q *Queries) GetPATByID(ctx context.Context, id string) (CredboundPersonalA
 
 const getPATByPrefix = `-- name: GetPATByPrefix :one
 SELECT id, user_id, name, prefix, digest, workspace_id, scopes_json, created_at, expires_at, last_used_at, revoked_at
-FROM credbound_personal_access_tokens WHERE prefix = $1
+FROM credbound.personal_access_tokens WHERE prefix = $1
 `
 
 func (q *Queries) GetPATByPrefix(ctx context.Context, prefix string) (CredboundPersonalAccessToken, error) {
@@ -540,7 +540,7 @@ func (q *Queries) GetPATByPrefix(ctx context.Context, prefix string) (CredboundP
 }
 
 const getPassword = `-- name: GetPassword :one
-SELECT user_id, hash, updated_at FROM credbound_password_credentials WHERE user_id = $1
+SELECT user_id, hash, updated_at FROM credbound.password_credentials WHERE user_id = $1
 `
 
 func (q *Queries) GetPassword(ctx context.Context, userID string) (CredboundPasswordCredential, error) {
@@ -551,7 +551,7 @@ func (q *Queries) GetPassword(ctx context.Context, userID string) (CredboundPass
 }
 
 const getPasswordReset = `-- name: GetPasswordReset :one
-SELECT id, user_id, digest, created_at, expires_at, used_at FROM credbound_password_resets WHERE id = $1
+SELECT id, user_id, digest, created_at, expires_at, used_at FROM credbound.password_resets WHERE id = $1
 `
 
 func (q *Queries) GetPasswordReset(ctx context.Context, id string) (CredboundPasswordReset, error) {
@@ -570,7 +570,7 @@ func (q *Queries) GetPasswordReset(ctx context.Context, id string) (CredboundPas
 
 const getPendingWorkspaceInvitation = `-- name: GetPendingWorkspaceInvitation :one
 SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
-FROM credbound_workspace_invitations WHERE workspace_id = $1 AND email = $2 AND accepted_at IS NULL AND revoked_at IS NULL
+FROM credbound.workspace_invitations WHERE workspace_id = $1 AND email = $2 AND accepted_at IS NULL AND revoked_at IS NULL
 `
 
 type GetPendingWorkspaceInvitationParams struct {
@@ -599,7 +599,7 @@ func (q *Queries) GetPendingWorkspaceInvitation(ctx context.Context, arg GetPend
 
 const getSCIMConfiguration = `-- name: GetSCIMConfiguration :one
 SELECT id, workspace_id, enabled, default_role, trust_directory_emails, group_role_mappings_json, created_at, updated_at
-FROM credbound_scim_configurations WHERE id = $1
+FROM credbound.scim_configurations WHERE id = $1
 `
 
 func (q *Queries) GetSCIMConfiguration(ctx context.Context, id string) (CredboundScimConfiguration, error) {
@@ -621,8 +621,8 @@ func (q *Queries) GetSCIMConfiguration(ctx context.Context, id string) (Credboun
 const getSCIMConfigurationByCredentialPrefix = `-- name: GetSCIMConfigurationByCredentialPrefix :one
 SELECT c.id, c.workspace_id, c.enabled, c.default_role, c.trust_directory_emails, c.group_role_mappings_json, c.created_at, c.updated_at,
        k.id AS credential_id, k.configuration_id, k.prefix, k.digest, k.created_at AS credential_created_at, k.expires_at, k.last_used_at, k.revoked_at
-FROM credbound_scim_credentials k
-JOIN credbound_scim_configurations c ON c.id = k.configuration_id
+FROM credbound.scim_credentials k
+JOIN credbound.scim_configurations c ON c.id = k.configuration_id
 WHERE k.prefix = $1
 `
 
@@ -671,7 +671,7 @@ func (q *Queries) GetSCIMConfigurationByCredentialPrefix(ctx context.Context, pr
 
 const getSCIMGroup = `-- name: GetSCIMGroup :one
 SELECT id, configuration_id, external_id, display_name, member_ids_json, created_at, updated_at, deleted_at
-FROM credbound_scim_groups WHERE configuration_id = $1 AND id = $2 AND deleted_at IS NULL
+FROM credbound.scim_groups WHERE configuration_id = $1 AND id = $2 AND deleted_at IS NULL
 `
 
 type GetSCIMGroupParams struct {
@@ -697,7 +697,7 @@ func (q *Queries) GetSCIMGroup(ctx context.Context, arg GetSCIMGroupParams) (Cre
 
 const getSCIMGroupByExternalID = `-- name: GetSCIMGroupByExternalID :one
 SELECT id, configuration_id, external_id, display_name, member_ids_json, created_at, updated_at, deleted_at
-FROM credbound_scim_groups WHERE configuration_id = $1 AND external_id = $2 AND deleted_at IS NULL
+FROM credbound.scim_groups WHERE configuration_id = $1 AND external_id = $2 AND deleted_at IS NULL
 `
 
 type GetSCIMGroupByExternalIDParams struct {
@@ -723,7 +723,7 @@ func (q *Queries) GetSCIMGroupByExternalID(ctx context.Context, arg GetSCIMGroup
 
 const getSCIMUser = `-- name: GetSCIMUser :one
 SELECT id, configuration_id, user_id, external_id, normalized_user_name, display_name, emails_json, profile_json, active, created_at, updated_at, deprovisioned_at
-FROM credbound_scim_users WHERE configuration_id = $1 AND id = $2
+FROM credbound.scim_users WHERE configuration_id = $1 AND id = $2
 `
 
 type GetSCIMUserParams struct {
@@ -753,7 +753,7 @@ func (q *Queries) GetSCIMUser(ctx context.Context, arg GetSCIMUserParams) (Credb
 
 const getSCIMUserByExternalID = `-- name: GetSCIMUserByExternalID :one
 SELECT id, configuration_id, user_id, external_id, normalized_user_name, display_name, emails_json, profile_json, active, created_at, updated_at, deprovisioned_at
-FROM credbound_scim_users WHERE configuration_id = $1 AND external_id = $2
+FROM credbound.scim_users WHERE configuration_id = $1 AND external_id = $2
 `
 
 type GetSCIMUserByExternalIDParams struct {
@@ -783,7 +783,7 @@ func (q *Queries) GetSCIMUserByExternalID(ctx context.Context, arg GetSCIMUserBy
 
 const getSCIMUserByUserName = `-- name: GetSCIMUserByUserName :one
 SELECT id, configuration_id, user_id, external_id, normalized_user_name, display_name, emails_json, profile_json, active, created_at, updated_at, deprovisioned_at
-FROM credbound_scim_users WHERE configuration_id = $1 AND normalized_user_name = $2
+FROM credbound.scim_users WHERE configuration_id = $1 AND normalized_user_name = $2
 `
 
 type GetSCIMUserByUserNameParams struct {
@@ -813,7 +813,7 @@ func (q *Queries) GetSCIMUserByUserName(ctx context.Context, arg GetSCIMUserByUs
 
 const getSSOIdentity = `-- name: GetSSOIdentity :one
 SELECT id, user_id, provider_configuration_id, provider_kind, issuer, subject, email, created_at, last_used_at
-FROM credbound_sso_identities WHERE provider_configuration_id = $1 AND issuer = $2 AND subject = $3
+FROM credbound.sso_identities WHERE provider_configuration_id = $1 AND issuer = $2 AND subject = $3
 `
 
 type GetSSOIdentityParams struct {
@@ -841,7 +841,7 @@ func (q *Queries) GetSSOIdentity(ctx context.Context, arg GetSSOIdentityParams) 
 
 const getSSOIdentityByID = `-- name: GetSSOIdentityByID :one
 SELECT id, user_id, provider_configuration_id, provider_kind, issuer, subject, email, created_at, last_used_at
-FROM credbound_sso_identities WHERE id = $1
+FROM credbound.sso_identities WHERE id = $1
 `
 
 func (q *Queries) GetSSOIdentityByID(ctx context.Context, id string) (CredboundSsoIdentity, error) {
@@ -862,7 +862,7 @@ func (q *Queries) GetSSOIdentityByID(ctx context.Context, id string) (CredboundS
 }
 
 const getTOTP = `-- name: GetTOTP :one
-SELECT user_id, encrypted_secret, active, last_used_step, created_at, updated_at FROM credbound_totp_factors WHERE user_id = $1
+SELECT user_id, encrypted_secret, active, last_used_step, created_at, updated_at FROM credbound.totp_factors WHERE user_id = $1
 `
 
 func (q *Queries) GetTOTP(ctx context.Context, userID string) (CredboundTotpFactor, error) {
@@ -881,9 +881,9 @@ func (q *Queries) GetTOTP(ctx context.Context, userID string) (CredboundTotpFact
 
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT u.id, primary_email.address AS email, u.display_name, u.disabled, u.last_seen_at, u.created_at, u.updated_at
-FROM credbound_users u
-JOIN credbound_user_emails login_email ON login_email.user_id = u.id
-JOIN credbound_user_emails primary_email ON primary_email.user_id = u.id AND primary_email.is_primary
+FROM credbound.users u
+JOIN credbound.user_emails login_email ON login_email.user_id = u.id
+JOIN credbound.user_emails primary_email ON primary_email.user_id = u.id AND primary_email.is_primary
 WHERE login_email.address = $1 AND login_email.verified_at IS NOT NULL
 `
 
@@ -914,8 +914,8 @@ func (q *Queries) GetUserByEmail(ctx context.Context, address string) (GetUserBy
 
 const getUserByID = `-- name: GetUserByID :one
 SELECT u.id, primary_email.address AS email, u.display_name, u.disabled, u.last_seen_at, u.created_at, u.updated_at
-FROM credbound_users u
-JOIN credbound_user_emails primary_email ON primary_email.user_id = u.id AND primary_email.is_primary
+FROM credbound.users u
+JOIN credbound.user_emails primary_email ON primary_email.user_id = u.id AND primary_email.is_primary
 WHERE u.id = $1
 `
 
@@ -945,7 +945,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, e
 }
 
 const getWorkspace = `-- name: GetWorkspace :one
-SELECT id, name, created_at, updated_at, disabled_at, require_mfa FROM credbound_workspaces WHERE id = $1
+SELECT id, name, created_at, updated_at, disabled_at, require_mfa FROM credbound.workspaces WHERE id = $1
 `
 
 func (q *Queries) GetWorkspace(ctx context.Context, id string) (CredboundWorkspace, error) {
@@ -964,7 +964,7 @@ func (q *Queries) GetWorkspace(ctx context.Context, id string) (CredboundWorkspa
 
 const getWorkspaceInvitation = `-- name: GetWorkspaceInvitation :one
 SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
-FROM credbound_workspace_invitations WHERE id = $1
+FROM credbound.workspace_invitations WHERE id = $1
 `
 
 func (q *Queries) GetWorkspaceInvitation(ctx context.Context, id string) (CredboundWorkspaceInvitation, error) {
@@ -987,7 +987,7 @@ func (q *Queries) GetWorkspaceInvitation(ctx context.Context, id string) (Credbo
 }
 
 const insertAudit = `-- name: InsertAudit :exec
-INSERT INTO credbound_audit_events (id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash)
+INSERT INTO credbound.audit_events (id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 `
 
@@ -1031,7 +1031,7 @@ func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error 
 }
 
 const insertEmailAuthentication = `-- name: InsertEmailAuthentication :exec
-INSERT INTO credbound_email_authentications (id, user_id, email_id, digest, created_at, expires_at, used_at) VALUES ($1, $2, $3, $4, $5, $6, NULL)
+INSERT INTO credbound.email_authentications (id, user_id, email_id, digest, created_at, expires_at, used_at) VALUES ($1, $2, $3, $4, $5, $6, NULL)
 `
 
 type InsertEmailAuthenticationParams struct {
@@ -1056,7 +1056,7 @@ func (q *Queries) InsertEmailAuthentication(ctx context.Context, arg InsertEmail
 }
 
 const insertPAT = `-- name: InsertPAT :exec
-INSERT INTO credbound_personal_access_tokens (id, user_id, name, prefix, digest, workspace_id, scopes_json, created_at, expires_at, last_used_at, revoked_at)
+INSERT INTO credbound.personal_access_tokens (id, user_id, name, prefix, digest, workspace_id, scopes_json, created_at, expires_at, last_used_at, revoked_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, NULL)
 `
 
@@ -1088,7 +1088,7 @@ func (q *Queries) InsertPAT(ctx context.Context, arg InsertPATParams) error {
 }
 
 const insertPasskey = `-- name: InsertPasskey :exec
-INSERT INTO credbound_passkeys (id, user_id, name, credential_id, credential_json, created_at, last_used_at) VALUES ($1, $2, $3, $4, $5, $6, NULL)
+INSERT INTO credbound.passkeys (id, user_id, name, credential_id, credential_json, created_at, last_used_at) VALUES ($1, $2, $3, $4, $5, $6, NULL)
 `
 
 type InsertPasskeyParams struct {
@@ -1113,7 +1113,7 @@ func (q *Queries) InsertPasskey(ctx context.Context, arg InsertPasskeyParams) er
 }
 
 const insertPassword = `-- name: InsertPassword :exec
-INSERT INTO credbound_password_credentials (user_id, hash, updated_at) VALUES ($1, $2, $3)
+INSERT INTO credbound.password_credentials (user_id, hash, updated_at) VALUES ($1, $2, $3)
 `
 
 type InsertPasswordParams struct {
@@ -1128,7 +1128,7 @@ func (q *Queries) InsertPassword(ctx context.Context, arg InsertPasswordParams) 
 }
 
 const insertPasswordReset = `-- name: InsertPasswordReset :exec
-INSERT INTO credbound_password_resets (id, user_id, digest, created_at, expires_at, used_at) VALUES ($1, $2, $3, $4, $5, NULL)
+INSERT INTO credbound.password_resets (id, user_id, digest, created_at, expires_at, used_at) VALUES ($1, $2, $3, $4, $5, NULL)
 `
 
 type InsertPasswordResetParams struct {
@@ -1151,7 +1151,7 @@ func (q *Queries) InsertPasswordReset(ctx context.Context, arg InsertPasswordRes
 }
 
 const insertRecoveryCode = `-- name: InsertRecoveryCode :exec
-INSERT INTO credbound_recovery_codes (user_id, digest, used_at) VALUES ($1, $2, NULL)
+INSERT INTO credbound.recovery_codes (user_id, digest, used_at) VALUES ($1, $2, NULL)
 `
 
 type InsertRecoveryCodeParams struct {
@@ -1165,7 +1165,7 @@ func (q *Queries) InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCode
 }
 
 const insertSCIMConfiguration = `-- name: InsertSCIMConfiguration :exec
-INSERT INTO credbound_scim_configurations (id, workspace_id, enabled, default_role, trust_directory_emails, group_role_mappings_json, created_at, updated_at)
+INSERT INTO credbound.scim_configurations (id, workspace_id, enabled, default_role, trust_directory_emails, group_role_mappings_json, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
@@ -1195,7 +1195,7 @@ func (q *Queries) InsertSCIMConfiguration(ctx context.Context, arg InsertSCIMCon
 }
 
 const insertSCIMCredential = `-- name: InsertSCIMCredential :exec
-INSERT INTO credbound_scim_credentials (id, configuration_id, prefix, digest, created_at, expires_at, last_used_at, revoked_at)
+INSERT INTO credbound.scim_credentials (id, configuration_id, prefix, digest, created_at, expires_at, last_used_at, revoked_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
@@ -1225,7 +1225,7 @@ func (q *Queries) InsertSCIMCredential(ctx context.Context, arg InsertSCIMCreden
 }
 
 const insertSCIMUser = `-- name: InsertSCIMUser :exec
-INSERT INTO credbound_scim_users (id, configuration_id, user_id, external_id, normalized_user_name, display_name, emails_json, profile_json, active, created_at, updated_at, deprovisioned_at)
+INSERT INTO credbound.scim_users (id, configuration_id, user_id, external_id, normalized_user_name, display_name, emails_json, profile_json, active, created_at, updated_at, deprovisioned_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 `
 
@@ -1263,7 +1263,7 @@ func (q *Queries) InsertSCIMUser(ctx context.Context, arg InsertSCIMUserParams) 
 }
 
 const insertSSOIdentity = `-- name: InsertSSOIdentity :exec
-INSERT INTO credbound_sso_identities (id, user_id, provider_configuration_id, provider_kind, issuer, subject, email, created_at, last_used_at)
+INSERT INTO credbound.sso_identities (id, user_id, provider_configuration_id, provider_kind, issuer, subject, email, created_at, last_used_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `
 
@@ -1295,7 +1295,7 @@ func (q *Queries) InsertSSOIdentity(ctx context.Context, arg InsertSSOIdentityPa
 }
 
 const insertUser = `-- name: InsertUser :exec
-INSERT INTO credbound_users (id, display_name, disabled, last_seen_at, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO credbound.users (id, display_name, disabled, last_seen_at, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type InsertUserParams struct {
@@ -1320,7 +1320,7 @@ func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) error {
 }
 
 const insertUserEmail = `-- name: InsertUserEmail :exec
-INSERT INTO credbound_user_emails (id, user_id, address, is_primary, verified_at, verification_digest, verification_expires_at, created_at, updated_at)
+INSERT INTO credbound.user_emails (id, user_id, address, is_primary, verified_at, verification_digest, verification_expires_at, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `
 
@@ -1352,7 +1352,7 @@ func (q *Queries) InsertUserEmail(ctx context.Context, arg InsertUserEmailParams
 }
 
 const insertWorkspace = `-- name: InsertWorkspace :exec
-INSERT INTO credbound_workspaces (id, name, created_at, updated_at, disabled_at, require_mfa) VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO credbound.workspaces (id, name, created_at, updated_at, disabled_at, require_mfa) VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type InsertWorkspaceParams struct {
@@ -1377,7 +1377,7 @@ func (q *Queries) InsertWorkspace(ctx context.Context, arg InsertWorkspaceParams
 }
 
 const insertWorkspaceInvitation = `-- name: InsertWorkspaceInvitation :exec
-INSERT INTO credbound_workspace_invitations (id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at)
+INSERT INTO credbound.workspace_invitations (id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL, NULL)
 `
 
@@ -1407,7 +1407,7 @@ func (q *Queries) InsertWorkspaceInvitation(ctx context.Context, arg InsertWorks
 }
 
 const lockLoginThrottle = `-- name: LockLoginThrottle :execrows
-UPDATE credbound_login_throttles SET locked_until = $2 WHERE user_id = $1
+UPDATE credbound.login_throttles SET locked_until = $2 WHERE user_id = $1
 `
 
 type LockLoginThrottleParams struct {
@@ -1424,7 +1424,7 @@ func (q *Queries) LockLoginThrottle(ctx context.Context, arg LockLoginThrottlePa
 }
 
 const lockRootAdministrators = `-- name: LockRootAdministrators :many
-SELECT user_id FROM credbound_instance_administrators
+SELECT user_id FROM credbound.instance_administrators
 WHERE role = 'root'
 ORDER BY user_id
 FOR UPDATE
@@ -1455,8 +1455,8 @@ func (q *Queries) LockRootAdministrators(ctx context.Context) ([]string, error) 
 
 const lockUserAdminWorkspaces = `-- name: LockUserAdminWorkspaces :many
 SELECT w.id
-FROM credbound_workspaces w
-JOIN credbound_memberships m ON m.workspace_id = w.id
+FROM credbound.workspaces w
+JOIN credbound.memberships m ON m.workspace_id = w.id
 WHERE m.user_id = $1 AND m.role = 'admin' AND m.status = 'active'
 ORDER BY w.id
 FOR UPDATE OF w
@@ -1486,7 +1486,7 @@ func (q *Queries) LockUserAdminWorkspaces(ctx context.Context, userID string) ([
 }
 
 const lockWorkspace = `-- name: LockWorkspace :one
-SELECT id FROM credbound_workspaces WHERE id = $1 FOR UPDATE
+SELECT id FROM credbound.workspaces WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockWorkspace(ctx context.Context, id string) (string, error) {
@@ -1497,7 +1497,7 @@ func (q *Queries) LockWorkspace(ctx context.Context, id string) (string, error) 
 }
 
 const oAuthAccessTokenJSONByID = `-- name: OAuthAccessTokenJSONByID :one
-SELECT data_json FROM credbound_oauth_access_tokens WHERE id = $1
+SELECT data_json FROM credbound.oauth_access_tokens WHERE id = $1
 `
 
 func (q *Queries) OAuthAccessTokenJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
@@ -1508,7 +1508,7 @@ func (q *Queries) OAuthAccessTokenJSONByID(ctx context.Context, id string) (json
 }
 
 const oAuthAccessTokenJSONByPrefix = `-- name: OAuthAccessTokenJSONByPrefix :one
-SELECT data_json FROM credbound_oauth_access_tokens WHERE prefix = $1
+SELECT data_json FROM credbound.oauth_access_tokens WHERE prefix = $1
 `
 
 func (q *Queries) OAuthAccessTokenJSONByPrefix(ctx context.Context, prefix string) (json.RawMessage, error) {
@@ -1519,7 +1519,7 @@ func (q *Queries) OAuthAccessTokenJSONByPrefix(ctx context.Context, prefix strin
 }
 
 const oAuthAccessTokenRecordsByGrant = `-- name: OAuthAccessTokenRecordsByGrant :many
-SELECT id, data_json FROM credbound_oauth_access_tokens WHERE grant_id = $1
+SELECT id, data_json FROM credbound.oauth_access_tokens WHERE grant_id = $1
 `
 
 type OAuthAccessTokenRecordsByGrantRow struct {
@@ -1551,7 +1551,7 @@ func (q *Queries) OAuthAccessTokenRecordsByGrant(ctx context.Context, grantID st
 }
 
 const oAuthAuthorizationCodeJSONByID = `-- name: OAuthAuthorizationCodeJSONByID :one
-SELECT data_json FROM credbound_oauth_authorization_codes WHERE id = $1
+SELECT data_json FROM credbound.oauth_authorization_codes WHERE id = $1
 `
 
 func (q *Queries) OAuthAuthorizationCodeJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
@@ -1562,7 +1562,7 @@ func (q *Queries) OAuthAuthorizationCodeJSONByID(ctx context.Context, id string)
 }
 
 const oAuthAuthorizationCodeJSONByPrefix = `-- name: OAuthAuthorizationCodeJSONByPrefix :one
-SELECT data_json FROM credbound_oauth_authorization_codes WHERE prefix = $1
+SELECT data_json FROM credbound.oauth_authorization_codes WHERE prefix = $1
 `
 
 func (q *Queries) OAuthAuthorizationCodeJSONByPrefix(ctx context.Context, prefix string) (json.RawMessage, error) {
@@ -1573,7 +1573,7 @@ func (q *Queries) OAuthAuthorizationCodeJSONByPrefix(ctx context.Context, prefix
 }
 
 const oAuthClientJSONByClientID = `-- name: OAuthClientJSONByClientID :one
-SELECT data_json FROM credbound_oauth_clients WHERE issuer_id = $1 AND client_id = $2
+SELECT data_json FROM credbound.oauth_clients WHERE issuer_id = $1 AND client_id = $2
 `
 
 type OAuthClientJSONByClientIDParams struct {
@@ -1589,7 +1589,7 @@ func (q *Queries) OAuthClientJSONByClientID(ctx context.Context, arg OAuthClient
 }
 
 const oAuthClientJSONByID = `-- name: OAuthClientJSONByID :one
-SELECT data_json FROM credbound_oauth_clients WHERE id = $1
+SELECT data_json FROM credbound.oauth_clients WHERE id = $1
 `
 
 func (q *Queries) OAuthClientJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
@@ -1600,7 +1600,7 @@ func (q *Queries) OAuthClientJSONByID(ctx context.Context, id string) (json.RawM
 }
 
 const oAuthClientJSONsByIssuer = `-- name: OAuthClientJSONsByIssuer :many
-SELECT data_json FROM credbound_oauth_clients WHERE issuer_id = $1
+SELECT data_json FROM credbound.oauth_clients WHERE issuer_id = $1
 `
 
 func (q *Queries) OAuthClientJSONsByIssuer(ctx context.Context, issuerID string) ([]json.RawMessage, error) {
@@ -1627,7 +1627,7 @@ func (q *Queries) OAuthClientJSONsByIssuer(ctx context.Context, issuerID string)
 }
 
 const oAuthConsumeAuthorizationCode = `-- name: OAuthConsumeAuthorizationCode :execrows
-UPDATE credbound_oauth_authorization_codes SET used_at = $2, data_json = $3
+UPDATE credbound.oauth_authorization_codes SET used_at = $2, data_json = $3
 WHERE id = $1 AND used_at IS NULL AND expires_at > $4
 `
 
@@ -1652,7 +1652,7 @@ func (q *Queries) OAuthConsumeAuthorizationCode(ctx context.Context, arg OAuthCo
 }
 
 const oAuthConsumeRefreshToken = `-- name: OAuthConsumeRefreshToken :execrows
-UPDATE credbound_oauth_refresh_tokens SET used_at = $2, data_json = $3
+UPDATE credbound.oauth_refresh_tokens SET used_at = $2, data_json = $3
 WHERE id = $1 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > $4
 `
 
@@ -1677,7 +1677,7 @@ func (q *Queries) OAuthConsumeRefreshToken(ctx context.Context, arg OAuthConsume
 }
 
 const oAuthGrantJSONByID = `-- name: OAuthGrantJSONByID :one
-SELECT data_json FROM credbound_oauth_grants WHERE id = $1
+SELECT data_json FROM credbound.oauth_grants WHERE id = $1
 `
 
 func (q *Queries) OAuthGrantJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
@@ -1688,7 +1688,7 @@ func (q *Queries) OAuthGrantJSONByID(ctx context.Context, id string) (json.RawMe
 }
 
 const oAuthGrantRecords = `-- name: OAuthGrantRecords :many
-SELECT id, data_json FROM credbound_oauth_grants
+SELECT id, data_json FROM credbound.oauth_grants
 `
 
 type OAuthGrantRecordsRow struct {
@@ -1720,7 +1720,7 @@ func (q *Queries) OAuthGrantRecords(ctx context.Context) ([]OAuthGrantRecordsRow
 }
 
 const oAuthInitialAccessTokenJSONByID = `-- name: OAuthInitialAccessTokenJSONByID :one
-SELECT data_json FROM credbound_oauth_initial_access_tokens WHERE id = $1
+SELECT data_json FROM credbound.oauth_initial_access_tokens WHERE id = $1
 `
 
 func (q *Queries) OAuthInitialAccessTokenJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
@@ -1731,7 +1731,7 @@ func (q *Queries) OAuthInitialAccessTokenJSONByID(ctx context.Context, id string
 }
 
 const oAuthInitialAccessTokenJSONByIDAndIssuer = `-- name: OAuthInitialAccessTokenJSONByIDAndIssuer :one
-SELECT data_json FROM credbound_oauth_initial_access_tokens WHERE id = $1 AND issuer_id = $2
+SELECT data_json FROM credbound.oauth_initial_access_tokens WHERE id = $1 AND issuer_id = $2
 `
 
 type OAuthInitialAccessTokenJSONByIDAndIssuerParams struct {
@@ -1747,7 +1747,7 @@ func (q *Queries) OAuthInitialAccessTokenJSONByIDAndIssuer(ctx context.Context, 
 }
 
 const oAuthInitialAccessTokenJSONByPrefix = `-- name: OAuthInitialAccessTokenJSONByPrefix :one
-SELECT data_json FROM credbound_oauth_initial_access_tokens WHERE prefix = $1
+SELECT data_json FROM credbound.oauth_initial_access_tokens WHERE prefix = $1
 `
 
 func (q *Queries) OAuthInitialAccessTokenJSONByPrefix(ctx context.Context, prefix string) (json.RawMessage, error) {
@@ -1758,7 +1758,7 @@ func (q *Queries) OAuthInitialAccessTokenJSONByPrefix(ctx context.Context, prefi
 }
 
 const oAuthInsertAccessToken = `-- name: OAuthInsertAccessToken :exec
-INSERT INTO credbound_oauth_access_tokens (id, prefix, grant_id, data_json) VALUES ($1, $2, $3, $4)
+INSERT INTO credbound.oauth_access_tokens (id, prefix, grant_id, data_json) VALUES ($1, $2, $3, $4)
 `
 
 type OAuthInsertAccessTokenParams struct {
@@ -1779,7 +1779,7 @@ func (q *Queries) OAuthInsertAccessToken(ctx context.Context, arg OAuthInsertAcc
 }
 
 const oAuthInsertAuthorizationCode = `-- name: OAuthInsertAuthorizationCode :exec
-INSERT INTO credbound_oauth_authorization_codes (id, prefix, grant_id, used_at, expires_at, data_json) VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO credbound.oauth_authorization_codes (id, prefix, grant_id, used_at, expires_at, data_json) VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type OAuthInsertAuthorizationCodeParams struct {
@@ -1804,7 +1804,7 @@ func (q *Queries) OAuthInsertAuthorizationCode(ctx context.Context, arg OAuthIns
 }
 
 const oAuthInsertClient = `-- name: OAuthInsertClient :exec
-INSERT INTO credbound_oauth_clients (id, issuer_id, client_id, created_at, data_json) VALUES ($1, $2, $3, $4, $5)
+INSERT INTO credbound.oauth_clients (id, issuer_id, client_id, created_at, data_json) VALUES ($1, $2, $3, $4, $5)
 `
 
 type OAuthInsertClientParams struct {
@@ -1827,7 +1827,7 @@ func (q *Queries) OAuthInsertClient(ctx context.Context, arg OAuthInsertClientPa
 }
 
 const oAuthInsertGrant = `-- name: OAuthInsertGrant :exec
-INSERT INTO credbound_oauth_grants (id, client_record_id, resource_id, user_id, workspace_id, created_at, data_json)
+INSERT INTO credbound.oauth_grants (id, client_record_id, resource_id, user_id, workspace_id, created_at, data_json)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
@@ -1855,7 +1855,7 @@ func (q *Queries) OAuthInsertGrant(ctx context.Context, arg OAuthInsertGrantPara
 }
 
 const oAuthInsertInitialAccessToken = `-- name: OAuthInsertInitialAccessToken :exec
-INSERT INTO credbound_oauth_initial_access_tokens (id, issuer_id, prefix, registration_count, max_registrations, expires_at, revoked_at, data_json)
+INSERT INTO credbound.oauth_initial_access_tokens (id, issuer_id, prefix, registration_count, max_registrations, expires_at, revoked_at, data_json)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
@@ -1886,7 +1886,7 @@ func (q *Queries) OAuthInsertInitialAccessToken(ctx context.Context, arg OAuthIn
 
 const oAuthInsertIssuer = `-- name: OAuthInsertIssuer :exec
 
-INSERT INTO credbound_oauth_issuers (id, issuer, created_at, data_json) VALUES ($1, $2, $3, $4)
+INSERT INTO credbound.oauth_issuers (id, issuer, created_at, data_json) VALUES ($1, $2, $3, $4)
 `
 
 type OAuthInsertIssuerParams struct {
@@ -1909,7 +1909,7 @@ func (q *Queries) OAuthInsertIssuer(ctx context.Context, arg OAuthInsertIssuerPa
 }
 
 const oAuthInsertRefreshToken = `-- name: OAuthInsertRefreshToken :exec
-INSERT INTO credbound_oauth_refresh_tokens (id, family_id, prefix, grant_id, used_at, revoked_at, expires_at, data_json)
+INSERT INTO credbound.oauth_refresh_tokens (id, family_id, prefix, grant_id, used_at, revoked_at, expires_at, data_json)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
@@ -1939,7 +1939,7 @@ func (q *Queries) OAuthInsertRefreshToken(ctx context.Context, arg OAuthInsertRe
 }
 
 const oAuthInsertResource = `-- name: OAuthInsertResource :exec
-INSERT INTO credbound_oauth_resources (id, issuer_id, workspace_id, resource, created_at, data_json) VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO credbound.oauth_resources (id, issuer_id, workspace_id, resource, created_at, data_json) VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type OAuthInsertResourceParams struct {
@@ -1964,7 +1964,7 @@ func (q *Queries) OAuthInsertResource(ctx context.Context, arg OAuthInsertResour
 }
 
 const oAuthIssuerJSONByID = `-- name: OAuthIssuerJSONByID :one
-SELECT data_json FROM credbound_oauth_issuers WHERE id = $1
+SELECT data_json FROM credbound.oauth_issuers WHERE id = $1
 `
 
 func (q *Queries) OAuthIssuerJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
@@ -1975,7 +1975,7 @@ func (q *Queries) OAuthIssuerJSONByID(ctx context.Context, id string) (json.RawM
 }
 
 const oAuthIssuerJSONByURL = `-- name: OAuthIssuerJSONByURL :one
-SELECT data_json FROM credbound_oauth_issuers WHERE issuer = $1
+SELECT data_json FROM credbound.oauth_issuers WHERE issuer = $1
 `
 
 func (q *Queries) OAuthIssuerJSONByURL(ctx context.Context, issuer string) (json.RawMessage, error) {
@@ -1986,7 +1986,7 @@ func (q *Queries) OAuthIssuerJSONByURL(ctx context.Context, issuer string) (json
 }
 
 const oAuthRefreshFamilyExists = `-- name: OAuthRefreshFamilyExists :one
-SELECT EXISTS(SELECT 1 FROM credbound_oauth_refresh_tokens WHERE family_id = $1)
+SELECT EXISTS(SELECT 1 FROM credbound.oauth_refresh_tokens WHERE family_id = $1)
 `
 
 func (q *Queries) OAuthRefreshFamilyExists(ctx context.Context, familyID string) (bool, error) {
@@ -1997,7 +1997,7 @@ func (q *Queries) OAuthRefreshFamilyExists(ctx context.Context, familyID string)
 }
 
 const oAuthRefreshTokenByPrefix = `-- name: OAuthRefreshTokenByPrefix :one
-SELECT data_json, used_at, revoked_at FROM credbound_oauth_refresh_tokens WHERE prefix = $1
+SELECT data_json, used_at, revoked_at FROM credbound.oauth_refresh_tokens WHERE prefix = $1
 `
 
 type OAuthRefreshTokenByPrefixRow struct {
@@ -2014,7 +2014,7 @@ func (q *Queries) OAuthRefreshTokenByPrefix(ctx context.Context, prefix string) 
 }
 
 const oAuthRefreshTokenJSONByID = `-- name: OAuthRefreshTokenJSONByID :one
-SELECT data_json FROM credbound_oauth_refresh_tokens WHERE id = $1
+SELECT data_json FROM credbound.oauth_refresh_tokens WHERE id = $1
 `
 
 func (q *Queries) OAuthRefreshTokenJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
@@ -2025,7 +2025,7 @@ func (q *Queries) OAuthRefreshTokenJSONByID(ctx context.Context, id string) (jso
 }
 
 const oAuthRefreshTokenRecordsByGrant = `-- name: OAuthRefreshTokenRecordsByGrant :many
-SELECT id, data_json FROM credbound_oauth_refresh_tokens WHERE grant_id = $1 AND revoked_at IS NULL
+SELECT id, data_json FROM credbound.oauth_refresh_tokens WHERE grant_id = $1 AND revoked_at IS NULL
 `
 
 type OAuthRefreshTokenRecordsByGrantRow struct {
@@ -2057,7 +2057,7 @@ func (q *Queries) OAuthRefreshTokenRecordsByGrant(ctx context.Context, grantID s
 }
 
 const oAuthResourceJSONByID = `-- name: OAuthResourceJSONByID :one
-SELECT data_json FROM credbound_oauth_resources WHERE id = $1
+SELECT data_json FROM credbound.oauth_resources WHERE id = $1
 `
 
 func (q *Queries) OAuthResourceJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
@@ -2068,7 +2068,7 @@ func (q *Queries) OAuthResourceJSONByID(ctx context.Context, id string) (json.Ra
 }
 
 const oAuthResourceJSONByURI = `-- name: OAuthResourceJSONByURI :one
-SELECT data_json FROM credbound_oauth_resources WHERE resource = $1
+SELECT data_json FROM credbound.oauth_resources WHERE resource = $1
 `
 
 func (q *Queries) OAuthResourceJSONByURI(ctx context.Context, resource string) (json.RawMessage, error) {
@@ -2079,7 +2079,7 @@ func (q *Queries) OAuthResourceJSONByURI(ctx context.Context, resource string) (
 }
 
 const oAuthRevokeInitialAccessToken = `-- name: OAuthRevokeInitialAccessToken :execrows
-UPDATE credbound_oauth_initial_access_tokens SET revoked_at = $2, data_json = $3 WHERE id = $1
+UPDATE credbound.oauth_initial_access_tokens SET revoked_at = $2, data_json = $3 WHERE id = $1
 `
 
 type OAuthRevokeInitialAccessTokenParams struct {
@@ -2097,7 +2097,7 @@ func (q *Queries) OAuthRevokeInitialAccessToken(ctx context.Context, arg OAuthRe
 }
 
 const oAuthRevokeRefreshFamily = `-- name: OAuthRevokeRefreshFamily :execrows
-UPDATE credbound_oauth_refresh_tokens SET revoked_at = $2 WHERE family_id = $1 AND revoked_at IS NULL
+UPDATE credbound.oauth_refresh_tokens SET revoked_at = $2 WHERE family_id = $1 AND revoked_at IS NULL
 `
 
 type OAuthRevokeRefreshFamilyParams struct {
@@ -2114,7 +2114,7 @@ func (q *Queries) OAuthRevokeRefreshFamily(ctx context.Context, arg OAuthRevokeR
 }
 
 const oAuthRevokeRefreshToken = `-- name: OAuthRevokeRefreshToken :execrows
-UPDATE credbound_oauth_refresh_tokens SET revoked_at = $2, data_json = $3 WHERE id = $1
+UPDATE credbound.oauth_refresh_tokens SET revoked_at = $2, data_json = $3 WHERE id = $1
 `
 
 type OAuthRevokeRefreshTokenParams struct {
@@ -2132,7 +2132,7 @@ func (q *Queries) OAuthRevokeRefreshToken(ctx context.Context, arg OAuthRevokeRe
 }
 
 const oAuthUpdateAccessTokenJSON = `-- name: OAuthUpdateAccessTokenJSON :execrows
-UPDATE credbound_oauth_access_tokens SET data_json = $2 WHERE id = $1
+UPDATE credbound.oauth_access_tokens SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateAccessTokenJSONParams struct {
@@ -2149,7 +2149,7 @@ func (q *Queries) OAuthUpdateAccessTokenJSON(ctx context.Context, arg OAuthUpdat
 }
 
 const oAuthUpdateClientJSON = `-- name: OAuthUpdateClientJSON :execrows
-UPDATE credbound_oauth_clients SET data_json = $2 WHERE id = $1
+UPDATE credbound.oauth_clients SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateClientJSONParams struct {
@@ -2166,7 +2166,7 @@ func (q *Queries) OAuthUpdateClientJSON(ctx context.Context, arg OAuthUpdateClie
 }
 
 const oAuthUpdateGrantJSON = `-- name: OAuthUpdateGrantJSON :execrows
-UPDATE credbound_oauth_grants SET data_json = $2 WHERE id = $1
+UPDATE credbound.oauth_grants SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateGrantJSONParams struct {
@@ -2183,7 +2183,7 @@ func (q *Queries) OAuthUpdateGrantJSON(ctx context.Context, arg OAuthUpdateGrant
 }
 
 const oAuthUpdateIssuer = `-- name: OAuthUpdateIssuer :execrows
-UPDATE credbound_oauth_issuers SET data_json = $3 WHERE id = $1 AND issuer = $2
+UPDATE credbound.oauth_issuers SET data_json = $3 WHERE id = $1 AND issuer = $2
 `
 
 type OAuthUpdateIssuerParams struct {
@@ -2201,7 +2201,7 @@ func (q *Queries) OAuthUpdateIssuer(ctx context.Context, arg OAuthUpdateIssuerPa
 }
 
 const oAuthUpdateIssuerJSON = `-- name: OAuthUpdateIssuerJSON :execrows
-UPDATE credbound_oauth_issuers SET data_json = $2 WHERE id = $1
+UPDATE credbound.oauth_issuers SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateIssuerJSONParams struct {
@@ -2218,7 +2218,7 @@ func (q *Queries) OAuthUpdateIssuerJSON(ctx context.Context, arg OAuthUpdateIssu
 }
 
 const oAuthUpdateResourceJSON = `-- name: OAuthUpdateResourceJSON :execrows
-UPDATE credbound_oauth_resources SET data_json = $2 WHERE id = $1
+UPDATE credbound.oauth_resources SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateResourceJSONParams struct {
@@ -2235,7 +2235,7 @@ func (q *Queries) OAuthUpdateResourceJSON(ctx context.Context, arg OAuthUpdateRe
 }
 
 const oAuthUpsertCIMDClient = `-- name: OAuthUpsertCIMDClient :exec
-INSERT INTO credbound_oauth_clients (id, issuer_id, client_id, created_at, data_json) VALUES ($1, $2, $3, $4, $5)
+INSERT INTO credbound.oauth_clients (id, issuer_id, client_id, created_at, data_json) VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (issuer_id, client_id) DO UPDATE SET data_json = EXCLUDED.data_json
 `
 
@@ -2259,7 +2259,7 @@ func (q *Queries) OAuthUpsertCIMDClient(ctx context.Context, arg OAuthUpsertCIMD
 }
 
 const oAuthUseInitialAccessToken = `-- name: OAuthUseInitialAccessToken :execrows
-UPDATE credbound_oauth_initial_access_tokens
+UPDATE credbound.oauth_initial_access_tokens
 SET registration_count = $2, data_json = $3
 WHERE id = $1 AND registration_count = $4 AND revoked_at IS NULL AND expires_at > $5
 `
@@ -2287,7 +2287,7 @@ func (q *Queries) OAuthUseInitialAccessToken(ctx context.Context, arg OAuthUseIn
 }
 
 const replacePassword = `-- name: ReplacePassword :execrows
-UPDATE credbound_password_credentials SET hash = $2, updated_at = $3 WHERE user_id = $1
+UPDATE credbound.password_credentials SET hash = $2, updated_at = $3 WHERE user_id = $1
 `
 
 type ReplacePasswordParams struct {
@@ -2305,7 +2305,7 @@ func (q *Queries) ReplacePassword(ctx context.Context, arg ReplacePasswordParams
 }
 
 const revokeAllWorkspacePATs = `-- name: RevokeAllWorkspacePATs :exec
-UPDATE credbound_personal_access_tokens SET revoked_at = $2 WHERE workspace_id = $1 AND revoked_at IS NULL
+UPDATE credbound.personal_access_tokens SET revoked_at = $2 WHERE workspace_id = $1 AND revoked_at IS NULL
 `
 
 type RevokeAllWorkspacePATsParams struct {
@@ -2319,7 +2319,7 @@ func (q *Queries) RevokeAllWorkspacePATs(ctx context.Context, arg RevokeAllWorks
 }
 
 const revokePAT = `-- name: RevokePAT :execrows
-UPDATE credbound_personal_access_tokens SET revoked_at = $3 WHERE user_id = $1 AND id = $2
+UPDATE credbound.personal_access_tokens SET revoked_at = $3 WHERE user_id = $1 AND id = $2
 `
 
 type RevokePATParams struct {
@@ -2337,7 +2337,7 @@ func (q *Queries) RevokePAT(ctx context.Context, arg RevokePATParams) (int64, er
 }
 
 const revokeSCIMCredential = `-- name: RevokeSCIMCredential :execrows
-UPDATE credbound_scim_credentials SET revoked_at = $3 WHERE configuration_id = $1 AND id = $2
+UPDATE credbound.scim_credentials SET revoked_at = $3 WHERE configuration_id = $1 AND id = $2
 `
 
 type RevokeSCIMCredentialParams struct {
@@ -2355,7 +2355,7 @@ func (q *Queries) RevokeSCIMCredential(ctx context.Context, arg RevokeSCIMCreden
 }
 
 const revokeSCIMCredentials = `-- name: RevokeSCIMCredentials :exec
-UPDATE credbound_scim_credentials SET revoked_at = $2 WHERE configuration_id = $1 AND revoked_at IS NULL
+UPDATE credbound.scim_credentials SET revoked_at = $2 WHERE configuration_id = $1 AND revoked_at IS NULL
 `
 
 type RevokeSCIMCredentialsParams struct {
@@ -2369,7 +2369,7 @@ func (q *Queries) RevokeSCIMCredentials(ctx context.Context, arg RevokeSCIMCrede
 }
 
 const revokeUserPATs = `-- name: RevokeUserPATs :exec
-UPDATE credbound_personal_access_tokens SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL
+UPDATE credbound.personal_access_tokens SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL
 `
 
 type RevokeUserPATsParams struct {
@@ -2383,7 +2383,7 @@ func (q *Queries) RevokeUserPATs(ctx context.Context, arg RevokeUserPATsParams) 
 }
 
 const revokeWorkspaceInvitation = `-- name: RevokeWorkspaceInvitation :execrows
-UPDATE credbound_workspace_invitations SET revoked_at = $3 WHERE id = $2 AND workspace_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL
+UPDATE credbound.workspace_invitations SET revoked_at = $3 WHERE id = $2 AND workspace_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL
 `
 
 type RevokeWorkspaceInvitationParams struct {
@@ -2401,7 +2401,7 @@ func (q *Queries) RevokeWorkspaceInvitation(ctx context.Context, arg RevokeWorks
 }
 
 const revokeWorkspacePATs = `-- name: RevokeWorkspacePATs :exec
-UPDATE credbound_personal_access_tokens SET revoked_at = $3 WHERE user_id = $1 AND workspace_id = $2 AND revoked_at IS NULL
+UPDATE credbound.personal_access_tokens SET revoked_at = $3 WHERE user_id = $1 AND workspace_id = $2 AND revoked_at IS NULL
 `
 
 type RevokeWorkspacePATsParams struct {
@@ -2416,10 +2416,10 @@ func (q *Queries) RevokeWorkspacePATs(ctx context.Context, arg RevokeWorkspacePA
 }
 
 const saveTOTPEnrollment = `-- name: SaveTOTPEnrollment :execrows
-INSERT INTO credbound_totp_factors (user_id, encrypted_secret, active, last_used_step, created_at, updated_at)
+INSERT INTO credbound.totp_factors (user_id, encrypted_secret, active, last_used_step, created_at, updated_at)
 VALUES ($1, $2, false, 0, $3, $4)
 ON CONFLICT (user_id) DO UPDATE SET encrypted_secret = EXCLUDED.encrypted_secret, active = false, last_used_step = 0, updated_at = EXCLUDED.updated_at
-WHERE NOT credbound_totp_factors.active
+WHERE NOT credbound.totp_factors.active
 `
 
 type SaveTOTPEnrollmentParams struct {
@@ -2443,7 +2443,7 @@ func (q *Queries) SaveTOTPEnrollment(ctx context.Context, arg SaveTOTPEnrollment
 }
 
 const setPrimaryEmail = `-- name: SetPrimaryEmail :execrows
-UPDATE credbound_user_emails SET is_primary = true, updated_at = $3
+UPDATE credbound.user_emails SET is_primary = true, updated_at = $3
 WHERE id = $2 AND user_id = $1 AND verified_at IS NOT NULL
 `
 
@@ -2462,7 +2462,7 @@ func (q *Queries) SetPrimaryEmail(ctx context.Context, arg SetPrimaryEmailParams
 }
 
 const setUserDisabled = `-- name: SetUserDisabled :execrows
-UPDATE credbound_users SET disabled = $2, updated_at = $3 WHERE id = $1
+UPDATE credbound.users SET disabled = $2, updated_at = $3 WHERE id = $1
 `
 
 type SetUserDisabledParams struct {
@@ -2480,7 +2480,7 @@ func (q *Queries) SetUserDisabled(ctx context.Context, arg SetUserDisabledParams
 }
 
 const setWorkspaceDisabled = `-- name: SetWorkspaceDisabled :execrows
-UPDATE credbound_workspaces SET disabled_at = $2, updated_at = $3 WHERE id = $1
+UPDATE credbound.workspaces SET disabled_at = $2, updated_at = $3 WHERE id = $1
 `
 
 type SetWorkspaceDisabledParams struct {
@@ -2498,7 +2498,7 @@ func (q *Queries) SetWorkspaceDisabled(ctx context.Context, arg SetWorkspaceDisa
 }
 
 const touchPAT = `-- name: TouchPAT :execrows
-UPDATE credbound_personal_access_tokens SET last_used_at = $2 WHERE id = $1
+UPDATE credbound.personal_access_tokens SET last_used_at = $2 WHERE id = $1
 `
 
 type TouchPATParams struct {
@@ -2515,7 +2515,7 @@ func (q *Queries) TouchPAT(ctx context.Context, arg TouchPATParams) (int64, erro
 }
 
 const touchPasskey = `-- name: TouchPasskey :execrows
-UPDATE credbound_passkeys SET credential_json = $3, last_used_at = $4 WHERE user_id = $1 AND credential_id = $2
+UPDATE credbound.passkeys SET credential_json = $3, last_used_at = $4 WHERE user_id = $1 AND credential_id = $2
 `
 
 type TouchPasskeyParams struct {
@@ -2539,7 +2539,7 @@ func (q *Queries) TouchPasskey(ctx context.Context, arg TouchPasskeyParams) (int
 }
 
 const touchSCIMCredential = `-- name: TouchSCIMCredential :execrows
-UPDATE credbound_scim_credentials SET last_used_at = $2 WHERE id = $1
+UPDATE credbound.scim_credentials SET last_used_at = $2 WHERE id = $1
 `
 
 type TouchSCIMCredentialParams struct {
@@ -2556,7 +2556,7 @@ func (q *Queries) TouchSCIMCredential(ctx context.Context, arg TouchSCIMCredenti
 }
 
 const touchSSOIdentity = `-- name: TouchSSOIdentity :execrows
-UPDATE credbound_sso_identities SET last_used_at = $3 WHERE id = $2 AND user_id = $1
+UPDATE credbound.sso_identities SET last_used_at = $3 WHERE id = $2 AND user_id = $1
 `
 
 type TouchSSOIdentityParams struct {
@@ -2574,7 +2574,7 @@ func (q *Queries) TouchSSOIdentity(ctx context.Context, arg TouchSSOIdentityPara
 }
 
 const touchUserLastSeen = `-- name: TouchUserLastSeen :execrows
-UPDATE credbound_users SET last_seen_at = $2 WHERE id = $1
+UPDATE credbound.users SET last_seen_at = $2 WHERE id = $1
 `
 
 type TouchUserLastSeenParams struct {
@@ -2591,7 +2591,7 @@ func (q *Queries) TouchUserLastSeen(ctx context.Context, arg TouchUserLastSeenPa
 }
 
 const updateAuditChainHead = `-- name: UpdateAuditChainHead :execrows
-UPDATE credbound_audit_chain SET sequence = $1, head_hash = $2 WHERE singleton = 1
+UPDATE credbound.audit_chain SET sequence = $1, head_hash = $2 WHERE singleton = 1
 `
 
 type UpdateAuditChainHeadParams struct {
@@ -2608,7 +2608,7 @@ func (q *Queries) UpdateAuditChainHead(ctx context.Context, arg UpdateAuditChain
 }
 
 const updateSCIMConfiguration = `-- name: UpdateSCIMConfiguration :execrows
-UPDATE credbound_scim_configurations
+UPDATE credbound.scim_configurations
 SET default_role = $2, trust_directory_emails = $3, group_role_mappings_json = $4, updated_at = $5
 WHERE id = $1 AND workspace_id = $6
 `
@@ -2638,7 +2638,7 @@ func (q *Queries) UpdateSCIMConfiguration(ctx context.Context, arg UpdateSCIMCon
 }
 
 const updateSCIMUser = `-- name: UpdateSCIMUser :execrows
-UPDATE credbound_scim_users SET external_id = $3, normalized_user_name = $4, display_name = $5, emails_json = $6, profile_json = $7, active = $8, updated_at = $9, deprovisioned_at = $10
+UPDATE credbound.scim_users SET external_id = $3, normalized_user_name = $4, display_name = $5, emails_json = $6, profile_json = $7, active = $8, updated_at = $9, deprovisioned_at = $10
 WHERE configuration_id = $1 AND id = $2
 `
 
@@ -2675,7 +2675,7 @@ func (q *Queries) UpdateSCIMUser(ctx context.Context, arg UpdateSCIMUserParams) 
 }
 
 const updateWorkspace = `-- name: UpdateWorkspace :execrows
-UPDATE credbound_workspaces SET name = $2, updated_at = $3, require_mfa = $4 WHERE id = $1
+UPDATE credbound.workspaces SET name = $2, updated_at = $3, require_mfa = $4 WHERE id = $1
 `
 
 type UpdateWorkspaceParams struct {
@@ -2699,7 +2699,7 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 }
 
 const upsertInstanceAdministrator = `-- name: UpsertInstanceAdministrator :exec
-INSERT INTO credbound_instance_administrators (user_id, role, created_at, updated_at)
+INSERT INTO credbound.instance_administrators (user_id, role, created_at, updated_at)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = EXCLUDED.updated_at
 `
@@ -2722,8 +2722,8 @@ func (q *Queries) UpsertInstanceAdministrator(ctx context.Context, arg UpsertIns
 }
 
 const upsertLoginFailure = `-- name: UpsertLoginFailure :one
-INSERT INTO credbound_login_throttles (user_id, failed_attempts, locked_until, updated_at) VALUES ($1, 1, NULL, $2)
-ON CONFLICT (user_id) DO UPDATE SET failed_attempts = credbound_login_throttles.failed_attempts + 1, updated_at = excluded.updated_at
+INSERT INTO credbound.login_throttles (user_id, failed_attempts, locked_until, updated_at) VALUES ($1, 1, NULL, $2)
+ON CONFLICT (user_id) DO UPDATE SET failed_attempts = credbound.login_throttles.failed_attempts + 1, updated_at = excluded.updated_at
 RETURNING failed_attempts
 `
 
@@ -2740,7 +2740,7 @@ func (q *Queries) UpsertLoginFailure(ctx context.Context, arg UpsertLoginFailure
 }
 
 const upsertMembership = `-- name: UpsertMembership :exec
-INSERT INTO credbound_memberships (workspace_id, user_id, role, status, provisioning_source, created_at, updated_at)
+INSERT INTO credbound.memberships (workspace_id, user_id, role, status, provisioning_source, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = EXCLUDED.role, status = EXCLUDED.status, provisioning_source = EXCLUDED.provisioning_source, updated_at = EXCLUDED.updated_at
 `
@@ -2769,7 +2769,7 @@ func (q *Queries) UpsertMembership(ctx context.Context, arg UpsertMembershipPara
 }
 
 const upsertSCIMGroup = `-- name: UpsertSCIMGroup :exec
-INSERT INTO credbound_scim_groups (id, configuration_id, external_id, display_name, member_ids_json, created_at, updated_at, deleted_at)
+INSERT INTO credbound.scim_groups (id, configuration_id, external_id, display_name, member_ids_json, created_at, updated_at, deleted_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (id) DO UPDATE SET external_id = EXCLUDED.external_id, display_name = EXCLUDED.display_name, member_ids_json = EXCLUDED.member_ids_json, updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
 `
@@ -2800,7 +2800,7 @@ func (q *Queries) UpsertSCIMGroup(ctx context.Context, arg UpsertSCIMGroupParams
 }
 
 const useTOTP = `-- name: UseTOTP :execrows
-UPDATE credbound_totp_factors SET last_used_step = $2, updated_at = $3 WHERE user_id = $1 AND active AND last_used_step < $2
+UPDATE credbound.totp_factors SET last_used_step = $2, updated_at = $3 WHERE user_id = $1 AND active AND last_used_step < $2
 `
 
 type UseTOTPParams struct {
@@ -2818,7 +2818,7 @@ func (q *Queries) UseTOTP(ctx context.Context, arg UseTOTPParams) (int64, error)
 }
 
 const verifyEmail = `-- name: VerifyEmail :execrows
-UPDATE credbound_user_emails
+UPDATE credbound.user_emails
 SET verified_at = $2, verification_digest = NULL, verification_expires_at = NULL, updated_at = $2
 WHERE id = $1 AND verified_at IS NULL
 `
