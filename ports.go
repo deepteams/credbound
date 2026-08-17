@@ -31,8 +31,9 @@ type Store interface {
 	PasswordResetByID(context.Context, string) (PasswordResetCredential, error)
 	// CompletePasswordReset atomically consumes the single-use reset,
 	// replaces the password, deletes the user's other pending resets,
-	// revokes the user's PATs and OAuth grants, and clears the login
-	// throttle. It returns ErrConflict when the reset was already consumed.
+	// revokes the user's PATs and OAuth grants (and, for SessionStore-capable
+	// stores, their sessions), and clears the login throttle. It returns
+	// ErrConflict when the reset was already consumed.
 	CompletePasswordReset(ctx context.Context, resetID string, password PasswordCredential, at time.Time, commit Commit) error
 
 	CreateEmailAuthentication(context.Context, EmailAuthenticationCredential, Commit) error
@@ -69,7 +70,9 @@ type Store interface {
 	PATs(context.Context, string, PageRequest) iter.Seq2[PageEvent[PAT], error]
 	// RevokeUserCredentials atomically revokes every active PAT of the user
 	// and, when the store has the OAuth capability, every OAuth grant and its
-	// tokens. Interactive sessions are host-owned and unaffected.
+	// tokens. A SessionStore-capable store also revokes the user's sessions
+	// in the same transaction; sessions the host manages itself remain
+	// host-owned and unaffected.
 	RevokeUserCredentials(context.Context, string, time.Time, Commit) error
 
 	CreateWorkspaceInvitation(context.Context, WorkspaceInvitation, Commit) error
@@ -116,6 +119,46 @@ type Store interface {
 	// ChainedAuditEvents streams every chained audit event in ascending
 	// sequence order so the chain can be recomputed and verified.
 	ChainedAuditEvents(context.Context) iter.Seq2[AuditEvent, error]
+}
+
+// SignupStore is an optional persistence capability required by SignUp.
+// CreateSignup atomically creates the user, their primary email address, the
+// password credential, the workspace and the admin membership, or nothing at
+// all. The verification credential is nil when the host auto-verifies the
+// address (the email then carries VerifiedAt); otherwise the email starts
+// unverified and the credential is persisted exactly as SaveEmail would,
+// keyed by the email identifier, so ConfirmEmail completes the proof. A
+// globally taken address fails with ErrConflict. Custom stores that do not
+// implement it can continue to use every other feature of Credbound.
+type SignupStore interface {
+	CreateSignup(ctx context.Context, user User, email EmailAddress, verification *EmailVerificationCredential, password PasswordCredential, workspace Workspace, membership Membership, commit Commit) error
+}
+
+// SessionStore is an optional persistence capability required by the session
+// operations (CreateSession, AuthenticateSession, Sessions, RevokeSession,
+// RevokeUserSessions); without it every one of them returns ErrNotSupported.
+//
+// Cascade contract: a store implementing SessionStore must extend its
+// CompletePasswordReset, SetUserDisabled (when disabling, not when
+// re-enabling) and RevokeUserCredentials implementations to also stamp
+// RevokedAt on the user's active sessions inside the same transaction, so a
+// recovery or lockdown revokes interactive sessions atomically with the rest
+// of the account's credentials. Stores without the capability keep their
+// existing contracts; hosts then terminate their own sessions.
+//
+// Sessions never returns the token digest: listed Session values carry a nil
+// Digest. SessionByID returns the digest for constant-time validation by the
+// Manager, which scrubs it before results leave the library.
+type SessionStore interface {
+	CreateSession(ctx context.Context, session Session, commit Commit) error
+	SessionByID(ctx context.Context, id string) (Session, error)
+	// TouchSession updates the session's last-seen timestamp (and the user's
+	// last_seen_at) in the same transaction as its audit event.
+	TouchSession(ctx context.Context, id string, at time.Time, commit Commit) error
+	RevokeSession(ctx context.Context, id string, at time.Time, commit Commit) error
+	// RevokeUserSessions stamps RevokedAt on every active session of the user.
+	RevokeUserSessions(ctx context.Context, userID string, at time.Time, commit Commit) error
+	Sessions(ctx context.Context, userID string, page PageRequest) iter.Seq2[PageEvent[Session], error]
 }
 
 // SCIMStore is an optional persistence capability. Custom stores that do not

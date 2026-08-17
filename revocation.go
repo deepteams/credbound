@@ -7,10 +7,12 @@ import (
 
 // RevokeUserCredentials revokes every active PAT of a user and, when the
 // store has the OAuth capability, every OAuth grant with its tokens, in one
-// atomic operation. A user runs it on their own account after a suspected
-// compromise; revoking another account requires an instance administrator.
-// Interactive sessions are owned by the host service and must be invalidated
-// by the host alongside this call.
+// atomic operation. When the store supports sessions (SessionStore) the
+// user's server-side sessions are revoked in the same transaction. A user
+// runs it on their own account after a suspected compromise; revoking
+// another account requires an instance administrator. Sessions the host
+// service manages itself remain host-owned and must be invalidated by the
+// host alongside this call.
 func (m *Manager) RevokeUserCredentials(ctx context.Context, actor Authentication, request TrustedRequest, userID string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.credentials.revoke", started, err) }()

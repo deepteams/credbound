@@ -34,6 +34,7 @@ type Store struct {
 	passkeys           map[string]map[string]credbound.Passkey
 	pats               map[string]credbound.PAT
 	patPrefixes        map[string]string
+	sessions           map[string]credbound.Session
 	scimConfigurations map[string]credbound.SCIMConfiguration
 	scimCredentials    map[string]credbound.SCIMCredential
 	scimCredentialKeys map[string]string
@@ -111,7 +112,7 @@ func New() *Store {
 		memberships: make(map[string]map[string]credbound.Membership), admins: make(map[string]credbound.InstanceAdministrator),
 		totp: make(map[string]credbound.TOTPFactor), recovery: make(map[string][]credbound.RecoveryCode),
 		passkeys: make(map[string]map[string]credbound.Passkey), pats: make(map[string]credbound.PAT),
-		patPrefixes: make(map[string]string), auditIDs: make(map[string]struct{}),
+		patPrefixes: make(map[string]string), sessions: make(map[string]credbound.Session), auditIDs: make(map[string]struct{}),
 		auditHead: make([]byte, 32), throttles: make(map[string]credbound.LoginThrottle),
 		passwordResets: make(map[string]credbound.PasswordResetCredential),
 		emailAuths:     make(map[string]credbound.EmailAuthenticationCredential),
@@ -194,6 +195,42 @@ func (s *Store) CreateUser(ctx context.Context, user credbound.User, email credb
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+func (s *Store) CreateSignup(ctx context.Context, user credbound.User, email credbound.EmailAddress, verification *credbound.EmailVerificationCredential, password credbound.PasswordCredential, workspace credbound.Workspace, membership credbound.Membership, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.users[user.ID]; exists {
+		return credbound.ErrConflict
+	}
+	if _, exists := s.emailIDs[email.Address]; exists {
+		return credbound.ErrConflict
+	}
+	if _, exists := s.workspaces[workspace.ID]; exists {
+		return credbound.ErrConflict
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	s.users[user.ID] = cloneUser(user)
+	s.emailAddresses[email.ID] = cloneEmail(email)
+	s.emailIDs[email.Address] = email.ID
+	// Only a verified address joins the sign-in lookup; an unverified primary
+	// becomes matchable by UserByEmail through VerifyEmail.
+	if email.VerifiedAt != nil {
+		s.emails[email.Address] = user.ID
+	}
+	if verification != nil {
+		s.emailVerifications[email.ID] = cloneEmailVerification(*verification)
+	}
+	s.passwords[user.ID] = password
+	s.workspaces[workspace.ID] = cloneWorkspace(workspace)
+	s.memberships[workspace.ID] = map[string]credbound.Membership{user.ID: normalizeMembership(membership)}
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
 func (s *Store) UserByEmail(ctx context.Context, email string) (credbound.User, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.User{}, err
@@ -268,6 +305,7 @@ func (s *Store) SetUserDisabled(ctx context.Context, userID string, disabled boo
 	s.users[userID] = cloneUser(user)
 	if disabled {
 		s.revokeUserCredentialsLocked(userID, "", at)
+		s.revokeUserSessionsLocked(userID, at)
 	}
 	return s.finishCommitLocked(ctx, commit, previous)
 }
@@ -469,6 +507,7 @@ func (s *Store) CompletePasswordReset(ctx context.Context, resetID string, passw
 	}
 	s.passwords[password.UserID] = password
 	s.revokeUserCredentialsLocked(password.UserID, "", at)
+	s.revokeUserSessionsLocked(password.UserID, at)
 	delete(s.throttles, password.UserID)
 	return s.finishCommitLocked(ctx, commit, previous)
 }
@@ -1028,6 +1067,7 @@ func (s *Store) RevokeUserCredentials(ctx context.Context, userID string, at tim
 		return err
 	}
 	s.revokeUserCredentialsLocked(userID, "", at)
+	s.revokeUserSessionsLocked(userID, at)
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
@@ -1072,6 +1112,141 @@ func (s *Store) PATs(ctx context.Context, userID string, page credbound.PageRequ
 			end.NextCursor = encodeCursor(values[len(values)-1].CreatedAt, values[len(values)-1].ID)
 		}
 		yield(credbound.EndEvent[credbound.PAT](end), nil)
+	}
+}
+
+func (s *Store) CreateSession(ctx context.Context, session credbound.Session, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.sessions[session.ID]; exists {
+		return credbound.ErrConflict
+	}
+	if _, ok := s.users[session.UserID]; !ok {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	s.sessions[session.ID] = cloneSession(session)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) SessionByID(ctx context.Context, id string) (credbound.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return credbound.Session{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	session, ok := s.sessions[id]
+	if !ok {
+		return credbound.Session{}, credbound.ErrNotFound
+	}
+	return cloneSession(session), nil
+}
+
+func (s *Store) TouchSession(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[id]
+	if !ok {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	session.LastSeenAt = at
+	s.sessions[id] = session
+	s.touchLastSeenLocked(session.UserID, at)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) RevokeSession(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[id]
+	if !ok {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	if session.RevokedAt == nil {
+		session.RevokedAt = cloneTime(&at)
+		s.sessions[id] = session
+	}
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) RevokeUserSessions(ctx context.Context, userID string, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.users[userID]; !ok {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	s.revokeUserSessionsLocked(userID, at)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) Sessions(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Session], error] {
+	return func(yield func(credbound.PageEvent[credbound.Session], error) bool) {
+		cursor, err := decodeCursor(page.Cursor)
+		if err != nil {
+			yield(credbound.PageEvent[credbound.Session]{}, err)
+			return
+		}
+		if err := ctx.Err(); err != nil {
+			yield(credbound.PageEvent[credbound.Session]{}, err)
+			return
+		}
+		s.mu.RLock()
+		values := make([]credbound.Session, 0)
+		for _, session := range s.sessions {
+			if session.UserID == userID && afterCursor(session.CreatedAt, session.ID, cursor) {
+				values = append(values, cloneSession(session))
+			}
+		}
+		s.mu.RUnlock()
+		sort.Slice(values, func(i, j int) bool {
+			return newer(values[i].CreatedAt, values[i].ID, values[j].CreatedAt, values[j].ID)
+		})
+		hasMore := len(values) > page.Limit
+		if hasMore {
+			values = values[:page.Limit]
+		}
+		for index := range values {
+			if err := ctx.Err(); err != nil {
+				yield(credbound.PageEvent[credbound.Session]{}, err)
+				return
+			}
+			values[index].Digest = nil
+			if !yield(credbound.ItemEvent(values[index]), nil) {
+				return
+			}
+		}
+		end := credbound.PageEnd{HasMore: hasMore}
+		if hasMore && len(values) > 0 {
+			end.NextCursor = encodeCursor(values[len(values)-1].CreatedAt, values[len(values)-1].ID)
+		}
+		yield(credbound.EndEvent[credbound.Session](end), nil)
 	}
 }
 
@@ -1756,6 +1931,7 @@ type storeState struct {
 	passkeys           map[string]map[string]credbound.Passkey
 	pats               map[string]credbound.PAT
 	patPrefixes        map[string]string
+	sessions           map[string]credbound.Session
 	scimConfigurations map[string]credbound.SCIMConfiguration
 	scimCredentials    map[string]credbound.SCIMCredential
 	scimCredentialKeys map[string]string
@@ -1799,7 +1975,8 @@ func (s *Store) snapshotLocked() storeState {
 		ssoIdentities: make(map[string]credbound.SSOIdentity, len(s.ssoIdentities)), ssoKeys: make(map[string]string, len(s.ssoKeys)),
 		totp: make(map[string]credbound.TOTPFactor, len(s.totp)), recovery: make(map[string][]credbound.RecoveryCode, len(s.recovery)),
 		passkeys: make(map[string]map[string]credbound.Passkey, len(s.passkeys)), pats: make(map[string]credbound.PAT, len(s.pats)),
-		patPrefixes: make(map[string]string, len(s.patPrefixes)), audits: slices.Clone(s.audits), auditIDs: make(map[string]struct{}, len(s.auditIDs)),
+		patPrefixes: make(map[string]string, len(s.patPrefixes)), sessions: make(map[string]credbound.Session, len(s.sessions)),
+		audits: slices.Clone(s.audits), auditIDs: make(map[string]struct{}, len(s.auditIDs)),
 		auditSequence: s.auditSequence, auditHead: slices.Clone(s.auditHead),
 		throttles:          make(map[string]credbound.LoginThrottle, len(s.throttles)),
 		passwordResets:     make(map[string]credbound.PasswordResetCredential, len(s.passwordResets)),
@@ -1883,6 +2060,9 @@ func (s *Store) snapshotLocked() storeState {
 	for key, value := range s.patPrefixes {
 		state.patPrefixes[key] = value
 	}
+	for key, value := range s.sessions {
+		state.sessions[key] = cloneSession(value)
+	}
 	for key, value := range s.scimConfigurations {
 		state.scimConfigurations[key] = cloneSCIMConfiguration(value)
 	}
@@ -1965,6 +2145,7 @@ func (s *Store) restoreLocked(state storeState) {
 	s.admins, s.ssoIdentities, s.ssoKeys = state.admins, state.ssoIdentities, state.ssoKeys
 	s.totp, s.recovery, s.passkeys = state.totp, state.recovery, state.passkeys
 	s.pats, s.patPrefixes = state.pats, state.patPrefixes
+	s.sessions = state.sessions
 	s.scimConfigurations, s.scimCredentials, s.scimCredentialKeys = state.scimConfigurations, state.scimCredentials, state.scimCredentialKeys
 	s.scimUsers, s.scimUserNames, s.scimExternalIDs = state.scimUsers, state.scimUserNames, state.scimExternalIDs
 	s.scimGroups, s.scimGroupExternal = state.scimGroups, state.scimGroupExternal
@@ -2222,6 +2403,24 @@ func clonePasskey(value credbound.Passkey) credbound.Passkey {
 	return value
 }
 
+func cloneSession(value credbound.Session) credbound.Session {
+	value.Digest = slices.Clone(value.Digest)
+	value.RevokedAt = cloneTime(value.RevokedAt)
+	return value
+}
+
+// revokeUserSessionsLocked backs both RevokeUserSessions and the session
+// revocation cascade of CompletePasswordReset, SetUserDisabled and
+// RevokeUserCredentials.
+func (s *Store) revokeUserSessionsLocked(userID string, at time.Time) {
+	for id, session := range s.sessions {
+		if session.UserID == userID && session.RevokedAt == nil {
+			session.RevokedAt = cloneTime(&at)
+			s.sessions[id] = session
+		}
+	}
+}
+
 func clonePAT(value credbound.PAT) credbound.PAT {
 	value.Digest = slices.Clone(value.Digest)
 	value.Scopes = slices.Clone(value.Scopes)
@@ -2251,3 +2450,5 @@ func normalizeMembership(value credbound.Membership) credbound.Membership {
 
 var _ credbound.Store = (*Store)(nil)
 var _ credbound.SCIMStore = (*Store)(nil)
+var _ credbound.SignupStore = (*Store)(nil)
+var _ credbound.SessionStore = (*Store)(nil)

@@ -46,6 +46,7 @@ type EventName string
 
 const (
 	EventBootstrapCompleted           EventName = "bootstrap.completed"
+	EventSignUpCompleted              EventName = "signup.completed"
 	EventUserCreated                  EventName = "user.created"
 	EventUserDisabled                 EventName = "user.disabled"
 	EventUserEnabled                  EventName = "user.enabled"
@@ -83,6 +84,9 @@ const (
 	EventPasskeyAuthenticated         EventName = "passkey.authenticated"
 	EventUserCredentialsRevoked       EventName = "user.credentials_revoked"
 	EventUserLocked                   EventName = "user.locked"
+	EventSessionCreated               EventName = "session.created"
+	EventSessionRevoked               EventName = "session.revoked"
+	EventUserSessionsRevoked          EventName = "session.user_revoked"
 	EventPATCreated                   EventName = "pat.created"
 	EventPATRevoked                   EventName = "pat.revoked"
 	EventPATAuthenticated             EventName = "pat.authenticated"
@@ -266,6 +270,27 @@ type UserCredentialRevocation struct {
 	UserID string
 }
 
+// SessionCreation carries the created session record; its Digest is always
+// nil so hook payloads never see token material.
+type SessionCreation struct {
+	EventMeta
+	Session Session
+	// Request is the client network context observed at creation.
+	Request RequestMetadata
+}
+
+type SessionRevocation struct {
+	EventMeta
+	SessionID string
+	UserID    string
+}
+
+// UserSessionRevocation reports a bulk "log out everywhere" for one user.
+type UserSessionRevocation struct {
+	EventMeta
+	UserID string
+}
+
 type SSOLink struct {
 	EventMeta
 	Identity SSOIdentity
@@ -334,6 +359,16 @@ type OAuthChange struct {
 }
 
 type BootstrapCompletedEvent struct {
+	EventMeta
+	User      User
+	Workspace Workspace
+}
+
+// SignUpCompletedEvent reports a successful self-service registration: the
+// created account and the workspace it administers. Collisions with an
+// existing address emit no event so listeners cannot become an enumeration
+// side channel.
+type SignUpCompletedEvent struct {
 	EventMeta
 	User      User
 	Workspace Workspace
@@ -493,6 +528,32 @@ type PATRevokedEvent struct {
 }
 
 type UserCredentialsRevokedEvent struct {
+	EventMeta
+	UserID string
+}
+
+// SessionCreatedEvent reports a new server-side session. The Session carries
+// a nil Digest and the raw token is never part of any event.
+// AuthenticateSession emits no per-validation event — it runs on every
+// request and would flood listeners; only the audit log records validations.
+type SessionCreatedEvent struct {
+	EventMeta
+	Session Session
+	// Request carries the client network context supplied by the host through
+	// WithRequestMetadata, so listeners can alert on new devices without
+	// re-reading the audit log.
+	Request RequestMetadata
+}
+
+type SessionRevokedEvent struct {
+	EventMeta
+	SessionID string
+	UserID    string
+}
+
+// UserSessionsRevokedEvent reports that every active session of the user was
+// revoked in one operation ("log out everywhere").
+type UserSessionsRevokedEvent struct {
 	EventMeta
 	UserID string
 }
@@ -684,6 +745,9 @@ type TransactionHook interface {
 	ApplyPATCreation(context.Context, Tx, PATCreation) error
 	ApplyPATRevocation(context.Context, Tx, PATRevocation) error
 	ApplyUserCredentialRevocation(context.Context, Tx, UserCredentialRevocation) error
+	ApplySessionCreation(context.Context, Tx, SessionCreation) error
+	ApplySessionRevocation(context.Context, Tx, SessionRevocation) error
+	ApplyUserSessionRevocation(context.Context, Tx, UserSessionRevocation) error
 	ApplySSOLink(context.Context, Tx, SSOLink) error
 	ApplySSOUnlink(context.Context, Tx, SSOUnlink) error
 	ApplyRoleGrant(context.Context, Tx, RoleGrant) error
@@ -710,6 +774,7 @@ type EventListener interface {
 	unimplementedEventListener()
 
 	OnBootstrapCompleted(context.Context, BootstrapCompletedEvent) error
+	OnSignUpCompleted(context.Context, SignUpCompletedEvent) error
 	OnUserCreated(context.Context, UserCreatedEvent) error
 	OnWorkspaceCreated(context.Context, WorkspaceCreatedEvent) error
 	OnUserStatusChanged(context.Context, UserStatusEvent) error
@@ -740,6 +805,9 @@ type EventListener interface {
 	OnPATCreated(context.Context, PATCreatedEvent) error
 	OnPATRevoked(context.Context, PATRevokedEvent) error
 	OnUserCredentialsRevoked(context.Context, UserCredentialsRevokedEvent) error
+	OnSessionCreated(context.Context, SessionCreatedEvent) error
+	OnSessionRevoked(context.Context, SessionRevokedEvent) error
+	OnUserSessionsRevoked(context.Context, UserSessionsRevokedEvent) error
 	OnUserLocked(context.Context, UserLockedEvent) error
 	OnPasswordResetRequested(context.Context, PasswordResetRequestedEvent) error
 	OnPasswordResetCompleted(context.Context, PasswordResetCompletedEvent) error

@@ -86,6 +86,18 @@ func (UnimplementedTransactionHook) ApplyUserCredentialRevocation(context.Contex
 	return nil
 }
 
+func (UnimplementedTransactionHook) ApplySessionCreation(context.Context, Tx, SessionCreation) error {
+	return nil
+}
+
+func (UnimplementedTransactionHook) ApplySessionRevocation(context.Context, Tx, SessionRevocation) error {
+	return nil
+}
+
+func (UnimplementedTransactionHook) ApplyUserSessionRevocation(context.Context, Tx, UserSessionRevocation) error {
+	return nil
+}
+
 func (UnimplementedTransactionHook) ApplySSOLink(context.Context, Tx, SSOLink) error { return nil }
 
 func (UnimplementedTransactionHook) ApplySSOUnlink(context.Context, Tx, SSOUnlink) error { return nil }
@@ -139,6 +151,10 @@ var _ EventListener = UnimplementedEventListener{}
 func (UnimplementedEventListener) unimplementedEventListener() {}
 
 func (UnimplementedEventListener) OnBootstrapCompleted(context.Context, BootstrapCompletedEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnSignUpCompleted(context.Context, SignUpCompletedEvent) error {
 	return nil
 }
 
@@ -251,6 +267,18 @@ func (UnimplementedEventListener) OnPATCreated(context.Context, PATCreatedEvent)
 func (UnimplementedEventListener) OnPATRevoked(context.Context, PATRevokedEvent) error { return nil }
 
 func (UnimplementedEventListener) OnUserCredentialsRevoked(context.Context, UserCredentialsRevokedEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnSessionCreated(context.Context, SessionCreatedEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnSessionRevoked(context.Context, SessionRevokedEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnUserSessionsRevoked(context.Context, UserSessionsRevokedEvent) error {
 	return nil
 }
 

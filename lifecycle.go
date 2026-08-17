@@ -209,8 +209,11 @@ func (m *Manager) setWorkspaceDisabled(ctx context.Context, actor Authentication
 // DisableUser disables a global account so it can no longer authenticate or
 // authorize anywhere, atomically with the audit event. The actor needs admin
 // users write and an admin mutation (fresh AAL2, or a trusted local
-// request); the store protects the last enabled root administrator.
-// Disabling an already disabled user is a no-op.
+// request); the store protects the last enabled root administrator. The
+// store cascade revokes the user's credentials and, when the store supports
+// sessions (SessionStore), their server-side sessions in the same
+// transaction; re-enabling never restores them. Disabling an already
+// disabled user is a no-op.
 func (m *Manager) DisableUser(ctx context.Context, actor Authentication, request TrustedRequest, userID string) error {
 	return m.setUserDisabled(ctx, actor, request, userID, true)
 }

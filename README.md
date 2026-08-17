@@ -24,6 +24,12 @@ be reimplemented in every project:
 - workspace isolation and extensible RBAC (`admin`, `member`, and application roles);
 - workspace invitations whose invitee chooses their own password, and an
   optional per-workspace MFA requirement;
+- optional self-service signup that atomically creates the user, their
+  workspace, and their admin membership, with enumeration-resistant handling
+  of already-registered addresses;
+- optional server-side sessions behind single-display `cbs_` tokens, with
+  device listings and a session-revocation cascade on reset, disable, and
+  credential revocation;
 - atomic revocation of every PAT and OAuth grant of a user;
 - optional SCIM 2.0 provisioning per workspace (`Users`, `Groups`, `.search`);
 - optional OAuth 2.0/OIDC authorization-server capabilities for remote MCP
@@ -98,6 +104,17 @@ checks and per-workspace MFA enforcement. The host owns sessions and must:
 
 `RequireStepUp` accepts only interactive AAL2 authentications newer than
 `Config.StepUpMaxAge`; a PAT can never satisfy it.
+
+Hosts that would rather not manage session persistence themselves can use the
+optional server-side session module (`CreateSession`, `AuthenticateSession`,
+`Sessions`, `RevokeSession`, `RevokeUserSessions`), available when the store
+implements `SessionStore` — the bundled in-memory, SQLite, and PostgreSQL
+stores all do. It persists the `Authentication` snapshot behind a
+single-display `cbs_` token (digest-only at rest, absolute
+`Config.SessionTTL` expiry), lists a user's devices, and extends the
+revocation cascade of `CompletePasswordReset`, `DisableUser`, and
+`RevokeUserCredentials` to those sessions within the same transaction. The
+token's transport — cookies, CSRF, TLS — remains host-owned.
 
 ### Minimal setup
 

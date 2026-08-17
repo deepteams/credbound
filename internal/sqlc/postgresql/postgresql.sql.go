@@ -861,6 +861,32 @@ func (q *Queries) GetSSOIdentityByID(ctx context.Context, id string) (CredboundS
 	return i, err
 }
 
+const getSession = `-- name: GetSession :one
+SELECT id, user_id, method, level, authenticated_at, second_factor_required, user_agent, ip_address, digest, created_at, last_seen_at, expires_at, revoked_at
+FROM credbound.sessions WHERE id = $1
+`
+
+func (q *Queries) GetSession(ctx context.Context, id string) (CredboundSession, error) {
+	row := q.db.QueryRowContext(ctx, getSession, id)
+	var i CredboundSession
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Method,
+		&i.Level,
+		&i.AuthenticatedAt,
+		&i.SecondFactorRequired,
+		&i.UserAgent,
+		&i.IpAddress,
+		&i.Digest,
+		&i.CreatedAt,
+		&i.LastSeenAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
 const getTOTP = `-- name: GetTOTP :one
 SELECT user_id, encrypted_secret, active, last_used_step, created_at, updated_at FROM credbound.totp_factors WHERE user_id = $1
 `
@@ -1290,6 +1316,44 @@ func (q *Queries) InsertSSOIdentity(ctx context.Context, arg InsertSSOIdentityPa
 		arg.Email,
 		arg.CreatedAt,
 		arg.LastUsedAt,
+	)
+	return err
+}
+
+const insertSession = `-- name: InsertSession :exec
+INSERT INTO credbound.sessions (id, user_id, method, level, authenticated_at, second_factor_required, user_agent, ip_address, digest, created_at, last_seen_at, expires_at, revoked_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULL)
+`
+
+type InsertSessionParams struct {
+	ID                   string    `json:"id"`
+	UserID               string    `json:"user_id"`
+	Method               string    `json:"method"`
+	Level                int16     `json:"level"`
+	AuthenticatedAt      time.Time `json:"authenticated_at"`
+	SecondFactorRequired bool      `json:"second_factor_required"`
+	UserAgent            string    `json:"user_agent"`
+	IpAddress            string    `json:"ip_address"`
+	Digest               []byte    `json:"digest"`
+	CreatedAt            time.Time `json:"created_at"`
+	LastSeenAt           time.Time `json:"last_seen_at"`
+	ExpiresAt            time.Time `json:"expires_at"`
+}
+
+func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) error {
+	_, err := q.db.ExecContext(ctx, insertSession,
+		arg.ID,
+		arg.UserID,
+		arg.Method,
+		arg.Level,
+		arg.AuthenticatedAt,
+		arg.SecondFactorRequired,
+		arg.UserAgent,
+		arg.IpAddress,
+		arg.Digest,
+		arg.CreatedAt,
+		arg.LastSeenAt,
+		arg.ExpiresAt,
 	)
 	return err
 }
@@ -2368,6 +2432,23 @@ func (q *Queries) RevokeSCIMCredentials(ctx context.Context, arg RevokeSCIMCrede
 	return err
 }
 
+const revokeSessionByID = `-- name: RevokeSessionByID :execrows
+UPDATE credbound.sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL
+`
+
+type RevokeSessionByIDParams struct {
+	ID        string       `json:"id"`
+	RevokedAt sql.NullTime `json:"revoked_at"`
+}
+
+func (q *Queries) RevokeSessionByID(ctx context.Context, arg RevokeSessionByIDParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, revokeSessionByID, arg.ID, arg.RevokedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const revokeUserPATs = `-- name: RevokeUserPATs :exec
 UPDATE credbound.personal_access_tokens SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL
 `
@@ -2379,6 +2460,20 @@ type RevokeUserPATsParams struct {
 
 func (q *Queries) RevokeUserPATs(ctx context.Context, arg RevokeUserPATsParams) error {
 	_, err := q.db.ExecContext(ctx, revokeUserPATs, arg.UserID, arg.RevokedAt)
+	return err
+}
+
+const revokeUserSessions = `-- name: RevokeUserSessions :exec
+UPDATE credbound.sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL
+`
+
+type RevokeUserSessionsParams struct {
+	UserID    string       `json:"user_id"`
+	RevokedAt sql.NullTime `json:"revoked_at"`
+}
+
+func (q *Queries) RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) error {
+	_, err := q.db.ExecContext(ctx, revokeUserSessions, arg.UserID, arg.RevokedAt)
 	return err
 }
 
@@ -2567,6 +2662,23 @@ type TouchSSOIdentityParams struct {
 
 func (q *Queries) TouchSSOIdentity(ctx context.Context, arg TouchSSOIdentityParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, touchSSOIdentity, arg.UserID, arg.ID, arg.LastUsedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const touchSession = `-- name: TouchSession :execrows
+UPDATE credbound.sessions SET last_seen_at = $2 WHERE id = $1
+`
+
+type TouchSessionParams struct {
+	ID         string    `json:"id"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+}
+
+func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, touchSession, arg.ID, arg.LastSeenAt)
 	if err != nil {
 		return 0, err
 	}

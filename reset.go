@@ -72,9 +72,11 @@ func (m *Manager) BeginPasswordReset(ctx context.Context, email string) (_ Issue
 
 // CompletePasswordReset consumes a reset token and installs the new password.
 // As required by the recovery policy, it atomically revokes every PAT and
-// OAuth grant of the account and clears its login throttle; the host must
-// also terminate its own sessions for the user. The user then signs in again
-// with the new password.
+// OAuth grant of the account and clears its login throttle. When the store
+// supports sessions (SessionStore) the user's server-side sessions are
+// revoked in the same transaction; hosts managing their own sessions must
+// still terminate those themselves. The user then signs in again with the
+// new password.
 func (m *Manager) CompletePasswordReset(ctx context.Context, raw, newPassword string) (_ User, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.password.reset.complete", started, err) }()

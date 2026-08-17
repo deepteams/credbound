@@ -272,6 +272,23 @@ UPDATE credbound.personal_access_tokens SET last_used_at = $2 WHERE id = $1;
 -- name: RevokePAT :execrows
 UPDATE credbound.personal_access_tokens SET revoked_at = $3 WHERE user_id = $1 AND id = $2;
 
+-- name: InsertSession :exec
+INSERT INTO credbound.sessions (id, user_id, method, level, authenticated_at, second_factor_required, user_agent, ip_address, digest, created_at, last_seen_at, expires_at, revoked_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULL);
+
+-- name: GetSession :one
+SELECT id, user_id, method, level, authenticated_at, second_factor_required, user_agent, ip_address, digest, created_at, last_seen_at, expires_at, revoked_at
+FROM credbound.sessions WHERE id = $1;
+
+-- name: TouchSession :execrows
+UPDATE credbound.sessions SET last_seen_at = $2 WHERE id = $1;
+
+-- name: RevokeSessionByID :execrows
+UPDATE credbound.sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL;
+
+-- name: RevokeUserSessions :exec
+UPDATE credbound.sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL;
+
 -- name: InsertAudit :exec
 INSERT INTO credbound.audit_events (id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15);

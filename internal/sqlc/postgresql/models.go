@@ -238,6 +238,22 @@ type CredboundScimUser struct {
 	DeprovisionedAt    sql.NullTime    `json:"deprovisioned_at"`
 }
 
+type CredboundSession struct {
+	ID                   string       `json:"id"`
+	UserID               string       `json:"user_id"`
+	Method               string       `json:"method"`
+	Level                int16        `json:"level"`
+	AuthenticatedAt      time.Time    `json:"authenticated_at"`
+	SecondFactorRequired bool         `json:"second_factor_required"`
+	UserAgent            string       `json:"user_agent"`
+	IpAddress            string       `json:"ip_address"`
+	Digest               []byte       `json:"digest"`
+	CreatedAt            time.Time    `json:"created_at"`
+	LastSeenAt           time.Time    `json:"last_seen_at"`
+	ExpiresAt            time.Time    `json:"expires_at"`
+	RevokedAt            sql.NullTime `json:"revoked_at"`
+}
+
 type CredboundSsoIdentity struct {
 	ID                      string       `json:"id"`
 	UserID                  string       `json:"user_id"`

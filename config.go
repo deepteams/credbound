@@ -91,6 +91,11 @@ type Config struct {
 	// InvitationTTL bounds the validity of a workspace invitation token.
 	// Zero keeps the default of 7 days.
 	InvitationTTL time.Duration
+	// SessionTTL bounds the absolute lifetime of a server-side session issued
+	// by CreateSession (ExpiresAt = CreatedAt + SessionTTL); activity never
+	// extends it. Zero keeps the default of 30 days. Sessions additionally
+	// require a SessionStore-capable store.
+	SessionTTL time.Duration
 	// SSOProviders registers the identity providers the host enables. Each
 	// must expose a unique UUIDv7 configuration ID and a known kind.
 	SSOProviders []SSOProvider
@@ -105,6 +110,18 @@ type Config struct {
 	// OAuth enables the OAuth/OIDC authorization server module when the
 	// store also implements OAuthStore. Nil leaves the module disabled.
 	OAuth *OAuthConfig
+	// SignUp enables self-service registration when the store also
+	// implements SignupStore. Nil leaves the operation disabled.
+	SignUp *SignUpConfig
+}
+
+// SignUpConfig configures the optional self-service signup operation.
+type SignUpConfig struct {
+	// AutoVerifyEmail marks the primary address verified at creation instead
+	// of issuing an email-verification token, and makes SignUp additionally
+	// return an AAL1 password Authentication. Hosts enabling it accept that
+	// mailbox control was never proven.
+	AutoVerifyEmail bool
 }
 
 // OAuthConfig configures the optional OAuth/OIDC module.
@@ -151,11 +168,15 @@ type Manager struct {
 	passwordResetTTL     time.Duration
 	emailAuthTTL         time.Duration
 	invitationTTL        time.Duration
+	sessionTTL           time.Duration
 	ssoProviders         map[string]SSOProvider
 	events               *eventRegistry
 	scimStore            SCIMStore
 	oauthStore           OAuthStore
 	oauth                *OAuthConfig
+	signupStore          SignupStore
+	signup               *SignUpConfig
+	sessionStore         SessionStore
 	dummyHash            string
 	idMu                 sync.Mutex
 	idUnixMilli          int64
@@ -193,6 +214,9 @@ func New(cfg Config) (*Manager, error) {
 	}
 	if cfg.InvitationTTL <= 0 {
 		cfg.InvitationTTL = 7 * 24 * time.Hour
+	}
+	if cfg.SessionTTL <= 0 {
+		cfg.SessionTTL = 30 * 24 * time.Hour
 	}
 	if cfg.MinPasswordLen == 0 {
 		cfg.MinPasswordLen = 12
@@ -256,6 +280,12 @@ func New(cfg Config) (*Manager, error) {
 		return nil, err
 	}
 	scimStore, _ := cfg.Store.(SCIMStore)
+	signupStore, _ := cfg.Store.(SignupStore)
+	sessionStore, _ := cfg.Store.(SessionStore)
+	var signupConfig *SignUpConfig
+	if cfg.SignUp != nil {
+		signupConfig = &SignUpConfig{AutoVerifyEmail: cfg.SignUp.AutoVerifyEmail}
+	}
 	var oauthStore OAuthStore
 	var oauthConfig *OAuthConfig
 	if cfg.OAuth != nil {
@@ -293,11 +323,15 @@ func New(cfg Config) (*Manager, error) {
 		passwordResetTTL:     cfg.PasswordResetTTL,
 		emailAuthTTL:         cfg.EmailAuthenticationTTL,
 		invitationTTL:        cfg.InvitationTTL,
+		sessionTTL:           cfg.SessionTTL,
 		ssoProviders:         ssoProviders,
 		events:               events,
 		scimStore:            scimStore,
 		oauthStore:           oauthStore,
 		oauth:                oauthConfig,
+		signupStore:          signupStore,
+		signup:               signupConfig,
+		sessionStore:         sessionStore,
 		dummyHash:            dummyHash,
 	}, nil
 }

@@ -121,6 +121,28 @@ func (s *Store) CreateUser(ctx context.Context, user credbound.User, email credb
 	})
 }
 
+func (s *Store) CreateSignup(ctx context.Context, user credbound.User, email credbound.EmailAddress, verification *credbound.EmailVerificationCredential, password credbound.PasswordCredential, workspace credbound.Workspace, membership credbound.Membership, commit credbound.Commit) error {
+	pending := credbound.EmailVerificationCredential{}
+	if verification != nil {
+		pending = *verification
+	}
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		if err := insertUser(ctx, q, user); err != nil {
+			return err
+		}
+		if err := insertEmail(ctx, q, email, pending); err != nil {
+			return err
+		}
+		if err := q.InsertPassword(ctx, db.InsertPasswordParams{UserID: password.UserID, Hash: password.Hash, UpdatedAt: password.UpdatedAt}); err != nil {
+			return mapError(err)
+		}
+		if err := q.InsertWorkspace(ctx, db.InsertWorkspaceParams{ID: workspace.ID, Name: workspace.Name, CreatedAt: workspace.CreatedAt, UpdatedAt: workspace.UpdatedAt, DisabledAt: nullableTime(workspace.DisabledAt), RequireMfa: boolValue(workspace.RequireMFA)}); err != nil {
+			return mapError(err)
+		}
+		return upsertMembership(ctx, q, membership)
+	})
+}
+
 func (s *Store) UserByEmail(ctx context.Context, email string) (credbound.User, error) {
 	row, err := s.queries.GetUserByEmail(ctx, email)
 	if err != nil {
@@ -174,7 +196,10 @@ func (s *Store) SetUserDisabled(ctx context.Context, userID string, disabled boo
 			return err
 		}
 		if disabled {
-			return mapError(q.RevokeUserPATs(ctx, db.RevokeUserPATsParams{UserID: userID, RevokedAt: nullableTime(&at)}))
+			if err := q.RevokeUserPATs(ctx, db.RevokeUserPATsParams{UserID: userID, RevokedAt: nullableTime(&at)}); err != nil {
+				return mapError(err)
+			}
+			return mapError(q.RevokeUserSessions(ctx, db.RevokeUserSessionsParams{UserID: userID, RevokedAt: nullableTime(&at)}))
 		}
 		return nil
 	})
@@ -340,6 +365,9 @@ func (s *Store) CompletePasswordReset(ctx context.Context, resetID string, passw
 			return err
 		}
 		if err := q.RevokeUserPATs(ctx, db.RevokeUserPATsParams{UserID: password.UserID, RevokedAt: nullableTime(&at)}); err != nil {
+			return mapError(err)
+		}
+		if err := q.RevokeUserSessions(ctx, db.RevokeUserSessionsParams{UserID: password.UserID, RevokedAt: nullableTime(&at)}); err != nil {
 			return mapError(err)
 		}
 		if err := s.revokeOAuthGrants(ctx, q, at, func(grant credbound.OAuthGrant) bool { return grant.UserID == password.UserID }); err != nil {
@@ -712,6 +740,9 @@ func (s *Store) RevokeUserCredentials(ctx context.Context, userID string, at tim
 			return mapError(err)
 		}
 		if err := q.RevokeUserPATs(ctx, db.RevokeUserPATsParams{UserID: userID, RevokedAt: nullableTime(&at)}); err != nil {
+			return mapError(err)
+		}
+		if err := q.RevokeUserSessions(ctx, db.RevokeUserSessionsParams{UserID: userID, RevokedAt: nullableTime(&at)}); err != nil {
 			return mapError(err)
 		}
 		return s.revokeOAuthGrants(ctx, q, at, func(grant credbound.OAuthGrant) bool { return grant.UserID == userID })
@@ -1617,3 +1648,4 @@ func decodeCursor(raw string) (cursor, error) {
 }
 
 var _ credbound.Store = (*Store)(nil)
+var _ credbound.SignupStore = (*Store)(nil)

@@ -440,6 +440,53 @@ func (a Authentication) HasScope(required string) bool {
 	return false
 }
 
+// Session is a persisted server-side session: an immutable snapshot of the
+// Authentication that created it, plus the device metadata observed at
+// creation. The raw cbs_ token is returned exactly once by CreateSession and
+// only its HMAC digest is stored. A session never upgrades its assurance
+// level in place — after VerifyTOTP or any other AAL transition the host
+// mints a new session and revokes the previous one, which doubles as
+// fixation protection.
+type Session struct {
+	ID     string
+	UserID string
+	// Method and Level snapshot the creating Authentication verbatim; they
+	// never change for the lifetime of the session.
+	Method AuthMethod
+	Level  AssuranceLevel
+	// AuthenticatedAt is copied from the creating Authentication so step-up
+	// freshness keeps measuring the factor verification, not session reuse.
+	AuthenticatedAt      time.Time
+	SecondFactorRequired bool
+	// UserAgent and IPAddress are the sanitized RequestMetadata observed when
+	// the session was created, for device listings.
+	UserAgent string
+	IPAddress string
+	// Digest is the HMAC of the raw token under the derived key (domain
+	// "session:"). It is scrubbed from listings and from every value the
+	// Manager returns.
+	Digest    []byte
+	CreatedAt time.Time
+	// LastSeenAt is telemetry only: expiry is absolute (CreatedAt plus
+	// Config.SessionTTL) and is never extended by activity.
+	LastSeenAt time.Time
+	ExpiresAt  time.Time
+	RevokedAt  *time.Time
+}
+
+// IssuedSession carries the raw session token exactly once, from
+// CreateSession. The host transports it (typically in a cookie) and never
+// stores it; only the digest is persisted.
+type IssuedSession struct {
+	Session Session
+	Token   string
+}
+
+// CreateSessionInput reserves room for future per-session options. Device
+// metadata is not part of it: CreateSession reads the sanitized
+// RequestMetadata attached to the context with WithRequestMetadata.
+type CreateSessionInput struct{}
+
 // AuditOutcome records whether the audited action succeeded or failed.
 type AuditOutcome string
 
@@ -784,6 +831,31 @@ type BootstrapInput struct {
 	DisplayName   string
 	Password      string
 	WorkspaceName string
+}
+
+// SignUpInput describes a self-service registration: the visitor's address,
+// profile, chosen password and the name of the workspace created for them.
+type SignUpInput struct {
+	Email         string
+	DisplayName   string
+	Password      string
+	WorkspaceName string
+}
+
+// SignUpResult is the outcome of a SignUp call. When ExistingAccount is true
+// the address already belonged to an account: every other field is zero, the
+// collision was reported only to the audit log, and the host must answer the
+// end user exactly as if the registration had succeeded. Otherwise User and
+// Workspace carry the created records; EmailVerification carries the
+// single-use token proving the primary address (delivered by the host, never
+// stored) unless Config.SignUp.AutoVerifyEmail is set, in which case
+// Authentication instead carries an AAL1 password authentication.
+type SignUpResult struct {
+	User              User
+	Workspace         Workspace
+	Authentication    Authentication
+	EmailVerification IssuedEmailVerification
+	ExistingAccount   bool
 }
 
 // CreateUserInput describes an administratively created account. The address
