@@ -12,8 +12,10 @@ const emailOTPOperation = "email_otp"
 
 // BeginEmailOTP issues a single-use, short-lived numeric code for the account
 // owning the verified address, together with a sealed continuation that the
-// host keeps on its side of the exchange (session, cookie, or hidden form
-// field) and passes back to CompleteEmailOTP with the code the user typed.
+// host passes back to CompleteEmailOTP with the code the user typed. The
+// continuation is AEAD-sealed and tamper-proof, so it may safely round-trip
+// through the client (a cookie or hidden form field); what matters is that it
+// come back with the code, not where it was kept.
 // Binding the code to the continuation keeps its short length safe: a code is
 // only ever compared against the single credential it was issued for, and
 // failed attempts count toward the account lockout.

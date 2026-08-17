@@ -278,6 +278,14 @@ func validWorkspaceDomainName(value string) (string, error) {
 // under the flow's action with reason "sso_required" and an empty actor,
 // since no account was resolved. Without a DomainStore the check is free and
 // always passes; infrastructure errors propagate.
+// domainRequiresSSO matches the exact registered domain of the address:
+// user@sub.corp.example is NOT covered by a policy on corp.example, by
+// design — over-matching would let a subdomain identity join or be forced
+// into the parent workspace. Hosts that need subdomain coverage register
+// each subdomain explicitly. Domains are stored in their ASCII form; an
+// address written with a Unicode domain does not match its punycode
+// registration and simply falls outside the policy (fail-safe: no
+// enforcement, no auto-join).
 func (m *Manager) domainRequiresSSO(ctx context.Context, email, action string) error {
 	if m.domainStore == nil {
 		return nil

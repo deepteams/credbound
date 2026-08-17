@@ -595,3 +595,57 @@ func TestSessionAuditUnavailableAndFaults(t *testing.T) {
 		t.Fatal("entropy failure ignored")
 	}
 }
+
+func TestSessionSignOut(t *testing.T) {
+	f := newFixture(t)
+	recorder := &sessionRecorder{}
+	f.manager.AddEventListener(recorder)
+	authn, _ := f.bootstrap(t)
+	ctx := context.Background()
+
+	issued, err := f.manager.CreateSession(ctx, authn, credbound.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Logout works by possession alone: an AAL1 password session needs no
+	// step-up to sign itself out.
+	if _, _, err := f.manager.AuthenticateSession(ctx, issued.Token); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.SignOut(ctx, issued.Token); err != nil {
+		t.Fatalf("sign out = %v", err)
+	}
+	if _, _, err := f.manager.AuthenticateSession(ctx, issued.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("signed-out session error = %v", err)
+	}
+	if len(recorder.revoked) != 1 || recorder.revoked[0].SessionID != issued.Session.ID {
+		t.Fatalf("session.revoked event = %#v", recorder.revoked)
+	}
+	// Logout is idempotent; forged and malformed tokens still fail.
+	if err := f.manager.SignOut(ctx, issued.Token); err != nil {
+		t.Fatalf("repeated sign out = %v", err)
+	}
+	if len(recorder.revoked) != 1 {
+		t.Fatalf("idempotent sign out emitted extra events: %#v", recorder.revoked)
+	}
+	if err := f.manager.SignOut(ctx, forgeSecret(issued.Token)); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("forged sign out = %v", err)
+	}
+	if err := f.manager.SignOut(ctx, "not-a-token"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("malformed sign out = %v", err)
+	}
+	unknown := "cbs_" + issued.Session.UserID + "_" + strings.Repeat("A", 43)
+	if err := f.manager.SignOut(ctx, unknown); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("unknown sign out = %v", err)
+	}
+
+	// An expired session still signs out, and a capability-less store refuses.
+	expired, err := f.manager.CreateSession(ctx, authn, credbound.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(31 * 24 * time.Hour)
+	if err := f.manager.SignOut(ctx, expired.Token); err != nil {
+		t.Fatalf("expired sign out = %v", err)
+	}
+}

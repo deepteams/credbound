@@ -94,6 +94,7 @@ type settings struct {
 	ssoProviders []credbound.SSOProvider
 	hooks        []credbound.TransactionHook
 	listeners    []credbound.EventListener
+	mutators     []func(*credbound.Config)
 }
 
 // Option customizes the manager built by NewManager.
@@ -141,6 +142,19 @@ func WithEventListeners(listeners ...credbound.EventListener) Option {
 	return func(s *settings) { s.listeners = listeners }
 }
 
+// WithConfig applies an arbitrary mutation to the assembled credbound.Config
+// just before New runs, covering everything without a dedicated option —
+// Config.SignUp, Config.OAuth, Config.SessionTTL, TTLs, and so on:
+//
+//	manager := credboundtest.NewManager(t, credboundtest.WithConfig(func(cfg *credbound.Config) {
+//		cfg.SignUp = &credbound.SignUpConfig{}
+//	}))
+//
+// Mutators run in registration order, after the other options are applied.
+func WithConfig(mutate func(*credbound.Config)) Option {
+	return func(s *settings) { s.mutators = append(s.mutators, mutate) }
+}
+
 // NewManager builds a *credbound.Manager wired for tests: memory.New() store,
 // the fast Passwords hasher, the TOTP and Passkeys fakes, fixed secret key and
 // peppers, a Clock frozen at DefaultStartTime, and a deterministic random
@@ -159,7 +173,7 @@ func NewManager(t testing.TB, opts ...Option) *credbound.Manager {
 	for _, opt := range opts {
 		opt(&s)
 	}
-	manager, err := credbound.New(credbound.Config{
+	cfg := credbound.Config{
 		Store:            s.store,
 		Passwords:        Passwords{},
 		TOTP:             TOTP{},
@@ -173,7 +187,11 @@ func NewManager(t testing.TB, opts ...Option) *credbound.Manager {
 		SSOProviders:     s.ssoProviders,
 		TransactionHooks: s.hooks,
 		EventListeners:   s.listeners,
-	})
+	}
+	for _, mutate := range s.mutators {
+		mutate(&cfg)
+	}
+	manager, err := credbound.New(cfg)
 	if err != nil {
 		t.Fatalf("credboundtest: build manager: %v", err)
 	}

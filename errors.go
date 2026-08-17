@@ -19,7 +19,7 @@ var (
 	ErrAuditUnavailable    = errors.New("credbound: audit unavailable")
 	ErrAuditCompromised    = errors.New("credbound: audit chain verification failed")
 	ErrTransactionRejected = errors.New("credbound: transaction rejected by hook")
-	ErrNotSupported        = errors.New("credbound: capability not supported by store")
+	ErrNotSupported        = errors.New("credbound: capability not enabled")
 )
 
 // ValidationError reports which input field failed validation and why, so a

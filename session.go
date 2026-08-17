@@ -154,6 +154,60 @@ func (m *Manager) AuthenticateSession(ctx context.Context, raw string) (_ Authen
 	return authentication, session, nil
 }
 
+// SignOut revokes the session identified by possession of its raw token —
+// the ordinary logout. Unlike RevokeSession it needs no step-up and no actor:
+// holding the single-display token proves ownership exactly as it does for
+// AuthenticateSession, so even a password-only (AAL1) deployment can sign out
+// immediately. Signing out an already-revoked session succeeds silently
+// (logout is idempotent); an expired session is still revoked so its record
+// reads as closed. Malformed, unknown, and forged tokens fail with
+// ErrInvalidCredentials.
+func (m *Manager) SignOut(ctx context.Context, raw string) (err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "auth.session.sign_out", started, err) }()
+	if m.sessionStore == nil {
+		return ErrNotSupported
+	}
+	sessionID, valid := parseSecretToken(sessionTokenPrefix, raw)
+	if !valid {
+		return ErrInvalidCredentials
+	}
+	session, lookupErr := m.sessionStore.SessionByID(ctx, sessionID)
+	if lookupErr != nil {
+		if errors.Is(lookupErr, ErrNotFound) {
+			return ErrInvalidCredentials
+		}
+		return lookupErr
+	}
+	if !m.matchTokenDigest(session.Digest, "session:"+raw) {
+		if auditErr := m.appendAuthenticationAudit(ctx, session.UserID, "session.sign_out", AuditFailed, "invalid_credentials"); auditErr != nil {
+			return auditErr
+		}
+		return ErrInvalidCredentials
+	}
+	if session.RevokedAt != nil {
+		return nil
+	}
+	event, err := m.newAudit(ctx, session.UserID, "session.sign_out", "session", session.ID, "", AuditSucceeded, "")
+	if err != nil {
+		return err
+	}
+	meta, err := m.newEventMeta(EventSessionRevoked, "auth.session.sign_out", session.UserID, "", event)
+	if err != nil {
+		return err
+	}
+	change := SessionRevocation{EventMeta: meta, SessionID: session.ID, UserID: session.UserID}
+	commit := m.transactionalCommit(event, "session.revocation", func(ctx context.Context, tx Tx, hook TransactionHook) error {
+		return hook.ApplySessionRevocation(ctx, tx, change)
+	})
+	if err := m.sessionStore.RevokeSession(ctx, session.ID, m.now(), commit); err != nil {
+		return m.mapStoreError(ctx, "auth.session.sign_out", err)
+	}
+	revoked := SessionRevokedEvent{EventMeta: meta, SessionID: session.ID, UserID: session.UserID}
+	m.events.emit(ctx, EventSessionRevoked, func(listener EventListener) error { return listener.OnSessionRevoked(ctx, revoked) })
+	return nil
+}
+
 // Sessions streams a user's sessions — snapshot, device metadata and
 // timestamps, never the token digest. The actor lists their own sessions
 // (userID empty or equal to the actor) with a recent interactive

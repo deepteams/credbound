@@ -95,6 +95,14 @@ func (m *Manager) beginSSO(ctx context.Context, actor Authentication, providerCo
 // the stable issuer/subject pair and update its last use. Failed or
 // mismatched ceremonies return ErrInvalidCredentials, stale continuations
 // ErrExpired.
+//
+// On a DomainStore-capable store, a sign-in whose identity is unknown may
+// JIT-provision an account: when the IdP-verified email belongs to a
+// confirmed auto-join workspace domain that trusts this provider
+// configuration and no existing account owns the address, one transaction
+// creates a passwordless user, its verified primary email, the configured
+// membership, and the identity link. An address owned by an existing account
+// is never auto-linked and the sign-in fails as an unknown identity.
 func (m *Manager) FinishSSO(ctx context.Context, continuation string, response []byte) (_ Authentication, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.sso.finish", started, err) }()

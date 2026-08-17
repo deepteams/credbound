@@ -109,6 +109,7 @@ SignUp(ctx, SignUpInput) (SignUpResult, error)
 
 CreateSession(ctx, authn, CreateSessionInput) (IssuedSession, error)
 AuthenticateSession(ctx, sessionToken) (Authentication, Session, error)
+SignOut(ctx, sessionToken) error
 Sessions(ctx, authn, userID, PageRequest) iter.Seq2[PageEvent[Session], error]
 RevokeSession(ctx, authn, sessionID) error
 RevokeUserSessions(ctx, authn, TrustedRequest, userID) error
@@ -316,6 +317,9 @@ touches the session's last-seen timestamp, and returns the snapshot with its
 after `VerifyTOTP` (or any AAL change) and revoke the previous one.
 `CompletePasswordReset`, `DisableUser`, and `RevokeUserCredentials` revoke the
 user's sessions in the same transaction when the store supports sessions.
+`SignOut` revokes a single session by possession of its raw token — the
+ordinary logout, deliberately requiring no step-up so an AAL1 deployment can
+sign out immediately; it is idempotent on already-revoked sessions.
 
 Workspace domains require a `DomainStore`-capable store. `CreateWorkspaceDomain`
 returns a DNS challenge value; the host proves control of the domain (for
@@ -323,11 +327,14 @@ example a TXT record) before calling `ConfirmWorkspaceDomain`. Only confirmed
 domains carry policy. `WorkspaceDomainPolicyInput` selects the auto-join role,
 the SSO provider configuration used for JIT provisioning, and the SSO
 enforcement flag. When enforcement is on, `AuthenticatePassword`,
-`BeginEmailAuthentication`, `BeginEmailOTP`, and `BeginPasswordReset` reject
-addresses under the domain with `ErrSSORequired`, which reflects domain policy
-rather than account existence. JIT provisioning inside `FinishSSO` creates a
-passwordless account only when no user owns the verified address (SSO-002
-still forbids auto-linking existing accounts).
+`BeginEmailAuthentication`, `BeginEmailOTP`, `BeginPasswordReset`, and
+`BeginPasskeyAuthentication` reject addresses at exactly that domain with
+`ErrSSORequired`, which reflects domain policy rather than account existence.
+Matching is exact and ASCII: subdomains require their own registration, and a
+Unicode-spelled domain falls outside the policy fail-safe. Non-interactive
+PATs are exempt, like the workspace MFA policy. JIT provisioning inside
+`FinishSSO` creates a passwordless account only when no user owns the
+verified address (SSO-002 still forbids auto-linking existing accounts).
 
 `Config.WorkspaceRoles` extends workspace roles only. Every custom role
 implicitly inherits from `member`; its inheritance and additional permissions

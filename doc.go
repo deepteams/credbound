@@ -1,9 +1,11 @@
 // Package credbound provides transport-independent authentication,
 // workspace authorization and instance-administration primitives for Go
-// SaaS services: local accounts, TOTP and passkey factors, magic links,
-// email OTP, password reset, PATs, SSO linking, workspace RBAC, invitations,
-// SCIM provisioning, an OAuth 2.1/OIDC authorization server for MCP
-// resources, and a hash-chained audit log.
+// SaaS services: local accounts, self-service signup, TOTP and passkey
+// factors, magic links, email OTP, password reset, PATs, server-side
+// sessions, SSO linking with verified workspace domains and JIT
+// provisioning, workspace RBAC, invitations, SCIM provisioning, an OAuth
+// 2.1/OIDC authorization server for MCP resources, and a hash-chained
+// audit log.
 //
 // Credbound starts no HTTP server and issues no cookies or JWTs. The host
 // service owns TLS, sessions, CSRF, throttling and UI; the optional oauthhttp
@@ -65,7 +67,7 @@
 // Failures map to sentinel errors compared with errors.Is:
 // ErrInvalidCredentials, ErrUnauthorized, ErrForbidden, ErrStepUpRequired,
 // ErrConflict, ErrNotFound, ErrNotSupported, ErrInvalidInput, ErrExpired,
-// ErrLocked, ErrAuditUnavailable, ErrAuditCompromised and
+// ErrLocked, ErrSSORequired, ErrAuditUnavailable, ErrAuditCompromised and
 // ErrTransactionRejected. User-input validation failures additionally carry
 // a *ValidationError{Field, Rule, Message} retrievable with errors.As; every
 // ValidationError also satisfies errors.Is(err, ErrInvalidInput). Public
@@ -91,10 +93,15 @@
 //
 // Config.TOTP and Config.Passkeys are optional providers; a Manager built
 // without one reports ErrNotSupported from the corresponding enrollment,
-// verification and ceremony operations. SCIM provisioning requires the
-// store to implement SCIMStore, and the OAuth server requires both
-// Config.OAuth and a store implementing OAuthStore; absent capabilities
-// likewise report ErrNotSupported without affecting anything else.
+// verification and ceremony operations. Store capabilities are detected by
+// type assertion: SCIM provisioning requires SCIMStore, the OAuth server
+// requires Config.OAuth plus OAuthStore, self-service signup requires
+// Config.SignUp plus SignupStore, server-side sessions (CreateSession,
+// AuthenticateSession, SignOut, device listing and the revocation cascade)
+// require SessionStore, and verified workspace domains with JIT provisioning
+// and domain-enforced SSO require DomainStore. Absent capabilities report
+// ErrNotSupported without affecting anything else; the bundled memory,
+// SQLite and PostgreSQL stores implement all of them.
 //
 // # Audit
 //

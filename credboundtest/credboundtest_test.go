@@ -143,3 +143,16 @@ func TestCredboundtestStoreAndListenerOptions(t *testing.T) {
 		t.Fatalf("user missing from injected store: %v", err)
 	}
 }
+
+func TestCredboundtestWithConfig(t *testing.T) {
+	manager := credboundtest.NewManager(t, credboundtest.WithConfig(func(cfg *credbound.Config) {
+		cfg.SignUp = &credbound.SignUpConfig{AutoVerifyEmail: true}
+	}))
+	result, err := manager.SignUp(context.Background(), credbound.SignUpInput{
+		Email: "founder@example.com", DisplayName: "Founder",
+		Password: "another strong password", WorkspaceName: "Startup",
+	})
+	if err != nil || result.Authentication.UserID == "" || result.ExistingAccount {
+		t.Fatalf("signup through WithConfig = %#v, %v", result, err)
+	}
+}

@@ -18,8 +18,8 @@ import (
 // fallback.
 type Config struct {
 	// Store is the required persistence port. A store that additionally
-	// implements SCIMStore or OAuthStore unlocks the corresponding optional
-	// capability.
+	// implements SCIMStore, OAuthStore, SignupStore, SessionStore, or
+	// DomainStore unlocks the corresponding optional capability.
 	Store Store
 	// Passwords derives and verifies password hashes (Argon2id is the
 	// intended algorithm). Required.
@@ -44,8 +44,9 @@ type Config struct {
 	// to satisfy RequireStepUp. Zero keeps the default of 10 minutes.
 	StepUpMaxAge time.Duration
 	// CeremonyTTL bounds the validity of sealed ceremony continuations
-	// (WebAuthn, SSO, OAuth consent, email OTP). Zero keeps the default of
-	// 5 minutes.
+	// (WebAuthn, SSO, OAuth consent). Email OTP continuations follow
+	// EmailAuthenticationTTL plus a one-minute audit grace instead. Zero
+	// keeps the default of 5 minutes.
 	CeremonyTTL time.Duration
 	// MinPasswordLen is the minimum accepted password length in runes. Zero
 	// keeps the default of 12; values below 10 are rejected.
@@ -85,8 +86,8 @@ type Config struct {
 	// PasswordResetTTL bounds the validity of a password reset token. Zero
 	// keeps the default of 1 hour.
 	PasswordResetTTL time.Duration
-	// EmailAuthenticationTTL bounds the validity of a magic-link token. Zero
-	// keeps the default of 15 minutes.
+	// EmailAuthenticationTTL bounds the validity of magic-link tokens and
+	// email OTP codes. Zero keeps the default of 15 minutes.
 	EmailAuthenticationTTL time.Duration
 	// InvitationTTL bounds the validity of a workspace invitation token.
 	// Zero keeps the default of 7 days.

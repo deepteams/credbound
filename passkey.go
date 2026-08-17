@@ -128,6 +128,14 @@ func (m *Manager) BeginPasskeyAuthentication(ctx context.Context, email string) 
 	}
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.passkey.authentication.begin", started, err) }()
+	// SSO-006: a confirmed EnforceSSO domain rejects every interactive
+	// non-SSO flow, including passkeys registered before the policy was
+	// enabled. Checked before any lookup so the answer depends only on the
+	// domain. Non-interactive PATs are deliberately exempt, like the
+	// workspace MFA policy.
+	if err := m.domainRequiresSSO(ctx, normalizeEmail(email), "passkey.authentication.begin"); err != nil {
+		return PasskeyChallenge{}, err
+	}
 	userRecord, err := m.store.UserByEmail(ctx, normalizeEmail(email))
 	if err != nil || userRecord.Disabled {
 		return PasskeyChallenge{}, ErrInvalidCredentials

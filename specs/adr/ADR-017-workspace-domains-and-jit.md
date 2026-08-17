@@ -32,10 +32,13 @@ Domains become an optional module behind the `DomainStore` capability:
   If any account already owns the address the login fails as an unknown
   identity: SSO-002's no-auto-link rule is preserved verbatim.
 - Enforcement: `AuthenticatePassword`, `BeginPasswordReset`,
-  `BeginEmailAuthentication`, and `BeginEmailOTP` reject addresses under an
-  `EnforceSSO` domain with the `ErrSSORequired` sentinel before touching any
-  credential. The response depends only on the domain, never on whether the
-  account exists, so it introduces no enumeration oracle.
+  `BeginEmailAuthentication`, `BeginEmailOTP`, and
+  `BeginPasskeyAuthentication` reject addresses under an `EnforceSSO` domain
+  with the `ErrSSORequired` sentinel before touching any credential. The
+  response depends only on the domain, never on whether the account exists,
+  so it introduces no enumeration oracle. Non-interactive PATs are exempt,
+  mirroring the workspace MFA policy; matching is exact, so subdomains need
+  their own registration.
 
 ## Consequences
 

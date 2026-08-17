@@ -1,9 +1,11 @@
 // Command minimal is a runnable, end-to-end Credbound integration: SQLite
 // persistence through the pure-Go modernc.org/sqlite driver, the embedded
-// migrations, Argon2id password hashing, and a net/http session layer that
-// follows the "Sessions and the Authentication capability" contract from the
-// README. TOTP and passkey providers are deliberately omitted to show that
-// they are optional: the related flows simply return ErrNotSupported.
+// migrations, Argon2id password hashing, and a net/http layer backed by
+// Credbound's server-side session module (CreateSession, AuthenticateSession,
+// SignOut), following the "Sessions and the Authentication capability"
+// contract from the README. TOTP and passkey providers are deliberately
+// omitted to show that they are optional: the related flows simply return
+// ErrNotSupported.
 //
 //	go run ./examples/minimal
 //	curl -c jar -X POST -d 'email=root@example.com' --data-urlencode 'password=correct horse battery staple' http://127.0.0.1:8080/signin
@@ -24,7 +26,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 
 	"github.com/deepteams/credbound"
 	"github.com/deepteams/credbound/migrations"
@@ -92,14 +93,6 @@ func main() {
 	// run hits ErrConflict, which simply means the instance already exists.
 	bootstrap(manager)
 
-	// The host owns sessions. This example keeps each Authentication
-	// server-side in a map keyed by a random 128-bit identifier and hands the
-	// browser only that identifier, so the client can never influence Level,
-	// Method or AuthenticatedAt. Sessions die with the process; a real host
-	// persists them (or uses a signed and encrypted cookie) and terminates
-	// them on password reset, user disable, or credential revocation.
-	sessions := &sessionStore{authns: make(map[string]credbound.Authentication)}
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /signin", func(w http.ResponseWriter, r *http.Request) {
 		authn, err := manager.AuthenticatePassword(r.Context(), r.FormValue("email"), r.FormValue("password"))
@@ -120,7 +113,13 @@ func main() {
 			http.Error(w, "second factor required", http.StatusForbidden)
 			return
 		}
-		id, err := sessions.create(authn)
+		// The session module persists an immutable snapshot of the
+		// Authentication behind a single-display cbs_ token: the client can
+		// never influence Level, Method or AuthenticatedAt, and password
+		// reset, user disable, and credential revocation revoke the session
+		// in the same store transaction. The cookie carries the raw token;
+		// only its HMAC digest is stored.
+		issued, err := manager.CreateSession(r.Context(), authn, credbound.CreateSessionInput{})
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -128,27 +127,39 @@ func main() {
 		// Secure is left off only because this demo serves plain HTTP on
 		// loopback; production cookies are Secure and served over TLS.
 		http.SetCookie(w, &http.Cookie{
-			Name: "credbound_session", Value: id, Path: "/",
+			Name: "credbound_session", Value: issued.Token, Path: "/",
 			HttpOnly: true, SameSite: http.SameSiteLaxMode,
 		})
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /me", func(w http.ResponseWriter, r *http.Request) {
-		authn, ok := sessions.get(r)
-		if !ok {
+		cookie, err := r.Cookie("credbound_session")
+		if err != nil {
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return
 		}
-		// The stored Authentication is reused verbatim as the capability for
+		// AuthenticateSession re-validates the token digest, expiry,
+		// revocation and user status on every request, and returns the
+		// snapshot Authentication to use verbatim as the capability for
 		// library calls; it is never rebuilt from client-supplied fields.
+		authn, session, err := manager.AuthenticateSession(r.Context(), cookie.Value)
+		if err != nil {
+			http.Error(w, "authentication required", http.StatusUnauthorized)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"user_id": authn.UserID, "method": authn.Method,
 			"level": authn.Level, "authenticated_at": authn.AuthenticatedAt,
+			"session_id": session.ID, "session_expires_at": session.ExpiresAt,
 		})
 	})
 	mux.HandleFunc("POST /signout", func(w http.ResponseWriter, r *http.Request) {
-		sessions.remove(r)
+		// SignOut revokes by possession of the token: no step-up needed, and
+		// signing out twice is a no-op. The cookie is cleared either way.
+		if cookie, err := r.Cookie("credbound_session"); err == nil {
+			_ = manager.SignOut(r.Context(), cookie.Value)
+		}
 		http.SetCookie(w, &http.Cookie{Name: "credbound_session", Value: "", Path: "/", MaxAge: -1})
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -237,44 +248,4 @@ func bootstrap(manager *credbound.Manager) {
 	default:
 		log.Printf("bootstrapped %s in workspace %q", email, workspace.Name)
 	}
-}
-
-// sessionStore is the minimal host-side session table: random identifier to
-// server-side Authentication.
-type sessionStore struct {
-	mu     sync.Mutex
-	authns map[string]credbound.Authentication
-}
-
-func (s *sessionStore) create(authn credbound.Authentication) (string, error) {
-	raw := make([]byte, 16)
-	if _, err := rand.Read(raw); err != nil {
-		return "", err
-	}
-	id := hex.EncodeToString(raw)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.authns[id] = authn
-	return id, nil
-}
-
-func (s *sessionStore) get(r *http.Request) (credbound.Authentication, bool) {
-	cookie, err := r.Cookie("credbound_session")
-	if err != nil {
-		return credbound.Authentication{}, false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	authn, ok := s.authns[cookie.Value]
-	return authn, ok
-}
-
-func (s *sessionStore) remove(r *http.Request) {
-	cookie, err := r.Cookie("credbound_session")
-	if err != nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.authns, cookie.Value)
 }

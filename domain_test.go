@@ -338,6 +338,9 @@ func TestDomainEnforcedSSO(t *testing.T) {
 		if _, err := f.manager.BeginEmailOTP(ctx, email); !errors.Is(err, credbound.ErrSSORequired) {
 			t.Fatalf("email OTP %q error = %v", email, err)
 		}
+		if _, err := f.manager.BeginPasskeyAuthentication(ctx, email); !errors.Is(err, credbound.ErrSSORequired) {
+			t.Fatalf("passkey %q error = %v", email, err)
+		}
 	}
 	// Addresses outside the domain keep their exact previous behavior.
 	if _, err := f.manager.AuthenticatePassword(ctx, "ghost@other.example", "whatever password"); !errors.Is(err, credbound.ErrInvalidCredentials) {
