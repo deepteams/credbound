@@ -88,7 +88,11 @@ func parse(encoded string) (Params, []byte, []byte, error) {
 		return Params{}, nil, nil, err
 	}
 	params.Memory, params.Iterations, params.Parallelism = uint32(memory), uint32(iterations), uint8(parallelism)
-	if params.Memory < 8 || params.Memory > 1024*1024 || params.Iterations == 0 || params.Iterations > 20 || params.Parallelism == 0 || params.Parallelism > 16 {
+	// Verification accepts a wider floor than New so hashes imported from a
+	// previous system can still authenticate once (they are rehashed under the
+	// current policy on the first successful login), but never below 8 MiB of
+	// memory: weaker stored parameters indicate tampering, not legacy data.
+	if params.Memory < 8*1024 || params.Memory > 1024*1024 || params.Iterations == 0 || params.Iterations > 20 || params.Parallelism == 0 || params.Parallelism > 16 {
 		return Params{}, nil, nil, errors.New("password: argon2id parameters outside safety bounds")
 	}
 	salt, err := base64.RawStdEncoding.Strict().DecodeString(parts[4])

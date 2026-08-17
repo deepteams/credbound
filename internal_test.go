@@ -107,9 +107,9 @@ func TestUUIDv7SequenceOverflowAndClockRollback(t *testing.T) {
 func TestContinuationAndEncryptionBoundaries(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	m := &Manager{
-		secretKey: bytes.Repeat([]byte{1}, 32),
-		clock:     func() time.Time { return now },
-		random:    bytes.NewReader(bytes.Repeat([]byte{2}, 256)),
+		secretKey: bytes.Repeat([]byte{1}, 32), sealKey: bytes.Repeat([]byte{1}, 32),
+		clock:  func() time.Time { return now },
+		random: bytes.NewReader(bytes.Repeat([]byte{2}, 256)),
 	}
 	continuation, err := m.encodeContinuation(ceremonyContinuation{
 		UserID: "user", Operation: "register", ExpiresAt: now.Add(time.Minute), Session: []byte("session"),
@@ -152,7 +152,7 @@ func TestContinuationAndEncryptionBoundaries(t *testing.T) {
 func TestSSOContinuationBoundaries(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	m := &Manager{
-		secretKey: bytes.Repeat([]byte{1}, 32), clock: func() time.Time { return now },
+		secretKey: bytes.Repeat([]byte{1}, 32), sealKey: bytes.Repeat([]byte{1}, 32), clock: func() time.Time { return now },
 		random: bytes.NewReader(bytes.Repeat([]byte{2}, 512)),
 	}
 	valid := ssoContinuation{
@@ -298,5 +298,33 @@ func TestSCIMValueHelpers(t *testing.T) {
 	}
 	if validSCIMFilter(SCIMFilter{Attribute: "unknown"}, true) || validSCIMFilter(SCIMFilter{Attribute: "active"}, false) || !validSCIMFilter(SCIMFilter{Attribute: "displayName"}, false) {
 		t.Fatal("SCIM filter validation mismatch")
+	}
+}
+
+func TestKeySeparationLegacyFallback(t *testing.T) {
+	raw := bytes.Repeat([]byte{7}, 32)
+	legacy := &Manager{secretKey: raw, sealKey: raw, random: bytes.NewReader(bytes.Repeat([]byte{2}, 64))}
+	sealed, err := legacy.seal([]byte("pre-separation data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := &Manager{
+		secretKey: raw,
+		sealKey:   bytes.Repeat([]byte{8}, 32),
+		digestKey: bytes.Repeat([]byte{9}, 32),
+		random:    bytes.NewReader(bytes.Repeat([]byte{2}, 64)),
+	}
+	plaintext, err := current.open(sealed)
+	if err != nil || string(plaintext) != "pre-separation data" {
+		t.Fatalf("legacy unseal = %q, %v", plaintext, err)
+	}
+	if !current.matchTokenDigest(digest(raw, "token"), "token") {
+		t.Fatal("legacy digest rejected")
+	}
+	if !current.matchTokenDigest(current.tokenDigest("token"), "token") {
+		t.Fatal("derived digest rejected")
+	}
+	if current.matchTokenDigest(current.tokenDigest("token"), "other") {
+		t.Fatal("mismatched digest accepted")
 	}
 }

@@ -155,11 +155,15 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 	var throttle LoginThrottle
 	if lookupErr == nil {
 		credential, credentialErr := m.store.PasswordByUserID(ctx, user.ID)
-		if credentialErr != nil {
-			infrastructureErr = credentialErr
-		} else {
+		switch {
+		case credentialErr == nil:
 			hash = credential.Hash
+		case !errors.Is(credentialErr, ErrNotFound):
+			infrastructureErr = credentialErr
 		}
+		// An account without a password credential (SSO- or passkey-only)
+		// keeps the dummy hash and fails exactly like a wrong password, so
+		// the returned error never reveals which accounts lack a password.
 		if m.maxFailedLogins > 0 && infrastructureErr == nil {
 			currentThrottle, throttleErr := m.store.LoginThrottleByUserID(ctx, user.ID)
 			if throttleErr == nil {

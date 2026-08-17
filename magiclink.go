@@ -2,7 +2,6 @@ package credbound
 
 import (
 	"context"
-	"crypto/hmac"
 	"encoding/base64"
 	"errors"
 )
@@ -11,8 +10,11 @@ const emailAuthenticationPrefix = "cbl"
 
 // BeginEmailAuthentication issues a single-use, short-lived magic-link token
 // for the account owning the verified address. The host delivers the token to
-// that address and must answer the end user identically whether or not the
-// account exists.
+// that address and answers the end user identically whether or not the account
+// exists. When the address does not belong to a verified email of an enabled
+// account, the call succeeds with a zero IssuedEmailAuthentication (empty
+// Token) so the host's error path never becomes an enumeration oracle: send
+// the email only when Token is non-empty.
 func (m *Manager) BeginEmailAuthentication(ctx context.Context, email string) (_ IssuedEmailAuthentication, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.email_link.begin", started, err) }()
@@ -29,7 +31,7 @@ func (m *Manager) BeginEmailAuthentication(ctx context.Context, email string) (_
 		return IssuedEmailAuthentication{}, err
 	}
 	raw := emailAuthenticationPrefix + "_" + id + "_" + base64.RawURLEncoding.EncodeToString(secret)
-	tokenDigest := digest(m.secretKey, "email-authentication:"+raw)
+	tokenDigest := m.tokenDigest("email-authentication:" + raw)
 	if lookupErr != nil {
 		if !errors.Is(lookupErr, ErrNotFound) {
 			return IssuedEmailAuthentication{}, lookupErr
@@ -37,15 +39,21 @@ func (m *Manager) BeginEmailAuthentication(ctx context.Context, email string) (_
 		if auditErr := m.appendAuthenticationAudit(ctx, "", "email_authentication.request", AuditFailed, "unknown_email"); auditErr != nil {
 			return IssuedEmailAuthentication{}, auditErr
 		}
-		return IssuedEmailAuthentication{}, ErrNotFound
+		return IssuedEmailAuthentication{}, nil
 	}
 	if user.Disabled {
 		if auditErr := m.appendAuthenticationAudit(ctx, user.ID, "email_authentication.request", AuditFailed, "user_disabled"); auditErr != nil {
 			return IssuedEmailAuthentication{}, auditErr
 		}
-		return IssuedEmailAuthentication{}, ErrNotFound
+		return IssuedEmailAuthentication{}, nil
 	}
 	emailID, err := m.verifiedEmailID(ctx, user.ID, normalized)
+	if errors.Is(err, ErrNotFound) {
+		if auditErr := m.appendAuthenticationAudit(ctx, user.ID, "email_authentication.request", AuditFailed, "unverified_email"); auditErr != nil {
+			return IssuedEmailAuthentication{}, auditErr
+		}
+		return IssuedEmailAuthentication{}, nil
+	}
 	if err != nil {
 		return IssuedEmailAuthentication{}, err
 	}
@@ -99,7 +107,7 @@ func (m *Manager) CompleteEmailAuthentication(ctx context.Context, raw string) (
 		}
 		return Authentication{}, ErrExpired
 	}
-	if !hmac.Equal(credential.Digest, digest(m.secretKey, "email-authentication:"+raw)) {
+	if !m.matchTokenDigest(credential.Digest, "email-authentication:"+raw) {
 		if auditErr := m.appendAuthenticationAudit(ctx, credential.UserID, "auth.email_link", AuditFailed, "invalid_credentials"); auditErr != nil {
 			return Authentication{}, auditErr
 		}

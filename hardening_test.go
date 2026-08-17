@@ -331,8 +331,8 @@ func TestPasswordResetFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := f.manager.BeginPasswordReset(ctx, "ghost@example.com"); !errors.Is(err, credbound.ErrNotFound) {
-		t.Fatalf("unknown email error = %v", err)
+	if issued, err := f.manager.BeginPasswordReset(ctx, "ghost@example.com"); err != nil || issued.Token != "" {
+		t.Fatalf("unknown email reset = %#v, %v", issued, err)
 	}
 	reset, err := f.manager.BeginPasswordReset(ctx, "ROOT@example.com")
 	if err != nil || reset.UserID != authn.UserID || !strings.HasPrefix(reset.Token, "cbr_") {
@@ -405,8 +405,8 @@ func TestMagicLinkAuthentication(t *testing.T) {
 	authn, _ := f.bootstrap(t)
 	ctx := context.Background()
 
-	if _, err := f.manager.BeginEmailAuthentication(ctx, "ghost@example.com"); !errors.Is(err, credbound.ErrNotFound) {
-		t.Fatalf("unknown email error = %v", err)
+	if issued, err := f.manager.BeginEmailAuthentication(ctx, "ghost@example.com"); err != nil || issued.Token != "" {
+		t.Fatalf("unknown email link = %#v, %v", issued, err)
 	}
 	link, err := f.manager.BeginEmailAuthentication(ctx, "Root@example.com")
 	if err != nil || link.UserID != authn.UserID || !strings.HasPrefix(link.Token, "cbl_") || link.EmailID == "" {
@@ -676,11 +676,11 @@ func TestTokenForgeryAndDisabledUserPaths(t *testing.T) {
 	if _, err := f.manager.CompleteEmailAuthentication(ctx, link.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("link for disabled user error = %v", err)
 	}
-	if _, err := f.manager.BeginPasswordReset(ctx, "member@example.com"); !errors.Is(err, credbound.ErrNotFound) {
-		t.Fatalf("reset request for disabled user error = %v", err)
+	if issued, err := f.manager.BeginPasswordReset(ctx, "member@example.com"); err != nil || issued.Token != "" {
+		t.Fatalf("reset request for disabled user = %#v, %v", issued, err)
 	}
-	if _, err := f.manager.BeginEmailAuthentication(ctx, "member@example.com"); !errors.Is(err, credbound.ErrNotFound) {
-		t.Fatalf("link request for disabled user error = %v", err)
+	if issued, err := f.manager.BeginEmailAuthentication(ctx, "member@example.com"); err != nil || issued.Token != "" {
+		t.Fatalf("link request for disabled user = %#v, %v", issued, err)
 	}
 }
 

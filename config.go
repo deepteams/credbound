@@ -2,7 +2,9 @@ package credbound
 
 import (
 	"context"
+	"crypto/hkdf"
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"reflect"
@@ -62,6 +64,8 @@ type Manager struct {
 	totp                 TOTPProvider
 	passkeys             PasskeyProvider
 	secretKey            []byte
+	sealKey              []byte
+	digestKey            []byte
 	patPepper            []byte
 	recoveryPepper       []byte
 	stepUpMaxAge         time.Duration
@@ -163,6 +167,17 @@ func New(cfg Config) (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize dummy password: %w", err)
 	}
+	// The AEAD and HMAC keys are distinct HKDF derivations of SecretKey so the
+	// two primitives never share key material. The raw SecretKey remains the
+	// fallback for data sealed before this separation existed.
+	sealKey, err := hkdf.Key(sha256.New, cfg.SecretKey, nil, "credbound/seal/v1", 32)
+	if err != nil {
+		return nil, fmt.Errorf("derive seal key: %w", err)
+	}
+	digestKey, err := hkdf.Key(sha256.New, cfg.SecretKey, nil, "credbound/digest/v1", 32)
+	if err != nil {
+		return nil, fmt.Errorf("derive digest key: %w", err)
+	}
 	events, err := newEventRegistry(cfg.Observer, func() time.Time { return cfg.Clock().UTC() }, cfg.TransactionHooks, cfg.EventListeners)
 	if err != nil {
 		return nil, err
@@ -186,6 +201,8 @@ func New(cfg Config) (*Manager, error) {
 		totp:                 cfg.TOTP,
 		passkeys:             cfg.Passkeys,
 		secretKey:            append([]byte(nil), cfg.SecretKey...),
+		sealKey:              sealKey,
+		digestKey:            digestKey,
 		patPepper:            append([]byte(nil), cfg.PATPepper...),
 		recoveryPepper:       append([]byte(nil), cfg.RecoveryPepper...),
 		stepUpMaxAge:         cfg.StepUpMaxAge,

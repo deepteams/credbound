@@ -2,7 +2,6 @@ package credbound
 
 import (
 	"context"
-	"crypto/hmac"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -59,7 +58,7 @@ func (m *Manager) InviteToWorkspace(ctx context.Context, actor Authentication, w
 	now := m.now()
 	invitation := WorkspaceInvitation{
 		ID: id, WorkspaceID: workspaceID, Email: email, Role: role, InvitedBy: actor.UserID,
-		Digest: digest(m.secretKey, "workspace-invitation:"+raw), CreatedAt: now, ExpiresAt: now.Add(m.invitationTTL),
+		Digest: m.tokenDigest("workspace-invitation:" + raw), CreatedAt: now, ExpiresAt: now.Add(m.invitationTTL),
 	}
 	event, err := m.newAudit(ctx, actor.UserID, "workspace.invitation.create", "workspace_invitation", id, workspaceID, AuditSucceeded, "")
 	if err != nil {
@@ -323,7 +322,7 @@ func (m *Manager) usableInvitation(ctx context.Context, raw, action string) (Wor
 		}
 		return WorkspaceInvitation{}, ErrExpired
 	}
-	if !hmac.Equal(invitation.Digest, digest(m.secretKey, "workspace-invitation:"+raw)) {
+	if !m.matchTokenDigest(invitation.Digest, "workspace-invitation:"+raw) {
 		if auditErr := m.appendAuthenticationAudit(ctx, "", action, AuditFailed, "invalid_credentials"); auditErr != nil {
 			return WorkspaceInvitation{}, auditErr
 		}

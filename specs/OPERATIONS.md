@@ -19,6 +19,13 @@ Never reuse a value across purposes, persist it in the application database,
 pass it on a command line, or emit it to logs and telemetry. Startup must fail
 when a required value is absent or malformed.
 
+Internally, the manager derives two HKDF-SHA256 subkeys from `SecretKey` — one
+for AEAD sealing, one for email-proof HMAC digests — so the two primitives never
+share key material. Data written before this separation (sealed TOTP secrets,
+passkey credentials, and outstanding email-proof digests) keeps verifying
+through a raw-key fallback; no migration is required, and rotation guidance for
+`SecretKey` is unchanged.
+
 ## Rotation
 
 `SecretKey`, PAT, recovery, and OAuth peppers are single active values in v0;
@@ -56,6 +63,13 @@ Test restoration on an isolated environment. Audit tables are append-only:
 recovery tooling must not rewrite or delete audit rows. Transaction-hook writes
 must use the provided bounded transaction capability so application outbox,
 billing, or credit changes commit atomically with the Credbound mutation.
+
+`VerifyAuditChain` detects any rewrite or reordering of retained events, but a
+writer with full database access who deletes the newest events and rewinds the
+chain head to a consistent earlier state is indistinguishable from a shorter
+history. For guarantees against tail truncation, periodically anchor the chain
+head hash and sequence number outside the database (an object-lock bucket, a
+transparency log, or a signed release note) and compare during audits.
 
 ## OAuth, CIMD, and DCR
 

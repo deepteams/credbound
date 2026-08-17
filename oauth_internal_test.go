@@ -153,7 +153,7 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 	manager := &Manager{
 		oauth: &OAuthConfig{Pepper: bytes.Repeat([]byte{4}, 32)}, workspaceRoles: roles,
 		clock: func() time.Time { return now }, random: bytes.NewReader(bytes.Repeat([]byte{7}, 8192)),
-		secretKey: bytes.Repeat([]byte{1}, 32), ceremonyTTL: 5 * time.Minute, observer: nopObserver{},
+		secretKey: bytes.Repeat([]byte{1}, 32), sealKey: bytes.Repeat([]byte{1}, 32), ceremonyTTL: 5 * time.Minute, observer: nopObserver{},
 	}
 	invalidPolicies := []UpdateOAuthIssuerInput{
 		{CIMDMode: "unknown"}, {DCRMode: "unknown"},
@@ -333,11 +333,11 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 	if _, err := manager.oauthIDToken(context.Background(), OAuthIssuer{OIDCEnabled: true}, OAuthClient{}, OAuthGrant{Scopes: []string{"openid"}}, "", now.Add(time.Minute)); err != ErrNotSupported {
 		t.Fatalf("missing OIDC signer = %v", err)
 	}
-	manager.secretKey = []byte("invalid")
+	manager.sealKey = []byte("invalid")
 	if _, err := manager.encodeOAuthContinuation(oauthAuthorizationContinuation{}); err == nil {
 		t.Fatal("continuation encryption failure ignored")
 	}
-	manager.secretKey = bytes.Repeat([]byte{1}, 32)
+	manager.sealKey = bytes.Repeat([]byte{1}, 32)
 	manager.random = bytes.NewReader(nil)
 	if _, _, err := manager.newOAuthChange(EventOAuthTokenIssued, "test", AuditEvent{}, OAuthClient{}, "", "", "", "", nil); err == nil {
 		t.Fatal("OAuth event entropy failure ignored")

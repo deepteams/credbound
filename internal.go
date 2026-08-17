@@ -89,14 +89,38 @@ func digest(key []byte, value string) []byte {
 	return h.Sum(nil)
 }
 
-func (m *Manager) seal(plaintext []byte) ([]byte, error) {
-	block, err := aes.NewCipher(m.secretKey)
+// tokenDigest computes the stored digest of a single-use token under the
+// HKDF-derived HMAC key.
+func (m *Manager) tokenDigest(value string) []byte {
+	return digest(m.digestKey, value)
+}
+
+// matchTokenDigest verifies a stored token digest. Digests written before the
+// key separation were computed under the raw SecretKey, so both keys are
+// accepted; new digests always use the derived key.
+func (m *Manager) matchTokenDigest(stored []byte, value string) bool {
+	if hmac.Equal(stored, digest(m.digestKey, value)) {
+		return true
+	}
+	return hmac.Equal(stored, digest(m.secretKey, value))
+}
+
+func newGCM(key []byte) (cipher.AEAD, error) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("create cipher: %w", err)
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return nil, fmt.Errorf("create gcm: %w", err)
+	}
+	return gcm, nil
+}
+
+func (m *Manager) seal(plaintext []byte) ([]byte, error) {
+	gcm, err := newGCM(m.sealKey)
+	if err != nil {
+		return nil, err
 	}
 	nonce, err := randomBytes(m.random, gcm.NonceSize())
 	if err != nil {
@@ -106,22 +130,23 @@ func (m *Manager) seal(plaintext []byte) ([]byte, error) {
 }
 
 func (m *Manager) open(ciphertext []byte) ([]byte, error) {
-	block, err := aes.NewCipher(m.secretKey)
-	if err != nil {
-		return nil, fmt.Errorf("create cipher: %w", err)
+	// Data sealed before the key separation used the raw SecretKey; try the
+	// derived key first and fall back so existing TOTP secrets and passkey
+	// credentials keep decrypting.
+	for _, key := range [][]byte{m.sealKey, m.secretKey} {
+		gcm, err := newGCM(key)
+		if err != nil {
+			return nil, err
+		}
+		if len(ciphertext) < gcm.NonceSize() {
+			return nil, ErrInvalidCredentials
+		}
+		plaintext, err := gcm.Open(nil, ciphertext[:gcm.NonceSize()], ciphertext[gcm.NonceSize():], nil)
+		if err == nil {
+			return plaintext, nil
+		}
 	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("create gcm: %w", err)
-	}
-	if len(ciphertext) < gcm.NonceSize() {
-		return nil, ErrInvalidCredentials
-	}
-	plaintext, err := gcm.Open(nil, ciphertext[:gcm.NonceSize()], ciphertext[gcm.NonceSize():], nil)
-	if err != nil {
-		return nil, ErrInvalidCredentials
-	}
-	return plaintext, nil
+	return nil, ErrInvalidCredentials
 }
 
 type ceremonyContinuation struct {

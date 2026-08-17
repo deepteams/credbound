@@ -2,7 +2,6 @@ package credbound
 
 import (
 	"context"
-	"crypto/hmac"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -12,9 +11,12 @@ const passwordResetPrefix = "cbr"
 
 // BeginPasswordReset issues a single-use, expiring reset token for the
 // account owning the address. The host delivers the token to that address and
-// must answer the end user identically whether or not the account exists; the
-// library performs the same cryptographic work in both cases so timing does
-// not reveal the difference.
+// answers the end user identically whether or not the account exists. When the
+// address does not belong to an enabled account, the call succeeds with a zero
+// IssuedPasswordReset (empty Token) so the host's error path never becomes an
+// enumeration oracle: send the email only when Token is non-empty. The library
+// performs the same cryptographic work and a comparable store write in both
+// cases so timing does not reveal the difference either.
 func (m *Manager) BeginPasswordReset(ctx context.Context, email string) (_ IssuedPasswordReset, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.password.reset.begin", started, err) }()
@@ -31,7 +33,7 @@ func (m *Manager) BeginPasswordReset(ctx context.Context, email string) (_ Issue
 		return IssuedPasswordReset{}, err
 	}
 	raw := passwordResetPrefix + "_" + id + "_" + base64.RawURLEncoding.EncodeToString(secret)
-	tokenDigest := digest(m.secretKey, "password-reset:"+raw)
+	tokenDigest := m.tokenDigest("password-reset:" + raw)
 	if lookupErr != nil {
 		if !errors.Is(lookupErr, ErrNotFound) {
 			return IssuedPasswordReset{}, lookupErr
@@ -39,13 +41,13 @@ func (m *Manager) BeginPasswordReset(ctx context.Context, email string) (_ Issue
 		if auditErr := m.appendAuthenticationAudit(ctx, "", "password.reset.request", AuditFailed, "unknown_email"); auditErr != nil {
 			return IssuedPasswordReset{}, auditErr
 		}
-		return IssuedPasswordReset{}, ErrNotFound
+		return IssuedPasswordReset{}, nil
 	}
 	if user.Disabled {
 		if auditErr := m.appendAuthenticationAudit(ctx, user.ID, "password.reset.request", AuditFailed, "user_disabled"); auditErr != nil {
 			return IssuedPasswordReset{}, auditErr
 		}
-		return IssuedPasswordReset{}, ErrNotFound
+		return IssuedPasswordReset{}, nil
 	}
 	now := m.now()
 	credential := PasswordResetCredential{
@@ -99,7 +101,7 @@ func (m *Manager) CompletePasswordReset(ctx context.Context, raw, newPassword st
 		}
 		return User{}, ErrExpired
 	}
-	if !hmac.Equal(credential.Digest, digest(m.secretKey, "password-reset:"+raw)) {
+	if !m.matchTokenDigest(credential.Digest, "password-reset:"+raw) {
 		if auditErr := m.appendAuthenticationAudit(ctx, credential.UserID, "password.reset.complete", AuditFailed, "invalid_credentials"); auditErr != nil {
 			return User{}, auditErr
 		}

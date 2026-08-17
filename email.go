@@ -2,7 +2,6 @@ package credbound
 
 import (
 	"context"
-	"crypto/hmac"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -34,7 +33,7 @@ func (m *Manager) BeginEmailAddition(ctx context.Context, actor Authentication, 
 	now := m.now()
 	email := EmailAddress{ID: id, UserID: actor.UserID, Address: address, CreatedAt: now, UpdatedAt: now}
 	verification := EmailVerificationCredential{
-		EmailID: id, Digest: digest(m.secretKey, "email-verification:"+raw), ExpiresAt: now.Add(m.emailVerificationTTL),
+		EmailID: id, Digest: m.tokenDigest("email-verification:" + raw), ExpiresAt: now.Add(m.emailVerificationTTL),
 	}
 	event, err := m.newAudit(ctx, actor.UserID, "email.add", "email", id, "", AuditSucceeded, "")
 	if err != nil {
@@ -79,7 +78,7 @@ func (m *Manager) ConfirmEmail(ctx context.Context, raw string) (_ EmailAddress,
 		}
 		return EmailAddress{}, ErrExpired
 	}
-	if !hmac.Equal(verification.Digest, digest(m.secretKey, "email-verification:"+raw)) {
+	if !m.matchTokenDigest(verification.Digest, "email-verification:"+raw) {
 		if auditErr := m.appendAuthenticationAudit(ctx, email.UserID, "email.verify", AuditFailed, "invalid_credentials"); auditErr != nil {
 			return EmailAddress{}, auditErr
 		}

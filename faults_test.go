@@ -45,6 +45,12 @@ func TestAuthenticationInfrastructureAndRehashPaths(t *testing.T) {
 	if _, err := manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); err == nil || err.Error() != "credential storage offline" {
 		t.Fatalf("credential infrastructure failure = %v", err)
 	}
+	// A user without a password credential (SSO- or passkey-only) must fail
+	// exactly like a wrong password, never leak a distinguishable error.
+	fault.passwordErr = credbound.ErrNotFound
+	if _, err := manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("passwordless account error = %v", err)
+	}
 	fault.passwordErr = nil
 	fault.totpErr = errors.New("factor storage offline")
 	if _, err := manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); err == nil || err.Error() != "factor storage offline" {

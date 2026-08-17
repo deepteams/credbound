@@ -60,7 +60,7 @@ func TestInternalSecurityHelperEdges(t *testing.T) {
 	}
 
 	boom := errors.New("random unavailable")
-	manager := &Manager{secretKey: []byte("short"), random: &edgeReader{err: boom}, clock: func() time.Time { return time.Unix(1, 0) }}
+	manager := &Manager{secretKey: []byte("short"), sealKey: []byte("short"), random: &edgeReader{err: boom}, clock: func() time.Time { return time.Unix(1, 0) }}
 	if _, err := manager.seal([]byte("payload")); err == nil {
 		t.Fatal("invalid AES key accepted for sealing")
 	}
@@ -68,6 +68,7 @@ func TestInternalSecurityHelperEdges(t *testing.T) {
 		t.Fatal("invalid AES key accepted for opening")
 	}
 	manager.secretKey = make([]byte, 32)
+	manager.sealKey = make([]byte, 32)
 	if _, err := manager.encodeContinuation(ceremonyContinuation{}); !errors.Is(err, boom) {
 		t.Fatalf("continuation random failure = %v", err)
 	}

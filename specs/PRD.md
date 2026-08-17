@@ -19,7 +19,7 @@ Credbound provides a reusable, testable, transport-independent core.
 | AUTH-003 | Passkey | The library can start and finish WebAuthn registration and authentication ceremonies while requiring user verification. |
 | AUTH-004 | 2FA | A user can enable TOTP after confirming a valid code and receives single-use recovery codes. |
 | AUTH-005 | Step-up | A sensitive operation can require interactive AAL2 authentication newer than a configurable duration. |
-| AUTH-006 | Enumeration resistance | An unknown identifier and an invalid password produce the same public error and both perform a password derivation. |
+| AUTH-006 | Enumeration resistance | An unknown identifier, an invalid password, and an account without a password credential produce the same public error and all perform a password derivation. Reset and magic-link initiation succeed without a token instead of erroring for ineligible addresses. |
 | AUTH-007 | Password reset | A single-use, expiring reset token is issued for an enabled account with the same cryptographic work for unknown addresses. Completing it atomically replaces the password, revokes the account's PATs and OAuth grants, clears its lockout, and audits the recovery. |
 | AUTH-008 | Magic link | A single-use, short-lived email token authenticates the owner of a verified address at AAL1 and reports whether a TOTP factor is still required. |
 | AUTH-009 | Lockout | Consecutive password or TOTP failures lock the account for a configurable duration. The check performs the same password derivation as a normal attempt, unknown accounts never reveal a lockout, and any successful authentication or completed reset clears the counter. |

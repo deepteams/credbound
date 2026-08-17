@@ -212,8 +212,15 @@ Credbound derives these values so that a consuming service cannot impersonate
 an actor or backdate an entry.
 
 `BeginPasswordReset` and `BeginEmailAuthentication` perform the same
-cryptographic work whether or not the address exists; the host answers the end
-user identically in both cases and delivers the returned token itself.
+cryptographic work whether or not the address exists, and both succeed with a
+zero-value result (empty `Token`) when the address does not belong to an
+eligible account, so the host's error path never distinguishes the two cases.
+The host answers the end user identically, and delivers the returned token
+itself only when `Token` is non-empty. `AuthenticatePassword` treats an account
+without a password credential exactly like a wrong password. `ErrLocked` is
+returned only for an existing account; a host that relays it verbatim to an
+unauthenticated caller reveals that the account exists — prefer a neutral
+"try again later" message on that path.
 `CompletePasswordReset` atomically installs the password, revokes the user's
 PATs and OAuth grants, and clears the lockout counter; host-owned sessions must
 be terminated by the host alongside it.
