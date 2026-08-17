@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+// StoreKind identifies the engine behind a Tx so a TransactionHook can
+// recover the engine-specific handle (for example sqlstore's TxFrom).
 type StoreKind string
 
 const (
@@ -37,6 +39,9 @@ type Commit struct {
 	Transactional func(context.Context, Tx) error
 }
 
+// EventName is the stable, unversioned name of an event, such as
+// "user.created" or "workspace.created". Payload shapes follow the library
+// version; names do not change.
 type EventName string
 
 const (
@@ -120,6 +125,10 @@ const (
 	EventOAuthConsentRevoked          EventName = "oauth.consent.revoked"
 )
 
+// EventMeta is embedded by every hook payload and event. ID is a UUIDv7
+// suitable as an idempotency key or outbox messageId; AuditID references the
+// audit event committed with the change (empty for advisory events that have
+// no audit of their own).
 type EventMeta struct {
 	ID          string
 	Name        EventName
@@ -132,6 +141,9 @@ type EventMeta struct {
 
 // Transaction payloads deliberately contain no passwords, credential hashes,
 // verification tokens, raw PATs, TOTP secrets, recovery codes or SSO tokens.
+
+// UserCreateChange carries a created account with its primary email and
+// initial membership.
 type UserCreateChange struct {
 	EventMeta
 	User       User
@@ -145,18 +157,25 @@ type WorkspaceCreateChange struct {
 	Owner     Membership
 }
 
+// UserStatusChange covers both directions of the user lifecycle; Disabled
+// tells them apart, as does the EventMeta name.
 type UserStatusChange struct {
 	EventMeta
 	UserID   string
 	Disabled bool
 }
 
+// WorkspaceChange carries a workspace update, disable or enable together
+// with the state it replaced.
 type WorkspaceChange struct {
 	EventMeta
 	Workspace Workspace
 	Previous  Workspace
 }
 
+// MembershipChange covers membership addition, status change and removal.
+// Previous is nil for an addition, and Removed marks a removal whose
+// Membership field holds the final state.
 type MembershipChange struct {
 	EventMeta
 	Membership Membership
@@ -278,6 +297,8 @@ type InstanceRoleRemoval struct {
 	PreviousRole InstanceRole
 }
 
+// ClientAuditRecord carries a host-supplied audit entry recorded through
+// RecordAudit, with the derived actor and timestamp already enforced.
 type ClientAuditRecord struct {
 	EventMeta
 	Audit AuditEvent
@@ -298,6 +319,9 @@ type SCIMGroupChange struct {
 	Group SCIMGroup
 }
 
+// OAuthChange is the shared payload of every OAuth hook call and event.
+// Only the identifiers that apply to the specific change are set; raw codes,
+// tokens and secrets never appear.
 type OAuthChange struct {
 	EventMeta
 	IssuerID     string
@@ -333,11 +357,15 @@ type PasswordChangedEvent struct {
 	UserID string
 }
 
+// PasswordRehashedEvent reports the transparent hash renewal performed after
+// a successful authentication when the hashing parameters changed.
 type PasswordRehashedEvent struct {
 	EventMeta
 	UserID string
 }
 
+// AuthenticationEvent reports every successful authentication, whatever the
+// method.
 type AuthenticationEvent struct {
 	EventMeta
 	Authentication Authentication
@@ -347,6 +375,8 @@ type AuthenticationEvent struct {
 	Request RequestMetadata
 }
 
+// AuthenticationFailureEvent reports a failed authentication attempt. UserID
+// is empty when the failure cannot be attributed to an existing account.
 type AuthenticationFailureEvent struct {
 	EventMeta
 	Method AuthMethod
@@ -358,11 +388,16 @@ type AuthenticationFailureEvent struct {
 	Request RequestMetadata
 }
 
+// StepUpDeniedEvent is an advisory signal that an operation was refused for
+// lack of a fresh AAL2 authentication; it carries no audit of its own.
 type StepUpDeniedEvent struct {
 	EventMeta
 	UserID string
 }
 
+// AuthorizationDeniedEvent is an advisory signal that a workspace
+// authorization failed; it carries no audit of its own. RequiredRole is
+// empty for permission-based checks.
 type AuthorizationDeniedEvent struct {
 	EventMeta
 	UserID       string
@@ -462,6 +497,9 @@ type UserCredentialsRevokedEvent struct {
 	UserID string
 }
 
+// UserLockedEvent is emitted once when consecutive failures reach the
+// lockout threshold, so listeners can alert without counting failures
+// themselves.
 type UserLockedEvent struct {
 	EventMeta
 	UserID      string
@@ -497,6 +535,9 @@ type PATAuthenticatedEvent struct {
 	UserID string
 }
 
+// PATRejectedEvent reports a rejected PAT authentication. The token owner,
+// when identifiable, is only in the associated audit — malformed tokens have
+// no attributable user.
 type PATRejectedEvent struct {
 	EventMeta
 	Reason string
@@ -561,32 +602,46 @@ type SCIMConfigurationCreatedEvent struct {
 	Configuration SCIMConfiguration
 }
 
+// SCIMUserEvent is the shared payload of every SCIM user lifecycle event
+// (provisioned, updated, activated, suspended, deprovisioned); the EventMeta
+// name tells them apart.
 type SCIMUserEvent struct {
 	EventMeta
 	User SCIMUser
 }
 
+// SCIMGroupEvent is the shared payload of every SCIM group lifecycle event
+// (created, updated, deleted, members changed); the EventMeta name tells
+// them apart.
 type SCIMGroupEvent struct {
 	EventMeta
 	Group SCIMGroup
 }
 
+// OAuthEvent is the shared payload of every OAuth event, distinguished by
+// the EventMeta name of its OAuthChange.
 type OAuthEvent struct {
 	OAuthChange
 }
 
+// UserStatusEvent reports a user being disabled or re-enabled; Disabled
+// tells the directions apart.
 type UserStatusEvent struct {
 	EventMeta
 	UserID   string
 	Disabled bool
 }
 
+// WorkspaceChangedEvent reports a workspace update, disable or enable
+// together with the state it replaced.
 type WorkspaceChangedEvent struct {
 	EventMeta
 	Workspace Workspace
 	Previous  Workspace
 }
 
+// MembershipChangedEvent reports a membership addition, status change or
+// removal. Previous is nil for an addition and Removed marks a removal.
 type MembershipChangedEvent struct {
 	EventMeta
 	Membership Membership
@@ -600,6 +655,13 @@ type WorkspaceInvitationEvent struct {
 	Invitation WorkspaceInvitation
 }
 
+// TransactionHook lets the host add its own writes to a Credbound mutation.
+// Hooks run sequentially inside the store transaction, after the mutation
+// and before the audit write, so returning an error aborts the whole commit;
+// errors that are not sentinel errors surface as ErrTransactionRejected.
+// Hooks must not perform external I/O, invoke another Manager mutation,
+// retain the Tx, or use it from another goroutine. Implementations embed
+// UnimplementedTransactionHook to stay compatible as methods are added.
 type TransactionHook interface {
 	unimplementedTransactionHook()
 
@@ -637,6 +699,13 @@ type TransactionHook interface {
 	ApplyOAuthChange(context.Context, Tx, OAuthChange) error
 }
 
+// EventListener observes committed facts. Listeners run synchronously after
+// the commit; their errors and panics are recorded through the Observer for
+// observability only and never propagate or interrupt other listeners.
+// Delivery is best effort — guaranteed delivery belongs in a host-owned
+// outbox written from a TransactionHook, with EventMeta.ID as the
+// idempotency key. Implementations embed UnimplementedEventListener to stay
+// compatible as methods are added. Events never carry secrets.
 type EventListener interface {
 	unimplementedEventListener()
 
@@ -699,6 +768,8 @@ type EventListener interface {
 	OnOAuthEvent(context.Context, OAuthEvent) error
 }
 
+// Subscription undoes an AddTransactionHook or AddEventListener
+// registration. Remove is idempotent.
 type Subscription interface {
 	Remove()
 }
@@ -764,6 +835,9 @@ func nilInterface(value any) bool {
 	}
 }
 
+// AddTransactionHook registers a hook after construction, in addition to
+// Config.TransactionHooks. It returns the Subscription that removes it; a
+// nil hook is ignored and yields a no-op Subscription.
 func (m *Manager) AddTransactionHook(hook TransactionHook) Subscription {
 	if nilInterface(hook) {
 		return &eventSubscription{remove: func() {}}
@@ -771,6 +845,9 @@ func (m *Manager) AddTransactionHook(hook TransactionHook) Subscription {
 	return m.events.addTransactionHook(hook)
 }
 
+// AddEventListener registers a listener after construction, in addition to
+// Config.EventListeners. It returns the Subscription that removes it; a nil
+// listener is ignored and yields a no-op Subscription.
 func (m *Manager) AddEventListener(listener EventListener) Subscription {
 	if nilInterface(listener) {
 		return &eventSubscription{remove: func() {}}

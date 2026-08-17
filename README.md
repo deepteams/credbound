@@ -130,8 +130,8 @@ if err != nil {
 auth, err := credbound.New(credbound.Config{
     Store:          store,
     Passwords:      passwords,
-    TOTP:           totpProvider,
-    Passkeys:       passkeys,
+    TOTP:           totpProvider,  // optional second factor
+    Passkeys:       passkeys,      // optional second factor
     SecretKey:      encryptionKey, // exactly 32 bytes
     PATPepper:      patPepper,     // at least 32 bytes
     RecoveryPepper: recoveryPepper,// at least 32 bytes
@@ -148,6 +148,15 @@ auth, err := credbound.New(credbound.Config{
     EventListeners:   []credbound.EventListener{segmentListener},
 })
 ```
+
+The snippet assumes the embedded migrations have already been applied to
+`database` (see `migrations.SQLite()` and `migrations.PostgreSQL()` below).
+Only `Store`, `Passwords`, and the three secrets are required: the `TOTP` and
+`Passkeys` providers are optional, and their flows return `ErrNotSupported`
+until the host wires them. A complete, runnable integration — SQLite,
+migration application, first-run bootstrap, and a cookie-session HTTP layer
+following the sessions contract above — lives in
+[`examples/minimal`](examples/minimal/main.go).
 
 Each SSO provider has a UUIDv7 configuration identifier. The host service
 implements the `SSOProvider` port for the IdPs it enables and remains responsible
@@ -233,6 +242,29 @@ first user, their workspace, their `admin` membership, and their instance-level
 Operational guidance is in [`specs/OPERATIONS.md`](specs/OPERATIONS.md), the
 release process in [`specs/RELEASING.md`](specs/RELEASING.md), and vulnerability
 reporting in [`SECURITY.md`](SECURITY.md).
+
+### Testing your integration
+
+The [`credboundtest`](credboundtest) package builds a fully wired `Manager` for
+host-service tests: in-memory store, fast fake password hasher, deterministic
+clock and randomness, and TOTP/passkey fakes whose ceremonies succeed with
+fixed inputs. Nothing in it is safe for production.
+
+```go
+func TestSignIn(t *testing.T) {
+    clock := credboundtest.NewClock(credboundtest.DefaultStartTime)
+    manager := credboundtest.NewManager(t, credboundtest.WithClock(clock))
+    authn, workspace := credboundtest.Bootstrap(t, manager)
+
+    issued, err := manager.CreatePAT(context.Background(),
+        credboundtest.AAL2(authn.UserID, clock.Now()), // test-only step-up
+        credbound.CreatePATInput{Name: "ci", WorkspaceID: workspace.ID, Scopes: []string{"read"}})
+    if err != nil {
+        t.Fatal(err)
+    }
+    _ = issued.Token // raw token, returned exactly once
+}
+```
 
 ## Verification
 

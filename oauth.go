@@ -72,6 +72,11 @@ func (m *Manager) ValidateOAuthAuthorizationRedirect(ctx context.Context, issuer
 	return nil
 }
 
+// CreateOAuthIssuer registers an authorization-server issuer with its CIMD,
+// DCR, OIDC and token-lifetime policy, atomically with the audit event. The
+// actor needs admin settings write and an admin mutation (fresh AAL2, or a
+// trusted local request). Returns ErrNotSupported unless both Config.OAuth
+// and the OAuthStore capability exist.
 func (m *Manager) CreateOAuthIssuer(ctx context.Context, actor Authentication, request TrustedRequest, input CreateOAuthIssuerInput) (_ OAuthIssuer, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.issuer.create", started, err) }()
@@ -122,6 +127,9 @@ func (m *Manager) CreateOAuthIssuer(ctx context.Context, actor Authentication, r
 	return cloneOAuthIssuer(issuer), nil
 }
 
+// UpdateOAuthIssuer replaces the policy of an issuer (its URL is immutable),
+// atomically with the audit event, under the same authorization as
+// CreateOAuthIssuer.
 func (m *Manager) UpdateOAuthIssuer(ctx context.Context, actor Authentication, request TrustedRequest, issuerID string, input UpdateOAuthIssuerInput) (_ OAuthIssuer, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.issuer.update", started, err) }()
@@ -166,6 +174,12 @@ func (m *Manager) UpdateOAuthIssuer(ctx context.Context, actor Authentication, r
 	return cloneOAuthIssuer(issuer), nil
 }
 
+// CreateOAuthProtectedResource registers an MCP resource of the workspace
+// under an issuer, with scope definitions that map onto registered workspace
+// permissions, atomically with the audit event. The actor needs a fresh AAL2
+// step-up and the oauth.resource.manage workspace permission; access tokens
+// are later bound to this resource URI and workspace. Returns
+// ErrNotSupported without the OAuth capability.
 func (m *Manager) CreateOAuthProtectedResource(ctx context.Context, actor Authentication, workspaceID string, input CreateOAuthProtectedResourceInput) (_ OAuthProtectedResource, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.resource.create", started, err) }()
@@ -216,6 +230,11 @@ func (m *Manager) CreateOAuthProtectedResource(ctx context.Context, actor Authen
 	return cloneOAuthResource(resource), nil
 }
 
+// PreRegisterOAuthClient administratively registers a client under an
+// issuer, atomically with the audit event, and returns the generated client
+// secret exactly once when client_secret_basic is requested. The actor needs
+// admin settings write and an admin mutation (fresh AAL2, or a trusted local
+// request); only pre-registered clients may be marked Trusted.
 func (m *Manager) PreRegisterOAuthClient(ctx context.Context, actor Authentication, request TrustedRequest, issuerID string, input OAuthClientRegistrationInput) (_ IssuedOAuthClient, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.client.pre_register", started, err) }()
@@ -252,6 +271,12 @@ func (m *Manager) PreRegisterOAuthClient(ctx context.Context, actor Authenticati
 	return IssuedOAuthClient{Client: publicOAuthClient(client), ClientSecret: rawSecret}, nil
 }
 
+// CreateOAuthInitialAccessToken issues the expiring, registration-limited
+// bootstrap credential for protected DCR and returns the raw token exactly
+// once; only its HMAC is persisted, atomically with the audit event. The
+// actor needs admin settings write and an admin mutation (fresh AAL2, or a
+// trusted local request); an issuer whose DCR mode is not protected fails
+// with ErrNotSupported. The token grants no authority over any resource.
 func (m *Manager) CreateOAuthInitialAccessToken(ctx context.Context, actor Authentication, request TrustedRequest, issuerID string, input CreateOAuthInitialAccessTokenInput) (_ IssuedOAuthInitialAccessToken, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.initial_access_token.create", started, err) }()
@@ -306,6 +331,9 @@ func (m *Manager) CreateOAuthInitialAccessToken(ctx context.Context, actor Authe
 	return IssuedOAuthInitialAccessToken{Credential: public, Token: raw}, nil
 }
 
+// RevokeOAuthInitialAccessToken withdraws a DCR bootstrap credential,
+// atomically with the audit event, under the same authorization as
+// CreateOAuthInitialAccessToken.
 func (m *Manager) RevokeOAuthInitialAccessToken(ctx context.Context, actor Authentication, request TrustedRequest, tokenID string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.initial_access_token.revoke", started, err) }()
@@ -332,6 +360,13 @@ func (m *Manager) RevokeOAuthInitialAccessToken(ctx context.Context, actor Authe
 	return nil
 }
 
+// RegisterOAuthClient performs dynamic client registration against an
+// issuer. In protected DCR mode it consumes one registration of a valid
+// initial access token; in open mode no credential is accepted. Registered
+// clients are never trusted, and a client secret is returned exactly once
+// when the issuer allows it. Returns ErrNotSupported when the issuer's DCR
+// mode is disabled and ErrInvalidCredentials for an unusable initial access
+// token.
 func (m *Manager) RegisterOAuthClient(ctx context.Context, issuerURL, initialAccessToken string, input OAuthClientRegistrationInput) (_ IssuedOAuthClient, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.client.dynamic_register", started, err) }()
@@ -392,6 +427,13 @@ func (m *Manager) RegisterOAuthClient(ctx context.Context, issuerURL, initialAcc
 	return IssuedOAuthClient{Client: publicOAuthClient(client), ClientSecret: rawSecret}, nil
 }
 
+// BeginOAuthAuthorization validates an authorization request — client,
+// exact redirect URI, PKCE S256, state, resource, scopes and the actor's
+// membership and per-scope permissions — and returns a sealed OAuthConsent
+// for the host's consent UI. Nothing is persisted yet: only
+// CompleteOAuthAuthorization can turn the continuation into a grant and
+// code. The actor must be interactive; RequiresStepUp on the result signals
+// that a scope demands a stronger or fresher authentication.
 func (m *Manager) BeginOAuthAuthorization(ctx context.Context, actor Authentication, input BeginOAuthAuthorizationInput) (_ OAuthConsent, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.authorization.begin", started, err) }()
@@ -479,6 +521,13 @@ func (m *Manager) BeginOAuthAuthorization(ctx context.Context, actor Authenticat
 	}, nil
 }
 
+// CompleteOAuthAuthorization resolves a consent continuation: approval
+// re-validates everything, creates the grant and the single-use
+// authorization code atomically with the audit event, and returns the code
+// exactly once; denial audits the refusal and returns an access_denied
+// result for the redirect. The continuation must belong to the same
+// interactive actor as BeginOAuthAuthorization, and scopes demanding a
+// stronger or fresher authentication fail with ErrStepUpRequired.
 func (m *Manager) CompleteOAuthAuthorization(ctx context.Context, actor Authentication, rawContinuation string, approved bool) (_ OAuthAuthorizationResult, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.authorization.complete", started, err) }()

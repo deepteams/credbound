@@ -183,6 +183,10 @@ type OAuthStore interface {
 	RevokeOAuthRefreshFamily(context.Context, string, time.Time, Commit) error
 }
 
+// PasswordHasher derives and verifies password hashes. Verify additionally
+// reports rehash when the stored hash uses outdated parameters, so a
+// successful authentication can transparently renew it. Argon2id with
+// versioned parameters is the intended implementation.
 type PasswordHasher interface {
 	Hash(string) (string, error)
 	Verify(string, string) (match bool, rehash bool, err error)
@@ -200,11 +204,18 @@ type PasswordPolicy interface {
 	ValidatePassword(ctx context.Context, password string) error
 }
 
+// TOTPProvider is the optional time-based OTP algorithm port. Generate
+// returns the shared secret and its otpauth:// URI; Validate reports the
+// accepted time step so the store can reject replays of the same step.
 type TOTPProvider interface {
 	Generate(accountName string) (secret string, uri string, err error)
 	Validate(code, secret string, at time.Time) (step int64, valid bool)
 }
 
+// PasskeyProvider is the optional WebAuthn ceremony port. Each Begin method
+// returns the browser options and an opaque session that Credbound seals
+// into the continuation; each Finish method validates the browser response
+// against that session. Implementations must require user verification.
 type PasskeyProvider interface {
 	BeginRegistration(context.Context, PasskeyUser) (json.RawMessage, []byte, error)
 	FinishRegistration(context.Context, PasskeyUser, []byte, []byte) (credentialID, credentialJSON []byte, err error)
@@ -212,6 +223,11 @@ type PasskeyProvider interface {
 	FinishAuthentication(context.Context, PasskeyUser, []byte, []byte) (credentialID, credentialJSON []byte, err error)
 }
 
+// SSOProvider is the network adapter for one registered identity provider.
+// ConfigurationID returns the stable UUIDv7 the host addresses it by, Begin
+// starts a ceremony (honoring SSORequest.ForceReauthentication for
+// step-up), and Finish validates the provider response against the sealed
+// session and returns the asserted claims.
 type SSOProvider interface {
 	ConfigurationID() string
 	Kind() SSOProviderKind
@@ -219,12 +235,17 @@ type SSOProvider interface {
 	Finish(context.Context, []byte, []byte) (SSOClaims, error)
 }
 
+// Operation is one observed unit of work: an API call, a transaction hook or
+// an event listener invocation. Outcome is "success", "error" or "panic".
+// Names are low-cardinality and values never contain secrets.
 type Operation struct {
 	Name     string
 	Outcome  string
 	Duration time.Duration
 }
 
+// Observer receives Operation records for metrics, logs and traces (OTEL is
+// the intended sink). Implementations must be safe for concurrent use.
 type Observer interface {
 	Observe(context.Context, Operation)
 }

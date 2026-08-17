@@ -11,6 +11,11 @@ import (
 	"strings"
 )
 
+// CreatePAT issues a personal access token with at least 256 bits of entropy
+// and returns the raw token exactly once; only its HMAC digest is persisted,
+// atomically with the audit event. It requires a fresh AAL2 step-up, and
+// binding the token to a workspace additionally requires access to that
+// workspace.
 func (m *Manager) CreatePAT(ctx context.Context, actor Authentication, input CreatePATInput) (_ IssuedPAT, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.pat.create", started, err) }()
@@ -80,6 +85,12 @@ func (m *Manager) CreatePAT(ctx context.Context, actor Authentication, input Cre
 	return IssuedPAT{PAT: pat, Token: raw}, nil
 }
 
+// AuthenticatePAT validates a raw cbp_ token in constant time against its
+// stored digest and returns a non-interactive AAL1 authentication carrying
+// the PAT's workspace binding and scopes; last_used_at is updated atomically
+// with the audit event. Malformed, unknown, expired and revoked tokens, as
+// well as tokens of disabled users or workspaces, all fail with
+// ErrInvalidCredentials. The result never satisfies step-up checks.
 func (m *Manager) AuthenticatePAT(ctx context.Context, raw string) (_ Authentication, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.pat.authenticate", started, err) }()
@@ -147,6 +158,9 @@ func (m *Manager) AuthenticatePAT(ctx context.Context, raw string) (_ Authentica
 	return authentication, nil
 }
 
+// RevokePAT revokes one of the actor's own tokens, atomically with the audit
+// event. It requires a fresh AAL2 step-up; a token belonging to another user
+// is reported as ErrNotFound by the store.
 func (m *Manager) RevokePAT(ctx context.Context, actor Authentication, patID string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.pat.revoke", started, err) }()
@@ -176,6 +190,8 @@ func (m *Manager) RevokePAT(ctx context.Context, actor Authentication, patID str
 	return nil
 }
 
+// PATs streams the actor's tokens — metadata, prefix and timestamps, never
+// the secret. It requires a recent interactive authentication.
 func (m *Manager) PATs(ctx context.Context, actor Authentication, page PageRequest) iter.Seq2[PageEvent[PAT], error] {
 	if err := m.requireRecentInteractive(ctx, actor); err != nil {
 		return errorSeq[PageEvent[PAT]](err)

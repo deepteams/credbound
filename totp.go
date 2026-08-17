@@ -10,6 +10,11 @@ import (
 
 const recoveryCodeCount = 10
 
+// BeginTOTPEnrollment creates or replaces the actor's inactive TOTP factor
+// and returns the otpauth URI once for the host to render; the secret is
+// persisted sealed. It requires a recent interactive authentication and
+// returns ErrNotSupported without Config.TOTP. The factor gates nothing
+// until ConfirmTOTPEnrollment activates it.
 func (m *Manager) BeginTOTPEnrollment(ctx context.Context, actor Authentication) (_ TOTPEnrollment, err error) {
 	if err := m.requireTOTPProvider(); err != nil {
 		return TOTPEnrollment{}, err
@@ -53,6 +58,11 @@ func (m *Manager) BeginTOTPEnrollment(ctx context.Context, actor Authentication)
 	return TOTPEnrollment{URI: uri}, nil
 }
 
+// ConfirmTOTPEnrollment activates the pending factor after proving a valid
+// code and returns the single-use recovery codes exactly once; only their
+// peppered digests are persisted. It requires a recent interactive
+// authentication and returns ErrNotSupported without Config.TOTP, ErrNotFound
+// without a pending enrollment, and ErrInvalidCredentials for a wrong code.
 func (m *Manager) ConfirmTOTPEnrollment(ctx context.Context, actor Authentication, code string) (_ []string, err error) {
 	if err := m.requireTOTPProvider(); err != nil {
 		return nil, err
@@ -103,6 +113,12 @@ func (m *Manager) ConfirmTOTPEnrollment(ctx context.Context, actor Authenticatio
 	return codes, nil
 }
 
+// VerifyTOTP validates a TOTP or single-use recovery code for an
+// interactive actor and returns a fresh AAL2 authentication — the second
+// step of the password-then-TOTP flow the host stores in place of the AAL1
+// context. Replays of an already accepted time step and wrong codes fail
+// with ErrInvalidCredentials; wrong codes count toward the account lockout
+// (ErrLocked while it lasts). Returns ErrNotSupported without Config.TOTP.
 func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code string) (_ Authentication, err error) {
 	if err := m.requireTOTPProvider(); err != nil {
 		return Authentication{}, err
@@ -184,6 +200,10 @@ func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code str
 	return Authentication{}, ErrInvalidCredentials
 }
 
+// DisableTOTP removes the actor's active TOTP factor and its recovery codes
+// after re-proving possession of a valid code, atomically with the audit
+// event. The verification itself yields the fresh AAL2 step-up the removal
+// requires. Returns ErrNotSupported without Config.TOTP.
 func (m *Manager) DisableTOTP(ctx context.Context, actor Authentication, code string) (err error) {
 	if err := m.requireTOTPProvider(); err != nil {
 		return err

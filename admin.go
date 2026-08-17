@@ -60,6 +60,12 @@ func buildAdminPermissions(overrides map[InstanceRole][]Permission) (map[Instanc
 	return result, nil
 }
 
+// AuthorizeAdmin checks that the actor is an enabled user holding an
+// instance role that maps to the permission. Every check — allowed or denied
+// — appends an audit event and fails with ErrAuditUnavailable when that
+// audit cannot be persisted; a missing role or permission fails with
+// ErrForbidden. Instance roles never grant workspace data access by
+// themselves.
 func (m *Manager) AuthorizeAdmin(ctx context.Context, actor Authentication, permission Permission) error {
 	if actor.UserID == "" {
 		return ErrUnauthorized
@@ -92,6 +98,10 @@ func (m *Manager) AuthorizeAdmin(ctx context.Context, actor Authentication, perm
 	return nil
 }
 
+// RequireAdminMutation gates administrative writes: the actor must be
+// interactive, and either the request was verified as loopback by the server
+// adapter (TrustedRequest.Local) or RequireStepUp must pass. It complements
+// AuthorizeAdmin, which checks the permission itself.
 func (m *Manager) RequireAdminMutation(actor Authentication, request TrustedRequest) error {
 	if actor.UserID == "" || !actor.Interactive() {
 		return ErrUnauthorized
@@ -112,6 +122,11 @@ func (m *Manager) requireAdminMutation(ctx context.Context, actor Authentication
 	return m.requireStepUp(ctx, actor, operation)
 }
 
+// SetInstanceRole grants or changes a user's instance-administration role,
+// atomically with the audit event. The actor needs admin instance-roles
+// write (root only by default) and an admin mutation (fresh AAL2, or a
+// trusted local request). A root cannot downgrade itself, and only the five
+// built-in roles are accepted.
 func (m *Manager) SetInstanceRole(ctx context.Context, actor Authentication, request TrustedRequest, userID string, role InstanceRole) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "admin.instance_role.set", started, err) }()
@@ -161,6 +176,10 @@ func (m *Manager) SetInstanceRole(ctx context.Context, actor Authentication, req
 	return nil
 }
 
+// RemoveInstanceRole withdraws a user's instance-administration role,
+// atomically with the audit event, under the same authorization as
+// SetInstanceRole. An administrator cannot remove its own role, and the
+// store protects the last root.
 func (m *Manager) RemoveInstanceRole(ctx context.Context, actor Authentication, request TrustedRequest, userID string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "admin.instance_role.remove", started, err) }()

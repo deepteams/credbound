@@ -11,6 +11,12 @@ import (
 
 const emailVerificationPrefix = "cbe"
 
+// BeginEmailAddition attaches a new, unverified address to the actor's
+// account and returns the raw verification token exactly once for the host
+// to deliver to that address; only its HMAC is persisted. It requires a
+// recent interactive authentication, and a globally taken address fails with
+// ErrConflict. The address becomes usable for sign-in only after
+// ConfirmEmail.
 func (m *Manager) BeginEmailAddition(ctx context.Context, actor Authentication, address string) (_ IssuedEmailVerification, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.email.add.begin", started, err) }()
@@ -55,6 +61,11 @@ func (m *Manager) BeginEmailAddition(ctx context.Context, actor Authentication, 
 	return IssuedEmailVerification{Email: email, Token: raw}, nil
 }
 
+// ConfirmEmail marks the pending address verified by proving possession of
+// the verification token. Possession of the token is the authorization — no
+// actor is required. An unknown or mismatched token fails with
+// ErrInvalidCredentials, a stale one with ErrExpired, and an already
+// verified address with ErrConflict.
 func (m *Manager) ConfirmEmail(ctx context.Context, raw string) (_ EmailAddress, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.email.add.confirm", started, err) }()
@@ -107,6 +118,9 @@ func (m *Manager) ConfirmEmail(ctx context.Context, raw string) (_ EmailAddress,
 	return email, nil
 }
 
+// SetPrimaryEmail makes one of the actor's verified addresses the primary
+// address, atomically with the audit event. It requires a fresh AAL2
+// step-up; an unverified address is rejected by the store.
 func (m *Manager) SetPrimaryEmail(ctx context.Context, actor Authentication, emailID string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.email.primary.set", started, err) }()
@@ -136,6 +150,9 @@ func (m *Manager) SetPrimaryEmail(ctx context.Context, actor Authentication, ema
 	return nil
 }
 
+// RemoveEmail deletes one of the actor's addresses, atomically with the
+// audit event. It requires a fresh AAL2 step-up; the primary address and the
+// last verified address cannot be removed.
 func (m *Manager) RemoveEmail(ctx context.Context, actor Authentication, emailID string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.email.remove", started, err) }()
@@ -165,6 +182,9 @@ func (m *Manager) RemoveEmail(ctx context.Context, actor Authentication, emailID
 	return nil
 }
 
+// Emails streams a user's email addresses. An empty userID means the actor,
+// which requires a recent interactive authentication; reading another user
+// requires admin users read.
 func (m *Manager) Emails(ctx context.Context, actor Authentication, userID string, page PageRequest) iter.Seq2[PageEvent[EmailAddress], error] {
 	if actor.UserID == "" {
 		return errorSeq[PageEvent[EmailAddress]](ErrUnauthorized)

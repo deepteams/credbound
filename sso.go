@@ -25,10 +25,18 @@ type ssoContinuation struct {
 	Session                 []byte    `json:"session"`
 }
 
+// BeginSSO starts a sign-in ceremony with a registered provider and returns
+// the redirect URL with a sealed continuation for FinishSSO. No actor is
+// required; an unregistered configuration fails with ErrNotFound. Sign-in
+// only succeeds for an identity previously linked with BeginSSOLink —
+// Credbound never matches accounts by IdP email.
 func (m *Manager) BeginSSO(ctx context.Context, providerConfigurationID string) (SSOChallenge, error) {
 	return m.beginSSO(ctx, Authentication{}, providerConfigurationID, ssoLogin)
 }
 
+// BeginSSOLink starts a ceremony that links the provider identity to the
+// actor's existing account when finished. It requires a recent interactive
+// authentication, per the explicit-linking policy.
 func (m *Manager) BeginSSOLink(ctx context.Context, actor Authentication, providerConfigurationID string) (SSOChallenge, error) {
 	if err := m.requireRecentInteractive(ctx, actor); err != nil {
 		return SSOChallenge{}, err
@@ -36,6 +44,10 @@ func (m *Manager) BeginSSOLink(ctx context.Context, actor Authentication, provid
 	return m.beginSSO(ctx, actor, providerConfigurationID, ssoLink)
 }
 
+// BeginSSOStepUp starts a step-up ceremony for the actor: the provider is
+// asked to force reauthentication and its own MFA, and the finished ceremony
+// must resolve to an identity already linked to this actor. It requires a
+// recent interactive authentication.
 func (m *Manager) BeginSSOStepUp(ctx context.Context, actor Authentication, providerConfigurationID string) (SSOChallenge, error) {
 	if err := m.requireRecentInteractive(ctx, actor); err != nil {
 		return SSOChallenge{}, err
@@ -76,6 +88,13 @@ func (m *Manager) beginSSO(ctx context.Context, actor Authentication, providerCo
 	return challenge, nil
 }
 
+// FinishSSO completes any SSO ceremony (sign-in, link or step-up) by
+// validating the provider response against the sealed continuation, and
+// returns an AAL2 interactive authentication. Link ceremonies persist the
+// new identity atomically with the audit event; sign-in and step-up resolve
+// the stable issuer/subject pair and update its last use. Failed or
+// mismatched ceremonies return ErrInvalidCredentials, stale continuations
+// ErrExpired.
 func (m *Manager) FinishSSO(ctx context.Context, continuation string, response []byte) (_ Authentication, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.sso.finish", started, err) }()
@@ -174,6 +193,8 @@ func (m *Manager) finishSSOLink(ctx context.Context, provider SSOProvider, state
 	return Authentication{UserID: state.UserID, Method: MethodSSO, Level: AAL2, AuthenticatedAt: now}, nil
 }
 
+// UnlinkSSO removes one of the actor's linked external identities,
+// atomically with the audit event. It requires a fresh AAL2 step-up.
 func (m *Manager) UnlinkSSO(ctx context.Context, actor Authentication, identityID string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.sso.unlink", started, err) }()
@@ -203,6 +224,8 @@ func (m *Manager) UnlinkSSO(ctx context.Context, actor Authentication, identityI
 	return nil
 }
 
+// SSOIdentities streams the actor's linked external identities with their
+// latest uses. It requires a recent interactive authentication.
 func (m *Manager) SSOIdentities(ctx context.Context, actor Authentication, page PageRequest) iter.Seq2[PageEvent[SSOIdentity], error] {
 	if err := m.requireRecentInteractive(ctx, actor); err != nil {
 		return errorSeq[PageEvent[SSOIdentity]](err)

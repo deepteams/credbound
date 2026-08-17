@@ -12,16 +12,43 @@ import (
 	"time"
 )
 
+// Config assembles the ports, keys and policies of a Manager. Store and
+// Passwords are required; New validates every invariant and applies safe
+// defaults to zero durations and limits. Cryptographic values have no weak
+// fallback.
 type Config struct {
-	Store          Store
-	Passwords      PasswordHasher
-	TOTP           TOTPProvider
-	Passkeys       PasskeyProvider
-	SecretKey      []byte
-	PATPepper      []byte
+	// Store is the required persistence port. A store that additionally
+	// implements SCIMStore or OAuthStore unlocks the corresponding optional
+	// capability.
+	Store Store
+	// Passwords derives and verifies password hashes (Argon2id is the
+	// intended algorithm). Required.
+	Passwords PasswordHasher
+	// TOTP is the optional TOTP provider; without it the TOTP enrollment and
+	// verification operations return ErrNotSupported.
+	TOTP TOTPProvider
+	// Passkeys is the optional WebAuthn provider; without it the passkey
+	// ceremonies return ErrNotSupported.
+	Passkeys PasskeyProvider
+	// SecretKey is the 32-byte root key. Distinct AEAD and HMAC keys are
+	// derived from it with HKDF to seal ceremony continuations and TOTP
+	// secrets and to digest single-use tokens.
+	SecretKey []byte
+	// PATPepper keys the HMAC digests of PAT and SCIM credentials. At least
+	// 32 bytes.
+	PATPepper []byte
+	// RecoveryPepper keys the HMAC digests of TOTP recovery codes. At least
+	// 32 bytes.
 	RecoveryPepper []byte
-	StepUpMaxAge   time.Duration
-	CeremonyTTL    time.Duration
+	// StepUpMaxAge bounds how old an interactive AAL2 authentication may be
+	// to satisfy RequireStepUp. Zero keeps the default of 10 minutes.
+	StepUpMaxAge time.Duration
+	// CeremonyTTL bounds the validity of sealed ceremony continuations
+	// (WebAuthn, SSO, OAuth consent, email OTP). Zero keeps the default of
+	// 5 minutes.
+	CeremonyTTL time.Duration
+	// MinPasswordLen is the minimum accepted password length in runes. Zero
+	// keeps the default of 12; values below 10 are rejected.
 	MinPasswordLen int
 	// PasswordPolicy optionally vets candidate passwords beyond the built-in
 	// length rules (for example against a breached-password corpus). Nil
@@ -33,12 +60,27 @@ type Config struct {
 	MaxFailedLogins int
 	// LockoutDuration is how long a locked account rejects authentication.
 	// Zero keeps the default of 15 minutes.
-	LockoutDuration      time.Duration
-	Clock                func() time.Time
-	Random               io.Reader
-	Observer             Observer
-	AdminPermissions     map[InstanceRole][]Permission
-	WorkspaceRoles       []RoleDefinition
+	LockoutDuration time.Duration
+	// Clock supplies the current time; nil uses time.Now. Injectable for
+	// tests only — persisted timestamps are always converted to UTC.
+	Clock func() time.Time
+	// Random supplies cryptographic randomness; nil uses crypto/rand.
+	// Injectable for tests only.
+	Random io.Reader
+	// Observer receives one Operation record per API call, transaction hook
+	// and event listener invocation, for metrics and tracing. Nil disables
+	// observation.
+	Observer Observer
+	// AdminPermissions restricts the default instance-role permission
+	// matrix. A role may only be narrowed: granting a permission outside its
+	// default set fails, and no role but root may hold instance-role write.
+	AdminPermissions map[InstanceRole][]Permission
+	// WorkspaceRoles registers additional workspace roles and permissions in
+	// the immutable RBAC catalog. Definitions are validated during New; see
+	// RoleDefinition.
+	WorkspaceRoles []RoleDefinition
+	// EmailVerificationTTL bounds the validity of an email addition token.
+	// Zero keeps the default of 24 hours.
 	EmailVerificationTTL time.Duration
 	// PasswordResetTTL bounds the validity of a password reset token. Zero
 	// keeps the default of 1 hour.
@@ -48,20 +90,42 @@ type Config struct {
 	EmailAuthenticationTTL time.Duration
 	// InvitationTTL bounds the validity of a workspace invitation token.
 	// Zero keeps the default of 7 days.
-	InvitationTTL    time.Duration
-	SSOProviders     []SSOProvider
+	InvitationTTL time.Duration
+	// SSOProviders registers the identity providers the host enables. Each
+	// must expose a unique UUIDv7 configuration ID and a known kind.
+	SSOProviders []SSOProvider
+	// TransactionHooks run inside every mutation's store transaction, after
+	// the mutation and before the audit write. A hook error aborts the
+	// commit. More hooks can be added later with AddTransactionHook.
 	TransactionHooks []TransactionHook
-	EventListeners   []EventListener
-	OAuth            *OAuthConfig
+	// EventListeners observe committed facts. Listener errors are recorded
+	// for observability and never propagate. More listeners can be added
+	// later with AddEventListener.
+	EventListeners []EventListener
+	// OAuth enables the OAuth/OIDC authorization server module when the
+	// store also implements OAuthStore. Nil leaves the module disabled.
+	OAuth *OAuthConfig
 }
 
+// OAuthConfig configures the optional OAuth/OIDC module.
 type OAuthConfig struct {
-	Pepper           []byte
-	MetadataFetcher  OAuthClientMetadataFetcher
+	// Pepper keys the HMAC digests of OAuth codes, tokens and client
+	// secrets, and the pairwise OIDC subjects. At least 32 bytes.
+	Pepper []byte
+	// MetadataFetcher resolves Client Identifier Metadata Documents; it is
+	// required for CIMD client policies. oauthhttp.NewMetadataFetcher
+	// provides a hardened implementation.
+	MetadataFetcher OAuthClientMetadataFetcher
+	// ClientAssertions verifies private_key_jwt client assertions; required
+	// for that authentication method.
 	ClientAssertions OAuthClientAssertionVerifier
-	OIDCSigner       OIDCSigner
+	// OIDCSigner signs ID Tokens and publishes the JWKS; required for any
+	// issuer with OIDC enabled.
+	OIDCSigner OIDCSigner
 }
 
+// Manager is the façade over every Credbound capability. It is safe for
+// concurrent use and is built once per process with New.
 type Manager struct {
 	store                Store
 	passwords            PasswordHasher
@@ -98,6 +162,10 @@ type Manager struct {
 	idSequence           uint16
 }
 
+// New validates the configuration and builds a Manager. It rejects missing
+// required ports, undersized keys and invalid role or provider definitions
+// with errors matching ErrInvalidInput, and fills zero durations and limits
+// with the documented defaults.
 func New(cfg Config) (*Manager, error) {
 	if cfg.Store == nil || cfg.Passwords == nil {
 		return nil, fmt.Errorf("%w: store and passwords are required", ErrInvalidInput)

@@ -12,6 +12,13 @@ import (
 	"time"
 )
 
+// ExchangeOAuthAuthorizationCode implements the token endpoint's
+// authorization_code grant: it authenticates the client, verifies the
+// single-use code, exact redirect URI and PKCE verifier, and consumes the
+// code atomically with the issued tokens and audit. Opaque tokens are
+// returned exactly once; a refresh token is added only for offline_access
+// grants of refresh-capable clients and an ID Token only for openid grants
+// of OIDC issuers. Every mismatch fails with ErrInvalidCredentials.
 func (m *Manager) ExchangeOAuthAuthorizationCode(ctx context.Context, input ExchangeOAuthAuthorizationCodeInput) (_ OAuthTokenResponse, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.token.exchange", started, err) }()
@@ -72,6 +79,12 @@ func (m *Manager) ExchangeOAuthAuthorizationCode(ctx context.Context, input Exch
 	}, nil
 }
 
+// RefreshOAuthToken rotates a refresh token: it authenticates the client,
+// re-validates the grant, and atomically retires the presented token while
+// issuing a new access/refresh pair, optionally narrowed to a subset of the
+// granted scopes. Reuse of an already rotated or revoked refresh token
+// revokes its whole family and fails with ErrInvalidCredentials; an expired
+// token fails with ErrExpired.
 func (m *Manager) RefreshOAuthToken(ctx context.Context, input RefreshOAuthTokenInput) (_ OAuthTokenResponse, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.token.refresh", started, err) }()
@@ -145,6 +158,11 @@ func (m *Manager) RefreshOAuthToken(ctx context.Context, input RefreshOAuthToken
 	}, nil
 }
 
+// RevokeOAuthToken implements RFC 7009 revocation for the authenticated
+// client's own tokens: an access token is revoked individually, a refresh
+// token revokes its whole family. As the RFC requires, unknown or foreign
+// tokens are silently ignored; only a failed client authentication returns
+// an error.
 func (m *Manager) RevokeOAuthToken(ctx context.Context, input RevokeOAuthTokenInput) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.token.revoke", started, err) }()
@@ -187,6 +205,14 @@ func (m *Manager) RevokeOAuthToken(ctx context.Context, input RevokeOAuthTokenIn
 	return nil
 }
 
+// AuthenticateOAuthAccessToken validates a bearer access token for one
+// resource URI — the MCP middleware check run on every request. It verifies
+// the token digest, expiry and revocation, then re-validates the grant,
+// client, issuer, resource binding, user, workspace and the workspace
+// permissions behind every scope, so a suspended membership or revoked
+// consent takes effect immediately. Returns the OAuthAuthentication
+// capability, or ErrInvalidCredentials (ErrForbidden when only a scope
+// permission is missing).
 func (m *Manager) AuthenticateOAuthAccessToken(ctx context.Context, resourceURI, raw string) (_ OAuthAuthentication, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.access_token.authenticate", started, err) }()
@@ -217,6 +243,10 @@ func (m *Manager) AuthenticateOAuthAccessToken(ctx context.Context, resourceURI,
 	}, nil
 }
 
+// OAuthUserInfo implements the OIDC UserInfo endpoint for an issuer. The
+// access token must carry the openid scope; the subject is pairwise and
+// never exposes the user's global UUID, and email claims require the email
+// scope. Returns ErrNotSupported when the issuer has OIDC disabled.
 func (m *Manager) OAuthUserInfo(ctx context.Context, issuerURL, rawAccessToken string) (OIDCUserInfo, error) {
 	store, _, err := m.requireOAuth()
 	if err != nil {
@@ -253,6 +283,10 @@ func (m *Manager) OAuthUserInfo(ctx context.Context, issuerURL, rawAccessToken s
 	return info, nil
 }
 
+// OAuthAuthorizationServerMetadata returns the RFC 8414 discovery document
+// of an enabled issuer, reflecting its actual DCR, CIMD and OIDC policy. No
+// authentication is required; unknown or disabled issuers fail with
+// ErrNotFound.
 func (m *Manager) OAuthAuthorizationServerMetadata(ctx context.Context, issuerURL string) (OAuthAuthorizationServerMetadata, error) {
 	store, _, err := m.requireOAuth()
 	if err != nil {
@@ -287,6 +321,9 @@ func (m *Manager) OAuthAuthorizationServerMetadata(ctx context.Context, issuerUR
 	return result, nil
 }
 
+// OAuthProtectedResourceMetadata returns the RFC 9728 metadata of an enabled
+// protected resource. No authentication is required; unknown or disabled
+// resources and issuers fail with ErrNotFound.
 func (m *Manager) OAuthProtectedResourceMetadata(ctx context.Context, resourceURI string) (OAuthProtectedResourceMetadata, error) {
 	store, _, err := m.requireOAuth()
 	if err != nil {
@@ -311,6 +348,9 @@ func (m *Manager) OAuthProtectedResourceMetadata(ctx context.Context, resourceUR
 	return OAuthProtectedResourceMetadata{Resource: resource.Resource, AuthorizationServers: []string{issuer.Issuer}, ScopesSupported: scopes, BearerMethods: []string{"header"}}, nil
 }
 
+// OAuthJWKS returns the JSON Web Key Set of an OIDC-enabled issuer, as
+// published by the configured OIDCSigner. No authentication is required;
+// issuers without OIDC or a signer fail with ErrNotSupported.
 func (m *Manager) OAuthJWKS(ctx context.Context, issuerURL string) ([]byte, error) {
 	store, config, err := m.requireOAuth()
 	if err != nil {

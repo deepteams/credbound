@@ -13,6 +13,10 @@ const (
 	passkeyAuthentication = "passkey_authentication"
 )
 
+// BeginPasskeyRegistration starts a WebAuthn registration ceremony for the
+// actor and returns the browser options with a sealed continuation bound to
+// the user, operation and expiry. It requires a recent interactive
+// authentication and returns ErrNotSupported without Config.Passkeys.
 func (m *Manager) BeginPasskeyRegistration(ctx context.Context, actor Authentication, name string) (_ PasskeyChallenge, err error) {
 	if err := m.requirePasskeyProvider(); err != nil {
 		return PasskeyChallenge{}, err
@@ -44,6 +48,12 @@ func (m *Manager) BeginPasskeyRegistration(ctx context.Context, actor Authentica
 	return PasskeyChallenge{Options: options, Continuation: continuation}, nil
 }
 
+// FinishPasskeyRegistration validates the browser response against the
+// sealed continuation and persists the new passkey, atomically with the
+// audit event. The continuation must belong to the same actor, who still
+// needs a recent interactive authentication; a failed ceremony is audited
+// and returns ErrInvalidCredentials. The returned Passkey carries no
+// credential material.
 func (m *Manager) FinishPasskeyRegistration(ctx context.Context, actor Authentication, continuation string, response []byte) (_ Passkey, err error) {
 	if err := m.requirePasskeyProvider(); err != nil {
 		return Passkey{}, err
@@ -108,6 +118,10 @@ func (m *Manager) FinishPasskeyRegistration(ctx context.Context, actor Authentic
 	return passkey, nil
 }
 
+// BeginPasskeyAuthentication starts a WebAuthn authentication ceremony for
+// the account owning the address. No actor is required; an unknown or
+// disabled account fails with the same ErrInvalidCredentials as a failed
+// ceremony. Returns ErrNotSupported without Config.Passkeys.
 func (m *Manager) BeginPasskeyAuthentication(ctx context.Context, email string) (_ PasskeyChallenge, err error) {
 	if err := m.requirePasskeyProvider(); err != nil {
 		return PasskeyChallenge{}, err
@@ -136,6 +150,11 @@ func (m *Manager) BeginPasskeyAuthentication(ctx context.Context, email string) 
 	return PasskeyChallenge{Options: options, Continuation: continuation}, nil
 }
 
+// FinishPasskeyAuthentication validates the browser response against the
+// sealed continuation and returns an AAL2 interactive authentication — a
+// user-verified passkey ceremony needs no second factor. The passkey's
+// last-use timestamp is updated atomically with the audit event; a failed
+// ceremony is audited and returns ErrInvalidCredentials.
 func (m *Manager) FinishPasskeyAuthentication(ctx context.Context, continuation string, response []byte) (_ Authentication, err error) {
 	if err := m.requirePasskeyProvider(); err != nil {
 		return Authentication{}, err
@@ -181,6 +200,9 @@ func (m *Manager) FinishPasskeyAuthentication(ctx context.Context, continuation 
 	return authentication, nil
 }
 
+// DeletePasskey removes one of the actor's passkeys, atomically with the
+// audit event. It requires a fresh AAL2 step-up and works even without
+// Config.Passkeys, so stale credentials remain removable.
 func (m *Manager) DeletePasskey(ctx context.Context, actor Authentication, passkeyID string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.passkey.delete", started, err) }()

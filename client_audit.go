@@ -6,6 +6,12 @@ import (
 	"strings"
 )
 
+// RecordAudit appends a host-supplied event to the audit log. Credbound
+// derives the actor, UUIDv7 and timestamp itself so a consuming service can
+// neither impersonate an actor nor backdate an entry. A workspace-scoped
+// event requires workspace access in that workspace; a global event requires
+// admin access. The entry commits atomically with the ApplyClientAudit hook
+// and fails closed with ErrAuditUnavailable.
 func (m *Manager) RecordAudit(ctx context.Context, actor Authentication, input AuditInput) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "audit.record", started, err) }()

@@ -24,6 +24,10 @@ Credbound provides a reusable, testable, transport-independent core.
 | AUTH-008 | Magic link | A single-use, short-lived email token authenticates the owner of a verified address at AAL1 and reports whether a TOTP factor is still required. |
 | AUTH-013 | Email OTP | A single-use, short-lived numeric code bound to a sealed continuation authenticates the owner of a verified address at AAL1; wrong codes count toward the lockout and ineligible addresses receive an indistinguishable decoy. |
 | AUTH-014 | Password vetting | The host can plug a password policy (for example a breached-password corpus check) that every password acceptance path consults after the built-in length rules. |
+| AUTH-015 | Self-service signup | When the host enables it, an anonymous visitor registers with email, password, display name, and workspace name; the call atomically creates the user, their workspace, and their admin membership without any instance role. The primary address starts unverified and is proven by a returned email-verification token before the first sign-in, unless the host opts into immediate verification. An address that already has an account produces an outwardly identical response that performs the same work and reports the collision only to the host. |
+| SESS-001 | Server-side sessions | When the store supports it, the host can persist a session bound to an Authentication snapshot behind an opaque single-display token, authenticate requests from that token, and see the device metadata (user agent, IP, created and last-seen timestamps) of every active session of a user. |
+| SESS-002 | Session integrity | A session never upgrades its assurance level in place: an AAL change mints a new session and revokes the old one. Session authentication re-checks user disablement and expiry on every call and touches last-seen transactionally. |
+| SESS-003 | Session revocation cascade | Completing a password reset, disabling a user, and revoking a user's credentials atomically revoke that user's sessions when the store supports sessions. Individual and bulk revocation are step-up operations for the owner and trusted operations for administrators. |
 | AUTH-009 | Lockout | Consecutive password or TOTP failures lock the account for a configurable duration. The check performs the same password derivation as a normal attempt, unknown accounts never reveal a lockout, and any successful authentication or completed reset clears the counter. |
 | AUTH-010 | Credential revocation | One atomic operation revokes every PAT and OAuth grant of a user, by the user with step-up or by an authorized instance administrator. |
 | AUTH-011 | Factor visibility | A user can list their passkeys and read their TOTP status (enrolled, active, unused recovery codes) without any secret material; administrators with users read may inspect another account. |
@@ -40,6 +44,8 @@ Credbound provides a reusable, testable, transport-independent core.
 | TENANT-004 | Revocation cascade | Disabling a workspace or suspending/removing a membership atomically revokes the affected workspace-scoped PAT and OAuth credentials. |
 | TENANT-005 | Invitations | An administrator with users write invites an email address with a pre-assigned role. The single-use, expiring token is returned once; the invitee either accepts from an authenticated account owning the verified address or registers a new account whose invited address is verified by token delivery. Invitations are unique per pending address, revocable, and listed without their digest. |
 | TENANT-006 | Workspace MFA policy | A workspace can require AAL2 from every interactive session. Non-interactive credentials such as PATs are unaffected, and the rejection uses the step-up sentinel so hosts can prompt for the second factor. |
+| TENANT-007 | Verified workspace domains | A workspace administrator with step-up registers an email domain and receives a DNS challenge value; the host proves control (for example a TXT record) and confirms the domain. A domain is unique across workspaces, listable, and removable; unconfirmed domains carry no policy effect. |
+| TENANT-008 | Domain policy | A confirmed domain carries an auto-join policy (JIT provisioning target role and SSO provider configuration) and an SSO enforcement flag consumed by SSO-005 and SSO-006. Policy changes are step-up, audited mutations. |
 | RBAC-001 | Workspace roles | The `admin` and `member` roles are provided; the host service may register additional roles and permissions when constructing the `Manager`. |
 | RBAC-002 | Permission changes | Only a workspace administrator with a valid step-up may grant or modify a role. |
 | RBAC-003 | Permission-based authorization | The canonical check uses a workspace permission. Inheritance is validated without cycles, `admin` receives all registered permissions, and an unknown role fails closed. |
@@ -60,6 +66,8 @@ Credbound provides a reusable, testable, transport-independent core.
 | SSO-002 | Explicit linking | An external identity is linked from an existing interactive session. Credbound never automatically associates an account from an email address returned by the IdP. |
 | SSO-003 | Assurance | Validated SSO authentication produces AAL2. For step-up, the provider receives a requirement to force reauthentication and its own MFA. |
 | SSO-004 | Stable identity | The link relies on the UUIDv7 configuration, issuer, and subject triplet, never on email alone. Latest uses are visible and auditable. |
+| SSO-005 | JIT provisioning | When a validated SSO identity is unknown, its verified email domain matches a confirmed workspace domain whose policy enables auto-join, and no account owns that address, the login atomically creates a passwordless user, its verified email, and the configured membership, then links the identity. An existing account with that address is never auto-linked (SSO-002 holds); the login fails as unknown identity. |
+| SSO-006 | Domain-enforced SSO | A confirmed workspace domain can require SSO: password, magic-link, and email-OTP authentication for addresses under it are rejected with a dedicated sentinel that reflects domain policy, not account existence. |
 | SCIM-001 | Optional activation | The core exposes SCIM only when the store implements `SCIMStore`. The SaaS application enabling provisioning explicitly mounts the `scimhttp` adapter. |
 | SCIM-002 | Tenant-scoped domain | Every SCIM configuration, credential, user, and group has a UUIDv7 and remains limited to one configuration and its workspace. A user's SCIM identifier is distinct from their global `User.ID`. |
 | SCIM-003 | User lifecycle | SCIM can create a passwordless user, explicitly adopt a local user, replace, suspend, reactivate, and logically deprovision a membership without disabling the global account. |
@@ -100,8 +108,9 @@ Credbound provides a reusable, testable, transport-independent core.
   retains its presentation and first-run flow.
 - H2C server, WebSocket/SSE, health checks, graceful shutdown, Docker, and
   reverse proxy: these are host-service responsibilities.
-- Cookie or JWT issuance: the library returns an authenticated identity; the
-  host service chooses its session strategy.
+- Cookie or JWT issuance: the library returns an authenticated identity and,
+  when the store supports it, optional server-side session records the host can
+  bind to its transport; cookies, CSRF, and transport remain host-owned.
 - Physical deletion or automatic anonymization. Privacy erasure requires an
   application-specific, separately reviewed retention policy; Credbound exposes
   disablement and revocation primitives without deleting append-only audit facts.

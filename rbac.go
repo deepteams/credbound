@@ -6,6 +6,12 @@ import (
 	"fmt"
 )
 
+// Authorize checks that the authentication belongs to an enabled user with
+// an active membership whose role includes the minimum role in that
+// workspace. Missing or insufficient memberships, disabled users or
+// workspaces, and workspace-bound credentials used elsewhere fail with
+// ErrForbidden; a workspace requiring MFA rejects interactive AAL1 contexts
+// with ErrStepUpRequired. AuthorizePermission is the canonical, finer check.
 func (m *Manager) Authorize(ctx context.Context, authn Authentication, workspaceID string, minimumRole Role) error {
 	if authn.UserID == "" {
 		return ErrUnauthorized
@@ -53,6 +59,12 @@ func (m *Manager) Authorize(ctx context.Context, authn Authentication, workspace
 	return nil
 }
 
+// AuthorizePermission is the canonical tenant authorization: it checks that
+// the authentication belongs to an enabled user with an active membership
+// whose role carries the workspace permission. Failures behave exactly like
+// Authorize — ErrForbidden fails closed, and a workspace requiring MFA
+// rejects interactive AAL1 contexts with ErrStepUpRequired while
+// non-interactive credentials such as PATs are unaffected.
 func (m *Manager) AuthorizePermission(ctx context.Context, authn Authentication, workspaceID string, permission WorkspacePermission) error {
 	if authn.UserID == "" {
 		return ErrUnauthorized
@@ -94,6 +106,11 @@ func (m *Manager) AuthorizePermission(ctx context.Context, authn Authentication,
 	return nil
 }
 
+// GrantRole sets a user's workspace role, creating the local membership when
+// none exists, atomically with the audit event. The actor needs a fresh AAL2
+// step-up and workspace RBAC write; SCIM-managed memberships fail with
+// ErrConflict and unknown roles are rejected. The store protects the last
+// active workspace administrator from demotion.
 func (m *Manager) GrantRole(ctx context.Context, actor Authentication, workspaceID, userID string, role Role) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "rbac.role.grant", started, err) }()

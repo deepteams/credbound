@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+// Bootstrap creates the first account of an empty instance: the user, its
+// verified primary email, the initial workspace, an admin membership and the
+// instance-level root role, all in one transaction with the audit event. It
+// requires no actor, returns an AAL1 password authentication, and every call
+// after the first fails with ErrConflict.
 func (m *Manager) Bootstrap(ctx context.Context, input BootstrapInput) (_ Authentication, _ Workspace, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.bootstrap", started, err) }()
@@ -88,6 +93,10 @@ func (m *Manager) Bootstrap(ctx context.Context, input BootstrapInput) (_ Authen
 	return Authentication{UserID: user.ID, Method: MethodPassword, Level: AAL1, AuthenticatedAt: now}, workspace, nil
 }
 
+// CreateUser administratively creates an account with a verified primary
+// email and an active membership in the workspace, atomically with its
+// audit. The actor needs a fresh AAL2 step-up and workspace users write in
+// that workspace; a taken address fails with ErrConflict.
 func (m *Manager) CreateUser(ctx context.Context, actor Authentication, workspaceID string, input CreateUserInput) (_ User, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.user.create", started, err) }()
@@ -147,6 +156,15 @@ func (m *Manager) CreateUser(ctx context.Context, actor Authentication, workspac
 	return user, nil
 }
 
+// AuthenticatePassword verifies an email and password and returns an AAL1
+// interactive authentication whose SecondFactorRequired flag reports an
+// active TOTP factor. An unknown address, a wrong password, a disabled user
+// and an account without a password credential all perform the same hash
+// derivation and fail identically with ErrInvalidCredentials, so the caller
+// learns nothing about account existence. Consecutive failures on an
+// existing enabled account count toward the lockout; a locked account fails
+// with ErrLocked, which the host should relay as a neutral "try again later"
+// to unauthenticated callers.
 func (m *Manager) AuthenticatePassword(ctx context.Context, email, password string) (_ Authentication, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.password.authenticate", started, err) }()
@@ -243,6 +261,11 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 	return authentication, nil
 }
 
+// ChangePassword replaces the actor's password after re-verifying the
+// current one. It requires a recent interactive authentication (any AAL,
+// within the step-up window) and validates the new password against the
+// built-in rules and Config.PasswordPolicy. A wrong current password is
+// audited and returns ErrInvalidCredentials.
 func (m *Manager) ChangePassword(ctx context.Context, actor Authentication, currentPassword, newPassword string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.password.change", started, err) }()
@@ -290,6 +313,11 @@ func (m *Manager) ChangePassword(ctx context.Context, actor Authentication, curr
 	return nil
 }
 
+// RequireStepUp accepts only an interactive AAL2 authentication whose
+// AuthenticatedAt falls within Config.StepUpMaxAge. Anything else — a PAT
+// regardless of age, an AAL1 context, or a stale AAL2 context — fails with
+// ErrStepUpRequired (ErrUnauthorized when there is no actor at all), and
+// the host should prompt for the second factor.
 func (m *Manager) RequireStepUp(authn Authentication) error {
 	if authn.UserID == "" {
 		return ErrUnauthorized

@@ -14,6 +14,11 @@ import (
 	"time"
 )
 
+// CreateSCIMConfiguration creates the provisioning domain of a workspace
+// with its first bearer credential and returns the raw token exactly once;
+// only its HMAC is persisted, atomically with the audit event. The actor
+// needs a fresh AAL2 step-up and workspace RBAC write. Returns
+// ErrNotSupported when the store lacks the SCIM capability.
 func (m *Manager) CreateSCIMConfiguration(ctx context.Context, actor Authentication, workspaceID string, input CreateSCIMConfigurationInput) (_ IssuedSCIMCredential, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.configuration.create", started, err) }()
@@ -71,6 +76,12 @@ func (m *Manager) CreateSCIMConfiguration(ctx context.Context, actor Authenticat
 	return IssuedSCIMCredential{Configuration: cloneSCIMConfiguration(configuration), Credential: publicCredential, Token: raw}, nil
 }
 
+// UpdateSCIMConfiguration replaces the role policy of the configuration and
+// immediately recomputes the roles of every membership it manages; the
+// configuration change, the recomputed memberships and the audit record
+// commit atomically. The actor needs a fresh AAL2 step-up and workspace RBAC
+// write in the configuration's workspace. An ambiguous group mapping fails
+// with ErrConflict; ErrNotSupported without the SCIM capability.
 func (m *Manager) UpdateSCIMConfiguration(ctx context.Context, actor Authentication, configurationID string, input UpdateSCIMConfigurationInput) (_ SCIMConfiguration, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.configuration.update", started, err) }()
@@ -120,6 +131,11 @@ func (m *Manager) UpdateSCIMConfiguration(ctx context.Context, actor Authenticat
 	return cloneSCIMConfiguration(configuration), nil
 }
 
+// RotateSCIMCredential issues an additional bearer credential for the
+// configuration and returns the raw token exactly once; existing credentials
+// stay valid until individually revoked. The actor needs a fresh AAL2
+// step-up and workspace RBAC write; ErrNotSupported without the SCIM
+// capability.
 func (m *Manager) RotateSCIMCredential(ctx context.Context, actor Authentication, configurationID string, expiresAt *time.Time) (_ IssuedSCIMCredential, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.credential.rotate", started, err) }()
@@ -146,6 +162,9 @@ func (m *Manager) RotateSCIMCredential(ctx context.Context, actor Authentication
 	return IssuedSCIMCredential{Configuration: configuration, Credential: publicCredential, Token: raw}, nil
 }
 
+// RevokeSCIMCredential revokes one bearer credential of the configuration,
+// atomically with the audit event. The actor needs a fresh AAL2 step-up and
+// workspace RBAC write; ErrNotSupported without the SCIM capability.
 func (m *Manager) RevokeSCIMCredential(ctx context.Context, actor Authentication, configurationID, credentialID string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.credential.revoke", started, err) }()
@@ -163,6 +182,10 @@ func (m *Manager) RevokeSCIMCredential(ctx context.Context, actor Authentication
 	return nil
 }
 
+// DisableSCIMConfiguration turns provisioning off for the workspace and
+// revokes all the configuration's active credentials, atomically with the
+// audit event. The actor needs a fresh AAL2 step-up and workspace RBAC
+// write; ErrNotSupported without the SCIM capability.
 func (m *Manager) DisableSCIMConfiguration(ctx context.Context, actor Authentication, configurationID string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.configuration.disable", started, err) }()
@@ -180,6 +203,12 @@ func (m *Manager) DisableSCIMConfiguration(ctx context.Context, actor Authentica
 	return nil
 }
 
+// AuthenticateSCIM validates a raw cbs_ bearer token in constant time and
+// returns the SCIMAuthentication service capability scoped to its
+// configuration and workspace; the credential's last use is recorded
+// atomically with the audit event. Malformed, unknown, expired and revoked
+// tokens, disabled configurations and disabled workspaces all fail with
+// ErrInvalidCredentials; ErrNotSupported without the SCIM capability.
 func (m *Manager) AuthenticateSCIM(ctx context.Context, raw string) (_ SCIMAuthentication, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.authenticate", started, err) }()
@@ -216,6 +245,12 @@ func (m *Manager) AuthenticateSCIM(ctx context.Context, raw string) (_ SCIMAuthe
 	}, nil
 }
 
+// ProvisionSCIMUser creates a passwordless global account, its primary
+// email, a directory-owned membership with the configuration's default role
+// and the SCIM link, all atomically with the transactional hook and audit.
+// The principal is a SCIMAuthentication from AuthenticateSCIM; the primary
+// address is marked verified only under TrustDirectoryEmails. A taken
+// address or userName fails with ErrConflict.
 func (m *Manager) ProvisionSCIMUser(ctx context.Context, principal SCIMAuthentication, input SCIMUserInput) (_ SCIMUser, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.user.provision", started, err) }()
@@ -278,6 +313,11 @@ func (m *Manager) ProvisionSCIMUser(ctx context.Context, principal SCIMAuthentic
 	return cloneSCIMUser(link), nil
 }
 
+// AdoptSCIMUser explicitly places an existing local membership under
+// directory management, creating the SCIM link atomically with the audit
+// event. Unlike the provisioning operations it is run by a workspace
+// administrator: the actor needs a fresh AAL2 step-up and workspace RBAC
+// write. A membership already managed by SCIM fails with ErrConflict.
 func (m *Manager) AdoptSCIMUser(ctx context.Context, actor Authentication, configurationID, userID string, input SCIMUserInput) (_ SCIMUser, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.user.adopt", started, err) }()
@@ -334,6 +374,11 @@ func (m *Manager) AdoptSCIMUser(ctx context.Context, actor Authentication, confi
 	return cloneSCIMUser(link), nil
 }
 
+// ReplaceSCIMUser replaces the SCIM representation of a managed user and
+// synchronizes the membership status from Active — false suspends, true
+// reactivates — atomically with the transactional hook and audit. The
+// membership must be managed by the principal's configuration
+// (ErrConflict otherwise); the global account is never disabled.
 func (m *Manager) ReplaceSCIMUser(ctx context.Context, principal SCIMAuthentication, id string, input SCIMUserInput) (_ SCIMUser, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.user.replace", started, err) }()
@@ -376,6 +421,11 @@ func (m *Manager) ReplaceSCIMUser(ctx context.Context, principal SCIMAuthenticat
 	return m.commitSCIMUserUpdate(ctx, principal, configuration, updated, membership, name, false)
 }
 
+// DeprovisionSCIMUser logically deprovisions a managed user: it suspends the
+// membership and revokes the user's workspace-scoped PATs while keeping the
+// global account and the SCIM link for auditing and restoration, atomically
+// with the transactional hook and audit. Deprovisioning an unknown or
+// already deprovisioned user is a no-op.
 func (m *Manager) DeprovisionSCIMUser(ctx context.Context, principal SCIMAuthentication, id string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.user.deprovision", started, err) }()
@@ -407,6 +457,7 @@ func (m *Manager) DeprovisionSCIMUser(ctx context.Context, principal SCIMAuthent
 	return err
 }
 
+// SCIMUser reads one managed user of the principal's configuration.
 func (m *Manager) SCIMUser(ctx context.Context, principal SCIMAuthentication, id string) (SCIMUser, error) {
 	configuration, err := m.scimConfigurationForPrincipal(ctx, principal)
 	if err != nil {
@@ -416,6 +467,10 @@ func (m *Manager) SCIMUser(ctx context.Context, principal SCIMAuthentication, id
 	return cloneSCIMUser(value), err
 }
 
+// SCIMUsers streams the managed users of the principal's configuration,
+// optionally narrowed by a supported equality filter (id, externalId,
+// userName, emails.value, active); unsupported filters fail with
+// ErrInvalidInput.
 func (m *Manager) SCIMUsers(ctx context.Context, principal SCIMAuthentication, filter SCIMFilter, page PageRequest) iter.Seq2[PageEvent[SCIMUser], error] {
 	configuration, err := m.scimConfigurationForPrincipal(ctx, principal)
 	if err != nil {
@@ -431,6 +486,11 @@ func (m *Manager) SCIMUsers(ctx context.Context, principal SCIMAuthentication, f
 	return m.scimStore.SCIMUsers(ctx, configuration.ID, filter, page)
 }
 
+// UpsertSCIMGroup creates (empty id) or replaces a directory group and
+// recomputes the roles of every membership the change affects through the
+// configured group-role mappings, atomically with the transactional hook and
+// audit. An unknown or deprovisioned member fails with ErrInvalidInput and
+// an ambiguous mapping fails closed with ErrConflict.
 func (m *Manager) UpsertSCIMGroup(ctx context.Context, principal SCIMAuthentication, id string, input SCIMGroupInput) (_ SCIMGroup, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.group.upsert", started, err) }()
@@ -496,6 +556,9 @@ func (m *Manager) UpsertSCIMGroup(ctx context.Context, principal SCIMAuthenticat
 	return cloneSCIMGroup(group), nil
 }
 
+// DeleteSCIMGroup logically deletes a directory group and recomputes the
+// roles of its former members, atomically with the transactional hook and
+// audit. Deleting an unknown group is a no-op.
 func (m *Manager) DeleteSCIMGroup(ctx context.Context, principal SCIMAuthentication, id string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.group.delete", started, err) }()
@@ -535,6 +598,7 @@ func (m *Manager) DeleteSCIMGroup(ctx context.Context, principal SCIMAuthenticat
 	return nil
 }
 
+// SCIMGroup reads one directory group of the principal's configuration.
 func (m *Manager) SCIMGroup(ctx context.Context, principal SCIMAuthentication, id string) (SCIMGroup, error) {
 	configuration, err := m.scimConfigurationForPrincipal(ctx, principal)
 	if err != nil {
@@ -544,6 +608,9 @@ func (m *Manager) SCIMGroup(ctx context.Context, principal SCIMAuthentication, i
 	return cloneSCIMGroup(value), err
 }
 
+// SCIMGroups streams the directory groups of the principal's configuration,
+// optionally narrowed by a supported equality filter (id, externalId,
+// displayName); unsupported filters fail with ErrInvalidInput.
 func (m *Manager) SCIMGroups(ctx context.Context, principal SCIMAuthentication, filter SCIMFilter, page PageRequest) iter.Seq2[PageEvent[SCIMGroup], error] {
 	configuration, err := m.scimConfigurationForPrincipal(ctx, principal)
 	if err != nil {

@@ -47,7 +47,7 @@ func ComputeAuditHash(previous []byte, event AuditEvent) []byte {
 
 // VerifyAuditChain recomputes the whole audit hash chain and compares it with
 // the persisted chain head. Any edited, deleted or reordered chained event
-// yields ErrAuditCompromised.
+// yields ErrAuditCompromised. It requires admin audit read.
 func (m *Manager) VerifyAuditChain(ctx context.Context, actor Authentication) (_ AuditChainReport, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "audit.chain.verify", started, err) }()
@@ -79,6 +79,8 @@ func (m *Manager) VerifyAuditChain(ctx context.Context, actor Authentication) (_
 	return AuditChainReport{Events: sequence, HeadSequence: headSequence, HeadHash: headHash}, nil
 }
 
+// AuditEvents streams the audit log of one workspace. The actor needs a
+// fresh AAL2 step-up and workspace audit read in that workspace.
 func (m *Manager) AuditEvents(ctx context.Context, actor Authentication, workspaceID string, page PageRequest) iter.Seq2[PageEvent[AuditEvent], error] {
 	if err := m.requireStepUp(ctx, actor, "audit.workspace.list"); err != nil {
 		return errorSeq[PageEvent[AuditEvent]](err)
@@ -93,6 +95,8 @@ func (m *Manager) AuditEvents(ctx context.Context, actor Authentication, workspa
 	return m.store.AuditEvents(ctx, workspaceID, page)
 }
 
+// InstanceAuditEvents streams the audit log of the whole instance. It
+// requires admin audit read.
 func (m *Manager) InstanceAuditEvents(ctx context.Context, actor Authentication, page PageRequest) iter.Seq2[PageEvent[AuditEvent], error] {
 	if err := m.AuthorizeAdmin(ctx, actor, PermissionAuditRead); err != nil {
 		return errorSeq[PageEvent[AuditEvent]](err)

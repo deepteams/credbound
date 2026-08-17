@@ -6,10 +6,17 @@ import (
 	"iter"
 )
 
+// DisableOAuthIssuer disables an issuer so all its discovery, authorization
+// and token operations are refused, atomically with the audit event. The
+// actor needs admin settings write and an admin mutation (fresh AAL2, or a
+// trusted local request); disabling an already disabled issuer is a no-op.
+// Returns ErrNotSupported without the OAuth capability.
 func (m *Manager) DisableOAuthIssuer(ctx context.Context, actor Authentication, request TrustedRequest, issuerID string) error {
 	return m.setOAuthIssuerDisabled(ctx, actor, request, issuerID, true)
 }
 
+// EnableOAuthIssuer re-enables a disabled issuer under the same
+// authorization as DisableOAuthIssuer.
 func (m *Manager) EnableOAuthIssuer(ctx context.Context, actor Authentication, request TrustedRequest, issuerID string) error {
 	return m.setOAuthIssuerDisabled(ctx, actor, request, issuerID, false)
 }
@@ -56,10 +63,17 @@ func (m *Manager) setOAuthIssuerDisabled(ctx context.Context, actor Authenticati
 	return nil
 }
 
+// DisableOAuthProtectedResource disables an MCP resource of the workspace so
+// its bearer validation and metadata are refused, atomically with the audit
+// event. The actor needs a fresh AAL2 step-up and the oauth.resource.manage
+// permission in that workspace; a resource of another workspace fails with
+// ErrForbidden.
 func (m *Manager) DisableOAuthProtectedResource(ctx context.Context, actor Authentication, workspaceID, resourceID string) error {
 	return m.setOAuthProtectedResourceDisabled(ctx, actor, workspaceID, resourceID, true)
 }
 
+// EnableOAuthProtectedResource re-enables a disabled resource under the same
+// authorization as DisableOAuthProtectedResource.
 func (m *Manager) EnableOAuthProtectedResource(ctx context.Context, actor Authentication, workspaceID, resourceID string) error {
 	return m.setOAuthProtectedResourceDisabled(ctx, actor, workspaceID, resourceID, false)
 }
@@ -103,10 +117,16 @@ func (m *Manager) setOAuthProtectedResourceDisabled(ctx context.Context, actor A
 	return nil
 }
 
+// DisableOAuthClient disables a client record so authorization and token
+// operations refuse it, atomically with the audit event. The actor needs
+// admin settings write and an admin mutation (fresh AAL2, or a trusted local
+// request); disabling an already disabled client is a no-op.
 func (m *Manager) DisableOAuthClient(ctx context.Context, actor Authentication, request TrustedRequest, clientID string) error {
 	return m.setOAuthClientDisabled(ctx, actor, request, clientID, true)
 }
 
+// EnableOAuthClient re-enables a disabled client under the same
+// authorization as DisableOAuthClient.
 func (m *Manager) EnableOAuthClient(ctx context.Context, actor Authentication, request TrustedRequest, clientID string) error {
 	return m.setOAuthClientDisabled(ctx, actor, request, clientID, false)
 }
@@ -155,6 +175,10 @@ func (m *Manager) setOAuthClientDisabled(ctx context.Context, actor Authenticati
 	return nil
 }
 
+// RevokeOAuthGrant revokes a delegation and its tokens, atomically with the
+// audit event. The grant's own user needs a fresh AAL2 step-up; revoking
+// another user's grant requires the oauth.resource.manage permission in the
+// grant's workspace with a fresh AAL2 step-up.
 func (m *Manager) RevokeOAuthGrant(ctx context.Context, actor Authentication, grantID string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.grant.revoke", started, err) }()
@@ -195,6 +219,8 @@ func (m *Manager) RevokeOAuthGrant(ctx context.Context, actor Authentication, gr
 	return nil
 }
 
+// OAuthIssuers streams every registered issuer. It requires admin settings
+// read; ErrNotSupported without the OAuth capability.
 func (m *Manager) OAuthIssuers(ctx context.Context, actor Authentication, page PageRequest) iter.Seq2[PageEvent[OAuthIssuer], error] {
 	store, _, err := m.requireOAuth()
 	if err != nil {
@@ -210,6 +236,8 @@ func (m *Manager) OAuthIssuers(ctx context.Context, actor Authentication, page P
 	return store.OAuthIssuers(ctx, page)
 }
 
+// OAuthProtectedResources streams the MCP resources of a workspace. The
+// actor needs the oauth.resource.manage permission in that workspace.
 func (m *Manager) OAuthProtectedResources(ctx context.Context, actor Authentication, workspaceID string, page PageRequest) iter.Seq2[PageEvent[OAuthProtectedResource], error] {
 	store, _, err := m.requireOAuth()
 	if err != nil {
@@ -225,6 +253,8 @@ func (m *Manager) OAuthProtectedResources(ctx context.Context, actor Authenticat
 	return store.OAuthProtectedResources(ctx, workspaceID, page)
 }
 
+// OAuthClients streams the client records of an issuer. It requires admin
+// settings read.
 func (m *Manager) OAuthClients(ctx context.Context, actor Authentication, issuerID string, page PageRequest) iter.Seq2[PageEvent[OAuthClient], error] {
 	store, _, err := m.requireOAuth()
 	if err != nil {
@@ -243,6 +273,10 @@ func (m *Manager) OAuthClients(ctx context.Context, actor Authentication, issuer
 	return store.OAuthClients(ctx, issuerID, page)
 }
 
+// OAuthGrants streams delegations. With a workspaceID it lists the
+// workspace's grants and requires the oauth.resource.manage permission
+// there; with an empty workspaceID it lists the actor's own grants and
+// requires a recent interactive authentication.
 func (m *Manager) OAuthGrants(ctx context.Context, actor Authentication, workspaceID string, page PageRequest) iter.Seq2[PageEvent[OAuthGrant], error] {
 	store, _, err := m.requireOAuth()
 	if err != nil {

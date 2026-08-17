@@ -105,6 +105,19 @@ BeginEmailAuthentication(ctx, email) (IssuedEmailAuthentication, error)
 CompleteEmailAuthentication(ctx, linkToken) (Authentication, error)
 BeginEmailOTP(ctx, email) (IssuedEmailOTP, error)
 CompleteEmailOTP(ctx, continuation, code) (Authentication, error)
+SignUp(ctx, SignUpInput) (SignUpResult, error)
+
+CreateSession(ctx, authn, CreateSessionInput) (IssuedSession, error)
+AuthenticateSession(ctx, sessionToken) (Authentication, Session, error)
+Sessions(ctx, authn, userID, PageRequest) iter.Seq2[PageEvent[Session], error]
+RevokeSession(ctx, authn, sessionID) error
+RevokeUserSessions(ctx, authn, TrustedRequest, userID) error
+
+CreateWorkspaceDomain(ctx, authn, workspaceID, domain) (IssuedWorkspaceDomain, error)
+ConfirmWorkspaceDomain(ctx, authn, domainID) error
+UpdateWorkspaceDomainPolicy(ctx, authn, domainID, WorkspaceDomainPolicyInput) error
+RemoveWorkspaceDomain(ctx, authn, domainID) error
+WorkspaceDomains(ctx, authn, workspaceID, PageRequest) iter.Seq2[PageEvent[WorkspaceDomain], error]
 RevokeUserCredentials(ctx, authn, TrustedRequest, userID) error
 
 BeginEmailAddition(ctx, authn, email) (IssuedEmailVerification, error)
@@ -263,7 +276,10 @@ correctly from `http.Request.RemoteAddr`.
 `Config.TOTP` and `Config.Passkeys` are optional; a manager built without one
 reports `ErrNotSupported` from the corresponding enrollment, verification, and
 ceremony operations, exactly like the optional SCIM and OAuth store
-capabilities. `Config.Store` and `Config.Passwords` remain required.
+capabilities. Read and cleanup operations that only touch the store
+(`TOTPStatus`, `Passkeys`, `DeletePasskey`) keep working so a host can inspect
+and remove leftover factors. `Config.Store` and `Config.Passwords` remain
+required.
 
 `CollectPage(seq)` drains a paginated sequence into `([]T, PageEnd, error)`
 for callers that want one page and a cursor; streaming callers range over the
@@ -279,7 +295,39 @@ Operation naming convention: `Begin.../Finish...` frame a ceremony whose
 opaque state round-trips through the caller (WebAuthn, SSO);
 `Begin.../Complete...` frame a flow finished by presenting a token or code
 (reset, magic link, email OTP, OAuth authorization); `Confirm...` proves
-possession to activate a pending resource (email addition, TOTP enrollment).
+possession to activate a pending resource (email addition, TOTP enrollment,
+workspace domains).
+
+`SignUp` is enabled by `Config.SignUp`; without it the operation returns
+`ErrNotSupported`. It requires a `SignupStore`-capable store. The result
+carries the created user, workspace, and an `IssuedEmailVerification` whose
+token the host delivers; `SignUpResult.ExistingAccount` is true — with zero
+values elsewhere and no error — when the address already has an account, so
+the host answers identically and may send an "already registered" notice
+instead. With `Config.SignUp.AutoVerifyEmail` the primary address is verified
+immediately and the result includes an AAL1 `Authentication`.
+
+Sessions require a `SessionStore`-capable store; otherwise every session
+operation returns `ErrNotSupported`. `CreateSession` snapshots the actor's
+`Authentication` behind an opaque `cbs_`-prefixed token returned once.
+`AuthenticateSession` re-validates expiry, revocation, and user disablement,
+touches the session's last-seen timestamp, and returns the snapshot with its
+`Session` record. Sessions are immutable snapshots: hosts mint a new session
+after `VerifyTOTP` (or any AAL change) and revoke the previous one.
+`CompletePasswordReset`, `DisableUser`, and `RevokeUserCredentials` revoke the
+user's sessions in the same transaction when the store supports sessions.
+
+Workspace domains require a `DomainStore`-capable store. `CreateWorkspaceDomain`
+returns a DNS challenge value; the host proves control of the domain (for
+example a TXT record) before calling `ConfirmWorkspaceDomain`. Only confirmed
+domains carry policy. `WorkspaceDomainPolicyInput` selects the auto-join role,
+the SSO provider configuration used for JIT provisioning, and the SSO
+enforcement flag. When enforcement is on, `AuthenticatePassword`,
+`BeginEmailAuthentication`, `BeginEmailOTP`, and `BeginPasswordReset` reject
+addresses under the domain with `ErrSSORequired`, which reflects domain policy
+rather than account existence. JIT provisioning inside `FinishSSO` creates a
+passwordless account only when no user owns the verified address (SSO-002
+still forbids auto-linking existing accounts).
 
 `Config.WorkspaceRoles` extends workspace roles only. Every custom role
 implicitly inherits from `member`; its inheritance and additional permissions
@@ -302,6 +350,12 @@ and audit record are atomic.
 OIDC issuer, and `ClientAssertions` for `private_key_jwt`. A store that does not
 implement `OAuthStore` returns `ErrNotSupported` without affecting other
 capabilities.
+
+`SignupStore`, `SessionStore`, and `DomainStore` are optional store
+capabilities detected by type assertion exactly like `SCIMStore` and
+`OAuthStore`. The bundled in-memory, SQLite, and PostgreSQL stores implement
+all of them. Session tokens are digested with the derived HMAC key under the
+`session:` domain; session records never expose the token after creation.
 
 `BeginOAuthAuthorization` validates the client, redirect URI, PKCE, resource,
 scopes, and membership, then returns a sealed continuation for the host UI.
@@ -377,6 +431,12 @@ type TransactionHook interface {
     ApplyInstanceRoleChange(context.Context, Tx, InstanceRoleChange) error
     ApplyInstanceRoleRemoval(context.Context, Tx, InstanceRoleRemoval) error
     ApplyClientAudit(context.Context, Tx, ClientAuditRecord) error
+    ApplyUserStatusChange(context.Context, Tx, UserStatusChange) error
+    ApplyWorkspaceChange(context.Context, Tx, WorkspaceChange) error
+    ApplyMembershipChange(context.Context, Tx, MembershipChange) error
+    ApplyWorkspaceInvitationChange(context.Context, Tx, WorkspaceInvitationChange) error
+    ApplyUserCredentialRevocation(context.Context, Tx, UserCredentialRevocation) error
+    ApplyOAuthChange(context.Context, Tx, OAuthChange) error
     ApplySCIMConfigurationCreate(context.Context, Tx, SCIMConfigurationChange) error
     ApplySCIMUserProvision(context.Context, Tx, SCIMUserChange) error
     ApplySCIMUserUpdate(context.Context, Tx, SCIMUserChange) error
@@ -447,6 +507,7 @@ Callers use `errors.Is` with the sentinel errors:
 - `ErrInvalidInput`
 - `ErrExpired`
 - `ErrLocked`
+- `ErrSSORequired`
 - `ErrAuditUnavailable`
 - `ErrAuditCompromised`
 - `ErrTransactionRejected`
