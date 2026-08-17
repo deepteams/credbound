@@ -161,6 +161,37 @@ type SessionStore interface {
 	Sessions(ctx context.Context, userID string, page PageRequest) iter.Seq2[PageEvent[Session], error]
 }
 
+// DomainStore is an optional persistence capability required by the
+// workspace-domain operations (CreateWorkspaceDomain, ConfirmWorkspaceDomain,
+// UpdateWorkspaceDomainPolicy, RemoveWorkspaceDomain, WorkspaceDomains), by
+// domain-enforced SSO and by JIT provisioning; without it every domain
+// operation returns ErrNotSupported and the authentication flows behave as if
+// no domain existed.
+//
+// A domain name is globally unique across workspaces: CreateWorkspaceDomain
+// fails with ErrConflict for a taken name. ConfirmWorkspaceDomain fails with
+// ErrConflict when the domain was already confirmed, and
+// UpdateWorkspaceDomainPolicy fails with ErrConflict on an unconfirmed
+// domain, so the pending state never carries policy.
+type DomainStore interface {
+	CreateWorkspaceDomain(ctx context.Context, domain WorkspaceDomain, commit Commit) error
+	WorkspaceDomainByID(ctx context.Context, id string) (WorkspaceDomain, error)
+	// ConfirmedWorkspaceDomainByName is the hot lookup behind SSO enforcement
+	// and JIT provisioning: it resolves a normalized domain name to its
+	// confirmed record and returns ErrNotFound when the domain is absent or
+	// not yet confirmed.
+	ConfirmedWorkspaceDomainByName(ctx context.Context, domain string) (WorkspaceDomain, error)
+	ConfirmWorkspaceDomain(ctx context.Context, id string, at time.Time, commit Commit) error
+	UpdateWorkspaceDomainPolicy(ctx context.Context, id string, policy WorkspaceDomainPolicyInput, at time.Time, commit Commit) error
+	DeleteWorkspaceDomain(ctx context.Context, id string, commit Commit) error
+	WorkspaceDomains(ctx context.Context, workspaceID string, page PageRequest) iter.Seq2[PageEvent[WorkspaceDomain], error]
+	// JITProvisionSSOUser atomically creates a passwordless user, their
+	// verified primary email, the auto-join membership and the SSO identity
+	// link, or nothing at all. A concurrently claimed address or identity
+	// fails with ErrConflict.
+	JITProvisionSSOUser(ctx context.Context, user User, email EmailAddress, membership Membership, identity SSOIdentity, at time.Time, commit Commit) error
+}
+
 // SCIMStore is an optional persistence capability. Custom stores that do not
 // implement it can continue to use every non-SCIM feature of Credbound.
 type SCIMStore interface {

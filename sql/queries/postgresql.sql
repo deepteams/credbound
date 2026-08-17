@@ -510,3 +510,25 @@ UPDATE credbound.oauth_refresh_tokens SET revoked_at = $2 WHERE family_id = $1 A
 
 -- name: OAuthRefreshFamilyExists :one
 SELECT EXISTS(SELECT 1 FROM credbound.oauth_refresh_tokens WHERE family_id = $1);
+
+-- name: InsertWorkspaceDomain :exec
+INSERT INTO credbound.workspace_domains (id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
+
+-- name: GetWorkspaceDomain :one
+SELECT id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at
+FROM credbound.workspace_domains WHERE id = $1;
+
+-- name: GetConfirmedWorkspaceDomainByName :one
+SELECT id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at
+FROM credbound.workspace_domains WHERE domain = $1 AND confirmed_at IS NOT NULL;
+
+-- name: ConfirmWorkspaceDomain :execrows
+UPDATE credbound.workspace_domains SET confirmed_at = $2, updated_at = $2 WHERE id = $1 AND confirmed_at IS NULL;
+
+-- name: UpdateWorkspaceDomainPolicy :execrows
+UPDATE credbound.workspace_domains SET auto_join = $2, auto_join_role = $3, sso_provider_configuration_id = $4, enforce_sso = $5, updated_at = $6
+WHERE id = $1 AND confirmed_at IS NOT NULL;
+
+-- name: DeleteWorkspaceDomain :execrows
+DELETE FROM credbound.workspace_domains WHERE id = $1;

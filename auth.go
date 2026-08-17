@@ -170,6 +170,12 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 	defer func() { m.observe(ctx, "auth.password.authenticate", started, err) }()
 
 	normalized := normalizeEmail(email)
+	// SSO-006: an address under a confirmed EnforceSSO domain is rejected
+	// before any lookup or hashing. The answer depends only on the domain,
+	// never on account existence, so it opens no enumeration oracle.
+	if err := m.domainRequiresSSO(ctx, normalized, "auth.password"); err != nil {
+		return Authentication{}, err
+	}
 	user, lookupErr := m.store.UserByEmail(ctx, normalized)
 	hash := m.dummyHash
 	infrastructureErr := error(nil)

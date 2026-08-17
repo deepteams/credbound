@@ -21,6 +21,12 @@ func (m *Manager) BeginPasswordReset(ctx context.Context, email string) (_ Issue
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.password.reset.begin", started, err) }()
 	normalized := normalizeEmail(email)
+	// SSO-006: an address under a confirmed EnforceSSO domain is rejected
+	// before any lookup or token derivation. The answer depends only on the
+	// domain, never on account existence, so it opens no enumeration oracle.
+	if err := m.domainRequiresSSO(ctx, normalized, "password.reset.request"); err != nil {
+		return IssuedPasswordReset{}, err
+	}
 	user, lookupErr := m.store.UserByEmail(ctx, normalized)
 	// Generate the identifier and secret before deciding the outcome so the
 	// work performed is identical for unknown addresses.

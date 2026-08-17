@@ -133,10 +133,16 @@ func (m *Manager) FinishSSO(ctx context.Context, continuation string, response [
 	}
 	identity, lookupErr := m.store.SSOIdentity(ctx, state.ProviderConfigurationID, claims.Issuer, claims.Subject)
 	if lookupErr != nil {
-		if errors.Is(lookupErr, ErrNotFound) {
-			return Authentication{}, ErrInvalidCredentials
+		if !errors.Is(lookupErr, ErrNotFound) {
+			return Authentication{}, lookupErr
 		}
-		return Authentication{}, lookupErr
+		// SSO-005: an unknown identity on the sign-in path may be provisioned
+		// just in time by a confirmed auto-join domain. Step-up ceremonies
+		// must resolve to an already linked identity and keep failing here.
+		if state.Operation == ssoLogin {
+			return m.finishSSOJIT(ctx, provider, state, claims)
+		}
+		return Authentication{}, ErrInvalidCredentials
 	}
 	if state.Operation == ssoStepUp && identity.UserID != state.UserID {
 		return Authentication{}, ErrInvalidCredentials
@@ -158,6 +164,120 @@ func (m *Manager) FinishSSO(ctx context.Context, continuation string, response [
 		authenticated := SSOAuthenticatedEvent{EventMeta: meta, IdentityID: identity.ID, Authentication: authentication}
 		m.events.emit(ctx, EventSSOAuthenticated, func(listener EventListener) error { return listener.OnSSOAuthenticated(ctx, authenticated) })
 	}
+	m.emitAuthenticationSucceeded(ctx, "auth.sso.finish", event, authentication)
+	return authentication, nil
+}
+
+// finishSSOJIT resolves an unknown sign-in identity through domain-based JIT
+// provisioning (SSO-005): when the store has the domain capability, the IdP
+// asserted a verified email whose domain is a confirmed auto-join domain
+// trusting exactly the provider configuration completing this ceremony, and
+// no account owns the address, one store transaction creates a passwordless
+// user with LastSeenAt set, its verified primary email, the configured
+// membership (ProvisioningSource "jit:<domainID>") and the SSO identity
+// link. The ApplyUserCreate and ApplySSOLink hooks run inside that
+// transaction, and the success emits user.created, sso.linked,
+// sso.jit_provisioned and authentication.succeeded with the same "auth.sso"
+// audit as a normal SSO login. Any account already owning the address — the
+// SSO-002 no-auto-link rule — and every other refusal reproduce today's
+// unknown-identity failure verbatim: ErrInvalidCredentials.
+func (m *Manager) finishSSOJIT(ctx context.Context, provider SSOProvider, state ssoContinuation, claims SSOClaims) (Authentication, error) {
+	if m.domainStore == nil || !claims.EmailVerified || claims.Email == "" {
+		return Authentication{}, ErrInvalidCredentials
+	}
+	at := strings.LastIndexByte(claims.Email, '@')
+	if at < 0 || at == len(claims.Email)-1 {
+		return Authentication{}, ErrInvalidCredentials
+	}
+	domain, err := m.domainStore.ConfirmedWorkspaceDomainByName(ctx, claims.Email[at+1:])
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return Authentication{}, ErrInvalidCredentials
+		}
+		return Authentication{}, err
+	}
+	if !domain.AutoJoin || domain.SSOProviderConfigurationID != state.ProviderConfigurationID {
+		return Authentication{}, ErrInvalidCredentials
+	}
+	if _, ownerErr := m.store.UserByEmail(ctx, claims.Email); ownerErr == nil {
+		// SSO-002 holds: an existing account is never auto-linked and the
+		// login fails exactly like any unknown identity.
+		return Authentication{}, ErrInvalidCredentials
+	} else if !errors.Is(ownerErr, ErrNotFound) {
+		return Authentication{}, ownerErr
+	}
+	userID, err := m.newID()
+	if err != nil {
+		return Authentication{}, err
+	}
+	emailID, err := m.newID()
+	if err != nil {
+		return Authentication{}, err
+	}
+	identityID, err := m.newID()
+	if err != nil {
+		return Authentication{}, err
+	}
+	now := m.now()
+	role := domain.AutoJoinRole
+	if role == "" {
+		role = RoleMember
+	}
+	user := User{ID: userID, Email: claims.Email, DisplayName: claims.Email, LastSeenAt: cloneTime(&now), CreatedAt: now, UpdatedAt: now}
+	primaryEmail := EmailAddress{ID: emailID, UserID: userID, Address: claims.Email, Primary: true, VerifiedAt: cloneTime(&now), CreatedAt: now, UpdatedAt: now}
+	membership := Membership{
+		WorkspaceID: domain.WorkspaceID, UserID: userID, Role: role, Status: MembershipActive,
+		ProvisioningSource: "jit:" + domain.ID, CreatedAt: now, UpdatedAt: now,
+	}
+	identity := SSOIdentity{
+		ID: identityID, UserID: userID, ProviderConfigurationID: state.ProviderConfigurationID,
+		ProviderKind: provider.Kind(), Issuer: claims.Issuer, Subject: claims.Subject,
+		Email: claims.Email, CreatedAt: now, LastUsedAt: cloneTime(&now),
+	}
+	event, err := m.newAudit(ctx, userID, "auth.sso", "sso_identity", identityID, domain.WorkspaceID, AuditSucceeded, "")
+	if err != nil {
+		return Authentication{}, err
+	}
+	userMeta, err := m.newEventMeta(EventUserCreated, "auth.sso.finish", userID, domain.WorkspaceID, event)
+	if err != nil {
+		return Authentication{}, err
+	}
+	linkMeta, err := m.newEventMeta(EventSSOLinked, "auth.sso.finish", userID, domain.WorkspaceID, event)
+	if err != nil {
+		return Authentication{}, err
+	}
+	jitMeta, err := m.newEventMeta(EventSSOJITProvisioned, "auth.sso.finish", userID, domain.WorkspaceID, event)
+	if err != nil {
+		return Authentication{}, err
+	}
+	userChange := UserCreateChange{EventMeta: userMeta, User: user, Email: primaryEmail, Membership: membership}
+	linkChange := SSOLink{EventMeta: linkMeta, Identity: identity}
+	commit := Commit{Audit: event, Transactional: func(ctx context.Context, tx Tx) error {
+		if err := m.events.apply(ctx, "user.create", func(hook TransactionHook) error {
+			return hook.ApplyUserCreate(ctx, tx, userChange)
+		}); err != nil {
+			return err
+		}
+		return m.events.apply(ctx, "sso.link", func(hook TransactionHook) error {
+			return hook.ApplySSOLink(ctx, tx, linkChange)
+		})
+	}}
+	if err := m.domainStore.JITProvisionSSOUser(ctx, user, primaryEmail, membership, identity, now, commit); err != nil {
+		if errors.Is(err, ErrConflict) {
+			// A concurrent registration claimed the address or identity
+			// between the lookup and the commit: preserve the unknown-identity
+			// failure.
+			return Authentication{}, ErrInvalidCredentials
+		}
+		return Authentication{}, m.mapStoreError(ctx, "auth.sso.finish", err)
+	}
+	userEvent := UserCreatedEvent{EventMeta: userMeta, User: user, Email: primaryEmail, Membership: membership}
+	m.events.emit(ctx, EventUserCreated, func(listener EventListener) error { return listener.OnUserCreated(ctx, userEvent) })
+	linkedEvent := SSOLinkedEvent{EventMeta: linkMeta, Identity: identity}
+	m.events.emit(ctx, EventSSOLinked, func(listener EventListener) error { return listener.OnSSOLinked(ctx, linkedEvent) })
+	jitEvent := SSOJITProvisionedEvent{EventMeta: jitMeta, User: user, Email: primaryEmail, Membership: membership, Identity: identity, DomainID: domain.ID}
+	m.events.emit(ctx, EventSSOJITProvisioned, func(listener EventListener) error { return listener.OnSSOJITProvisioned(ctx, jitEvent) })
+	authentication := Authentication{UserID: userID, Method: MethodSSO, Level: AAL2, AuthenticatedAt: now}
 	m.emitAuthenticationSucceeded(ctx, "auth.sso.finish", event, authentication)
 	return authentication, nil
 }

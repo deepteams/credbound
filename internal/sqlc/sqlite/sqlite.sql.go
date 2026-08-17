@@ -85,6 +85,23 @@ func (q *Queries) ClearPrimaryEmails(ctx context.Context, arg ClearPrimaryEmails
 	return err
 }
 
+const confirmWorkspaceDomain = `-- name: ConfirmWorkspaceDomain :execrows
+UPDATE credbound_workspace_domains SET confirmed_at = ?2, updated_at = ?2 WHERE id = ?1 AND confirmed_at IS NULL
+`
+
+type ConfirmWorkspaceDomainParams struct {
+	ID          string       `json:"id"`
+	ConfirmedAt sql.NullTime `json:"confirmed_at"`
+}
+
+func (q *Queries) ConfirmWorkspaceDomain(ctx context.Context, arg ConfirmWorkspaceDomainParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, confirmWorkspaceDomain, arg.ID, arg.ConfirmedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const consumeEmailAuthentication = `-- name: ConsumeEmailAuthentication :execrows
 UPDATE credbound_email_authentications SET used_at = ?3 WHERE id = ?1 AND user_id = ?2 AND used_at IS NULL
 `
@@ -360,6 +377,18 @@ func (q *Queries) DeleteTOTP(ctx context.Context, userID string) (int64, error) 
 	return result.RowsAffected()
 }
 
+const deleteWorkspaceDomain = `-- name: DeleteWorkspaceDomain :execrows
+DELETE FROM credbound_workspace_domains WHERE id = ?1
+`
+
+func (q *Queries) DeleteWorkspaceDomain(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteWorkspaceDomain, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const disableSCIMConfiguration = `-- name: DisableSCIMConfiguration :execrows
 UPDATE credbound_scim_configurations SET enabled = 0, updated_at = ?2 WHERE id = ?1
 `
@@ -390,6 +419,30 @@ func (q *Queries) GetAuditChainHead(ctx context.Context) (GetAuditChainHeadRow, 
 	row := q.db.QueryRowContext(ctx, getAuditChainHead)
 	var i GetAuditChainHeadRow
 	err := row.Scan(&i.Sequence, &i.HeadHash)
+	return i, err
+}
+
+const getConfirmedWorkspaceDomainByName = `-- name: GetConfirmedWorkspaceDomainByName :one
+SELECT id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at
+FROM credbound_workspace_domains WHERE domain = ?1 AND confirmed_at IS NOT NULL
+`
+
+func (q *Queries) GetConfirmedWorkspaceDomainByName(ctx context.Context, domain string) (CredboundWorkspaceDomain, error) {
+	row := q.db.QueryRowContext(ctx, getConfirmedWorkspaceDomainByName, domain)
+	var i CredboundWorkspaceDomain
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Domain,
+		&i.Challenge,
+		&i.ConfirmedAt,
+		&i.AutoJoin,
+		&i.AutoJoinRole,
+		&i.SsoProviderConfigurationID,
+		&i.EnforceSso,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
 	return i, err
 }
 
@@ -987,6 +1040,30 @@ func (q *Queries) GetWorkspace(ctx context.Context, id string) (CredboundWorkspa
 	return i, err
 }
 
+const getWorkspaceDomain = `-- name: GetWorkspaceDomain :one
+SELECT id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at
+FROM credbound_workspace_domains WHERE id = ?1
+`
+
+func (q *Queries) GetWorkspaceDomain(ctx context.Context, id string) (CredboundWorkspaceDomain, error) {
+	row := q.db.QueryRowContext(ctx, getWorkspaceDomain, id)
+	var i CredboundWorkspaceDomain
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Domain,
+		&i.Challenge,
+		&i.ConfirmedAt,
+		&i.AutoJoin,
+		&i.AutoJoinRole,
+		&i.SsoProviderConfigurationID,
+		&i.EnforceSso,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getWorkspaceInvitation = `-- name: GetWorkspaceInvitation :one
 SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
 FROM credbound_workspace_invitations WHERE id = ?1
@@ -1435,6 +1512,42 @@ func (q *Queries) InsertWorkspace(ctx context.Context, arg InsertWorkspaceParams
 		arg.UpdatedAt,
 		arg.DisabledAt,
 		arg.RequireMfa,
+	)
+	return err
+}
+
+const insertWorkspaceDomain = `-- name: InsertWorkspaceDomain :exec
+INSERT INTO credbound_workspace_domains (id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+`
+
+type InsertWorkspaceDomainParams struct {
+	ID                         string       `json:"id"`
+	WorkspaceID                string       `json:"workspace_id"`
+	Domain                     string       `json:"domain"`
+	Challenge                  string       `json:"challenge"`
+	ConfirmedAt                sql.NullTime `json:"confirmed_at"`
+	AutoJoin                   int64        `json:"auto_join"`
+	AutoJoinRole               string       `json:"auto_join_role"`
+	SsoProviderConfigurationID string       `json:"sso_provider_configuration_id"`
+	EnforceSso                 int64        `json:"enforce_sso"`
+	CreatedAt                  time.Time    `json:"created_at"`
+	UpdatedAt                  time.Time    `json:"updated_at"`
+}
+
+func (q *Queries) InsertWorkspaceDomain(ctx context.Context, arg InsertWorkspaceDomainParams) error {
+	_, err := q.db.ExecContext(ctx, insertWorkspaceDomain,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.Domain,
+		arg.Challenge,
+		arg.ConfirmedAt,
+		arg.AutoJoin,
+		arg.AutoJoinRole,
+		arg.SsoProviderConfigurationID,
+		arg.EnforceSso,
+		arg.CreatedAt,
+		arg.UpdatedAt,
 	)
 	return err
 }
@@ -2729,6 +2842,35 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		arg.Name,
 		arg.UpdatedAt,
 		arg.RequireMfa,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateWorkspaceDomainPolicy = `-- name: UpdateWorkspaceDomainPolicy :execrows
+UPDATE credbound_workspace_domains SET auto_join = ?2, auto_join_role = ?3, sso_provider_configuration_id = ?4, enforce_sso = ?5, updated_at = ?6
+WHERE id = ?1 AND confirmed_at IS NOT NULL
+`
+
+type UpdateWorkspaceDomainPolicyParams struct {
+	ID                         string    `json:"id"`
+	AutoJoin                   int64     `json:"auto_join"`
+	AutoJoinRole               string    `json:"auto_join_role"`
+	SsoProviderConfigurationID string    `json:"sso_provider_configuration_id"`
+	EnforceSso                 int64     `json:"enforce_sso"`
+	UpdatedAt                  time.Time `json:"updated_at"`
+}
+
+func (q *Queries) UpdateWorkspaceDomainPolicy(ctx context.Context, arg UpdateWorkspaceDomainPolicyParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateWorkspaceDomainPolicy,
+		arg.ID,
+		arg.AutoJoin,
+		arg.AutoJoinRole,
+		arg.SsoProviderConfigurationID,
+		arg.EnforceSso,
+		arg.UpdatedAt,
 	)
 	if err != nil {
 		return 0, err

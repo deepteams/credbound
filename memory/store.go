@@ -35,6 +35,8 @@ type Store struct {
 	pats               map[string]credbound.PAT
 	patPrefixes        map[string]string
 	sessions           map[string]credbound.Session
+	domains            map[string]credbound.WorkspaceDomain
+	domainNames        map[string]string
 	scimConfigurations map[string]credbound.SCIMConfiguration
 	scimCredentials    map[string]credbound.SCIMCredential
 	scimCredentialKeys map[string]string
@@ -112,7 +114,8 @@ func New() *Store {
 		memberships: make(map[string]map[string]credbound.Membership), admins: make(map[string]credbound.InstanceAdministrator),
 		totp: make(map[string]credbound.TOTPFactor), recovery: make(map[string][]credbound.RecoveryCode),
 		passkeys: make(map[string]map[string]credbound.Passkey), pats: make(map[string]credbound.PAT),
-		patPrefixes: make(map[string]string), sessions: make(map[string]credbound.Session), auditIDs: make(map[string]struct{}),
+		patPrefixes: make(map[string]string), sessions: make(map[string]credbound.Session),
+		domains: make(map[string]credbound.WorkspaceDomain), domainNames: make(map[string]string), auditIDs: make(map[string]struct{}),
 		auditHead: make([]byte, 32), throttles: make(map[string]credbound.LoginThrottle),
 		passwordResets: make(map[string]credbound.PasswordResetCredential),
 		emailAuths:     make(map[string]credbound.EmailAuthenticationCredential),
@@ -1250,6 +1253,208 @@ func (s *Store) Sessions(ctx context.Context, userID string, page credbound.Page
 	}
 }
 
+func (s *Store) CreateWorkspaceDomain(ctx context.Context, domain credbound.WorkspaceDomain, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.workspaces[domain.WorkspaceID]; !exists {
+		return credbound.ErrNotFound
+	}
+	if _, exists := s.domains[domain.ID]; exists {
+		return credbound.ErrConflict
+	}
+	if _, exists := s.domainNames[domain.Domain]; exists {
+		return credbound.ErrConflict
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	s.domains[domain.ID] = cloneWorkspaceDomain(domain)
+	s.domainNames[domain.Domain] = domain.ID
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) WorkspaceDomainByID(ctx context.Context, id string) (credbound.WorkspaceDomain, error) {
+	if err := ctx.Err(); err != nil {
+		return credbound.WorkspaceDomain{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	domain, ok := s.domains[id]
+	if !ok {
+		return credbound.WorkspaceDomain{}, credbound.ErrNotFound
+	}
+	return cloneWorkspaceDomain(domain), nil
+}
+
+func (s *Store) ConfirmedWorkspaceDomainByName(ctx context.Context, name string) (credbound.WorkspaceDomain, error) {
+	if err := ctx.Err(); err != nil {
+		return credbound.WorkspaceDomain{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id, ok := s.domainNames[name]
+	if !ok {
+		return credbound.WorkspaceDomain{}, credbound.ErrNotFound
+	}
+	domain := s.domains[id]
+	if domain.ConfirmedAt == nil {
+		return credbound.WorkspaceDomain{}, credbound.ErrNotFound
+	}
+	return cloneWorkspaceDomain(domain), nil
+}
+
+func (s *Store) ConfirmWorkspaceDomain(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	domain, ok := s.domains[id]
+	if !ok {
+		return credbound.ErrNotFound
+	}
+	if domain.ConfirmedAt != nil {
+		return credbound.ErrConflict
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	domain.ConfirmedAt = cloneTime(&at)
+	domain.UpdatedAt = at
+	s.domains[id] = domain
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) UpdateWorkspaceDomainPolicy(ctx context.Context, id string, policy credbound.WorkspaceDomainPolicyInput, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	domain, ok := s.domains[id]
+	if !ok {
+		return credbound.ErrNotFound
+	}
+	if domain.ConfirmedAt == nil {
+		return credbound.ErrConflict
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	domain.AutoJoin, domain.AutoJoinRole = policy.AutoJoin, policy.AutoJoinRole
+	domain.SSOProviderConfigurationID, domain.EnforceSSO = policy.SSOProviderConfigurationID, policy.EnforceSSO
+	domain.UpdatedAt = at
+	s.domains[id] = domain
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) DeleteWorkspaceDomain(ctx context.Context, id string, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	domain, ok := s.domains[id]
+	if !ok {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	delete(s.domainNames, domain.Domain)
+	delete(s.domains, id)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) WorkspaceDomains(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.WorkspaceDomain], error] {
+	return func(yield func(credbound.PageEvent[credbound.WorkspaceDomain], error) bool) {
+		cursor, err := decodeCursor(page.Cursor)
+		if err != nil {
+			yield(credbound.PageEvent[credbound.WorkspaceDomain]{}, err)
+			return
+		}
+		if err := ctx.Err(); err != nil {
+			yield(credbound.PageEvent[credbound.WorkspaceDomain]{}, err)
+			return
+		}
+		s.mu.RLock()
+		values := make([]credbound.WorkspaceDomain, 0)
+		for _, domain := range s.domains {
+			if domain.WorkspaceID == workspaceID && afterCursor(domain.CreatedAt, domain.ID, cursor) {
+				values = append(values, cloneWorkspaceDomain(domain))
+			}
+		}
+		s.mu.RUnlock()
+		sort.Slice(values, func(i, j int) bool {
+			return newer(values[i].CreatedAt, values[i].ID, values[j].CreatedAt, values[j].ID)
+		})
+		hasMore := len(values) > page.Limit
+		if hasMore {
+			values = values[:page.Limit]
+		}
+		for _, domain := range values {
+			if err := ctx.Err(); err != nil {
+				yield(credbound.PageEvent[credbound.WorkspaceDomain]{}, err)
+				return
+			}
+			if !yield(credbound.ItemEvent(domain), nil) {
+				return
+			}
+		}
+		end := credbound.PageEnd{HasMore: hasMore}
+		if hasMore && len(values) > 0 {
+			end.NextCursor = encodeCursor(values[len(values)-1].CreatedAt, values[len(values)-1].ID)
+		}
+		yield(credbound.EndEvent[credbound.WorkspaceDomain](end), nil)
+	}
+}
+
+func (s *Store) JITProvisionSSOUser(ctx context.Context, user credbound.User, email credbound.EmailAddress, membership credbound.Membership, identity credbound.SSOIdentity, _ time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.users[user.ID]; exists {
+		return credbound.ErrConflict
+	}
+	if _, exists := s.emailIDs[email.Address]; exists {
+		return credbound.ErrConflict
+	}
+	if _, exists := s.workspaces[membership.WorkspaceID]; !exists {
+		return credbound.ErrNotFound
+	}
+	key := ssoKey(identity.ProviderConfigurationID, identity.Issuer, identity.Subject)
+	if _, exists := s.ssoIdentities[identity.ID]; exists {
+		return credbound.ErrConflict
+	}
+	if _, exists := s.ssoKeys[key]; exists {
+		return credbound.ErrConflict
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	s.users[user.ID] = cloneUser(user)
+	s.emailAddresses[email.ID] = cloneEmail(email)
+	s.emailIDs[email.Address] = email.ID
+	s.emails[email.Address] = user.ID
+	if s.memberships[membership.WorkspaceID] == nil {
+		s.memberships[membership.WorkspaceID] = make(map[string]credbound.Membership)
+	}
+	s.memberships[membership.WorkspaceID][user.ID] = normalizeMembership(membership)
+	s.ssoIdentities[identity.ID] = cloneSSOIdentity(identity)
+	s.ssoKeys[key] = identity.ID
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
 func (s *Store) CreateWorkspace(ctx context.Context, workspace credbound.Workspace, owner credbound.Membership, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1932,6 +2137,8 @@ type storeState struct {
 	pats               map[string]credbound.PAT
 	patPrefixes        map[string]string
 	sessions           map[string]credbound.Session
+	domains            map[string]credbound.WorkspaceDomain
+	domainNames        map[string]string
 	scimConfigurations map[string]credbound.SCIMConfiguration
 	scimCredentials    map[string]credbound.SCIMCredential
 	scimCredentialKeys map[string]string
@@ -1976,6 +2183,7 @@ func (s *Store) snapshotLocked() storeState {
 		totp: make(map[string]credbound.TOTPFactor, len(s.totp)), recovery: make(map[string][]credbound.RecoveryCode, len(s.recovery)),
 		passkeys: make(map[string]map[string]credbound.Passkey, len(s.passkeys)), pats: make(map[string]credbound.PAT, len(s.pats)),
 		patPrefixes: make(map[string]string, len(s.patPrefixes)), sessions: make(map[string]credbound.Session, len(s.sessions)),
+		domains: make(map[string]credbound.WorkspaceDomain, len(s.domains)), domainNames: make(map[string]string, len(s.domainNames)),
 		audits: slices.Clone(s.audits), auditIDs: make(map[string]struct{}, len(s.auditIDs)),
 		auditSequence: s.auditSequence, auditHead: slices.Clone(s.auditHead),
 		throttles:          make(map[string]credbound.LoginThrottle, len(s.throttles)),
@@ -2063,6 +2271,12 @@ func (s *Store) snapshotLocked() storeState {
 	for key, value := range s.sessions {
 		state.sessions[key] = cloneSession(value)
 	}
+	for key, value := range s.domains {
+		state.domains[key] = cloneWorkspaceDomain(value)
+	}
+	for key, value := range s.domainNames {
+		state.domainNames[key] = value
+	}
 	for key, value := range s.scimConfigurations {
 		state.scimConfigurations[key] = cloneSCIMConfiguration(value)
 	}
@@ -2146,6 +2360,7 @@ func (s *Store) restoreLocked(state storeState) {
 	s.totp, s.recovery, s.passkeys = state.totp, state.recovery, state.passkeys
 	s.pats, s.patPrefixes = state.pats, state.patPrefixes
 	s.sessions = state.sessions
+	s.domains, s.domainNames = state.domains, state.domainNames
 	s.scimConfigurations, s.scimCredentials, s.scimCredentialKeys = state.scimConfigurations, state.scimCredentials, state.scimCredentialKeys
 	s.scimUsers, s.scimUserNames, s.scimExternalIDs = state.scimUsers, state.scimUserNames, state.scimExternalIDs
 	s.scimGroups, s.scimGroupExternal = state.scimGroups, state.scimGroupExternal
@@ -2430,6 +2645,11 @@ func clonePAT(value credbound.PAT) credbound.PAT {
 	return value
 }
 
+func cloneWorkspaceDomain(value credbound.WorkspaceDomain) credbound.WorkspaceDomain {
+	value.ConfirmedAt = cloneTime(value.ConfirmedAt)
+	return value
+}
+
 func cloneTime(value *time.Time) *time.Time {
 	if value == nil {
 		return nil
@@ -2452,3 +2672,4 @@ var _ credbound.Store = (*Store)(nil)
 var _ credbound.SCIMStore = (*Store)(nil)
 var _ credbound.SignupStore = (*Store)(nil)
 var _ credbound.SessionStore = (*Store)(nil)
+var _ credbound.DomainStore = (*Store)(nil)

@@ -333,6 +333,63 @@ type InviteToWorkspaceInput struct {
 	Role  Role
 }
 
+// WorkspaceDomain is a workspace-owned email domain. It is created pending
+// with a DNS challenge value; the host proves control of the domain (by
+// convention a TXT record carrying Challenge) out of band and confirms it
+// with ConfirmWorkspaceDomain. Only a confirmed domain carries policy:
+// auto-join (JIT provisioning through the trusted SSO provider
+// configuration) and SSO enforcement. A domain name is globally unique
+// across workspaces.
+type WorkspaceDomain struct {
+	ID          string
+	WorkspaceID string
+	// Domain is the normalized, lowercase registrable DNS name
+	// ("corp.example.com").
+	Domain string
+	// Challenge is the DNS TXT value proving control of the domain. It is
+	// deliberately not a secret credential — the host publishes it in public
+	// DNS — so it is stored in plaintext and remains visible on the record so
+	// the host can re-display it until the domain is confirmed.
+	Challenge string
+	// ConfirmedAt is set once the host asserted that DNS verification
+	// completed. An unconfirmed domain carries no policy effect.
+	ConfirmedAt *time.Time
+	// AutoJoin enables JIT provisioning: an unknown SSO identity whose
+	// verified email is under this domain and arrives through the trusted
+	// provider configuration is provisioned as a passwordless member.
+	AutoJoin bool
+	// AutoJoinRole is the workspace role granted to JIT-provisioned users.
+	AutoJoinRole Role
+	// SSOProviderConfigurationID names the registered SSO provider
+	// configuration this domain trusts for JIT provisioning.
+	SSOProviderConfigurationID string
+	// EnforceSSO rejects password, magic-link and email-OTP authentication
+	// for addresses under the domain with ErrSSORequired.
+	EnforceSSO bool
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// IssuedWorkspaceDomain is the result of CreateWorkspaceDomain: the pending
+// record and its DNS challenge value. Unlike single-use tokens the challenge
+// is not secret (it is published in DNS) and also stays on the record.
+type IssuedWorkspaceDomain struct {
+	Domain    WorkspaceDomain
+	Challenge string
+}
+
+// WorkspaceDomainPolicyInput replaces the policy of a confirmed workspace
+// domain: the auto-join flag with its target role, the SSO provider
+// configuration the domain trusts, and the SSO enforcement flag. A zero
+// AutoJoinRole means member. When AutoJoin or EnforceSSO is set the provider
+// configuration must be registered with the Manager.
+type WorkspaceDomainPolicyInput struct {
+	AutoJoin                   bool
+	AutoJoinRole               Role
+	SSOProviderConfigurationID string
+	EnforceSSO                 bool
+}
+
 // RegisterFromInvitationInput carries the profile the invitee chooses when
 // registering a new account from an invitation token. The invited address
 // becomes the verified primary email.

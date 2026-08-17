@@ -30,6 +30,9 @@ be reimplemented in every project:
 - optional server-side sessions behind single-display `cbs_` tokens, with
   device listings and a session-revocation cascade on reset, disable, and
   credential revocation;
+- optional verified workspace email domains (DNS-challenge capture) with
+  per-domain SSO enforcement and just-in-time provisioning of passwordless
+  members from a trusted SSO provider;
 - atomic revocation of every PAT and OAuth grant of a user;
 - optional SCIM 2.0 provisioning per workspace (`Users`, `Groups`, `.search`);
 - optional OAuth 2.0/OIDC authorization-server capabilities for remote MCP

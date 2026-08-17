@@ -27,6 +27,12 @@ func (m *Manager) BeginEmailOTP(ctx context.Context, email string) (_ IssuedEmai
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.email_otp.begin", started, err) }()
 	normalized := normalizeEmail(email)
+	// SSO-006: an address under a confirmed EnforceSSO domain is rejected
+	// before any lookup or code derivation. The answer depends only on the
+	// domain, never on account existence, so it opens no enumeration oracle.
+	if err := m.domainRequiresSSO(ctx, normalized, "email_otp.request"); err != nil {
+		return IssuedEmailOTP{}, err
+	}
 	user, lookupErr := m.store.UserByEmail(ctx, normalized)
 	// Generate the identifier and code before deciding the outcome so the
 	// work performed is identical for unknown addresses.

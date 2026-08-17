@@ -34,6 +34,10 @@ func (UnimplementedTransactionHook) ApplyWorkspaceInvitationChange(context.Conte
 	return nil
 }
 
+func (UnimplementedTransactionHook) ApplyWorkspaceDomainChange(context.Context, Tx, WorkspaceDomainChange) error {
+	return nil
+}
+
 func (UnimplementedTransactionHook) ApplyPasswordChange(context.Context, Tx, PasswordChange) error {
 	return nil
 }
@@ -188,6 +192,22 @@ func (UnimplementedEventListener) OnWorkspaceInvitationRevoked(context.Context, 
 	return nil
 }
 
+func (UnimplementedEventListener) OnWorkspaceDomainCreated(context.Context, WorkspaceDomainEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnWorkspaceDomainConfirmed(context.Context, WorkspaceDomainEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnWorkspaceDomainPolicyUpdated(context.Context, WorkspaceDomainEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnWorkspaceDomainRemoved(context.Context, WorkspaceDomainEvent) error {
+	return nil
+}
+
 func (UnimplementedEventListener) OnPasswordChanged(context.Context, PasswordChangedEvent) error {
 	return nil
 }
@@ -311,6 +331,10 @@ func (UnimplementedEventListener) OnSSOLinked(context.Context, SSOLinkedEvent) e
 func (UnimplementedEventListener) OnSSOUnlinked(context.Context, SSOUnlinkedEvent) error { return nil }
 
 func (UnimplementedEventListener) OnSSOAuthenticated(context.Context, SSOAuthenticatedEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnSSOJITProvisioned(context.Context, SSOJITProvisionedEvent) error {
 	return nil
 }
 

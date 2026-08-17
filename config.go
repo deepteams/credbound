@@ -177,6 +177,7 @@ type Manager struct {
 	signupStore          SignupStore
 	signup               *SignUpConfig
 	sessionStore         SessionStore
+	domainStore          DomainStore
 	dummyHash            string
 	idMu                 sync.Mutex
 	idUnixMilli          int64
@@ -282,6 +283,7 @@ func New(cfg Config) (*Manager, error) {
 	scimStore, _ := cfg.Store.(SCIMStore)
 	signupStore, _ := cfg.Store.(SignupStore)
 	sessionStore, _ := cfg.Store.(SessionStore)
+	domainStore, _ := cfg.Store.(DomainStore)
 	var signupConfig *SignUpConfig
 	if cfg.SignUp != nil {
 		signupConfig = &SignUpConfig{AutoVerifyEmail: cfg.SignUp.AutoVerifyEmail}
@@ -332,6 +334,7 @@ func New(cfg Config) (*Manager, error) {
 		signupStore:          signupStore,
 		signup:               signupConfig,
 		sessionStore:         sessionStore,
+		domainStore:          domainStore,
 		dummyHash:            dummyHash,
 	}, nil
 }

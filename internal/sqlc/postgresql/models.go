@@ -305,6 +305,20 @@ type CredboundWorkspace struct {
 	RequireMfa bool         `json:"require_mfa"`
 }
 
+type CredboundWorkspaceDomain struct {
+	ID                         string       `json:"id"`
+	WorkspaceID                string       `json:"workspace_id"`
+	Domain                     string       `json:"domain"`
+	Challenge                  string       `json:"challenge"`
+	ConfirmedAt                sql.NullTime `json:"confirmed_at"`
+	AutoJoin                   bool         `json:"auto_join"`
+	AutoJoinRole               string       `json:"auto_join_role"`
+	SsoProviderConfigurationID string       `json:"sso_provider_configuration_id"`
+	EnforceSso                 bool         `json:"enforce_sso"`
+	CreatedAt                  time.Time    `json:"created_at"`
+	UpdatedAt                  time.Time    `json:"updated_at"`
+}
+
 type CredboundWorkspaceInvitation struct {
 	ID             string         `json:"id"`
 	WorkspaceID    string         `json:"workspace_id"`

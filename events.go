@@ -58,6 +58,10 @@ const (
 	EventWorkspaceInvitationCreated   EventName = "workspace.invitation_created"
 	EventWorkspaceInvitationAccepted  EventName = "workspace.invitation_accepted"
 	EventWorkspaceInvitationRevoked   EventName = "workspace.invitation_revoked"
+	EventWorkspaceDomainCreated       EventName = "workspace.domain.created"
+	EventWorkspaceDomainConfirmed     EventName = "workspace.domain.confirmed"
+	EventWorkspaceDomainPolicyUpdated EventName = "workspace.domain.policy_updated"
+	EventWorkspaceDomainRemoved       EventName = "workspace.domain.removed"
 	EventMembershipStatusChanged      EventName = "membership.status_changed"
 	EventMembershipRemoved            EventName = "membership.removed"
 	EventPasswordChanged              EventName = "password.changed"
@@ -95,6 +99,7 @@ const (
 	EventSSOLinked                    EventName = "sso.linked"
 	EventSSOUnlinked                  EventName = "sso.unlinked"
 	EventSSOAuthenticated             EventName = "sso.authenticated"
+	EventSSOJITProvisioned            EventName = "sso.jit_provisioned"
 	EventRoleGranted                  EventName = "role.granted"
 	EventInstanceRoleChanged          EventName = "instance_role.changed"
 	EventInstanceRoleRemoved          EventName = "instance_role.removed"
@@ -191,6 +196,16 @@ type MembershipChange struct {
 type WorkspaceInvitationChange struct {
 	EventMeta
 	Invitation WorkspaceInvitation
+}
+
+// WorkspaceDomainChange covers workspace-domain creation, confirmation,
+// policy update and removal; the EventMeta name tells them apart and Removed
+// marks a removal whose Domain field holds the final state. The Challenge is
+// deliberately included: it is published in public DNS and is not a secret.
+type WorkspaceDomainChange struct {
+	EventMeta
+	Domain  WorkspaceDomain
+	Removed bool
 }
 
 type PasswordChange struct {
@@ -628,6 +643,31 @@ type SSOAuthenticatedEvent struct {
 	Authentication Authentication
 }
 
+// SSOJITProvisionedEvent reports a just-in-time provisioned account: the
+// passwordless user created inside FinishSSO from a verified IdP email under
+// a confirmed auto-join domain, its verified primary email, the configured
+// membership and the linked identity. It is emitted alongside user.created,
+// sso.linked and authentication.succeeded for the same commit.
+type SSOJITProvisionedEvent struct {
+	EventMeta
+	User       User
+	Email      EmailAddress
+	Membership Membership
+	Identity   SSOIdentity
+	// DomainID references the confirmed workspace domain whose auto-join
+	// policy produced the account.
+	DomainID string
+}
+
+// WorkspaceDomainEvent is the shared payload of the workspace-domain
+// lifecycle events (created, confirmed, policy updated, removed); the
+// EventMeta name tells them apart. The Challenge is deliberately included:
+// it is published in public DNS and is not a secret.
+type WorkspaceDomainEvent struct {
+	EventMeta
+	Domain WorkspaceDomain
+}
+
 type RoleGrantedEvent struct {
 	EventMeta
 	UserID       string
@@ -732,6 +772,7 @@ type TransactionHook interface {
 	ApplyWorkspaceChange(context.Context, Tx, WorkspaceChange) error
 	ApplyMembershipChange(context.Context, Tx, MembershipChange) error
 	ApplyWorkspaceInvitationChange(context.Context, Tx, WorkspaceInvitationChange) error
+	ApplyWorkspaceDomainChange(context.Context, Tx, WorkspaceDomainChange) error
 	ApplyPasswordChange(context.Context, Tx, PasswordChange) error
 	ApplyEmailAddition(context.Context, Tx, EmailAddition) error
 	ApplyEmailConfirmation(context.Context, Tx, EmailConfirmation) error
@@ -783,6 +824,10 @@ type EventListener interface {
 	OnWorkspaceInvitationCreated(context.Context, WorkspaceInvitationEvent) error
 	OnWorkspaceInvitationAccepted(context.Context, WorkspaceInvitationEvent) error
 	OnWorkspaceInvitationRevoked(context.Context, WorkspaceInvitationEvent) error
+	OnWorkspaceDomainCreated(context.Context, WorkspaceDomainEvent) error
+	OnWorkspaceDomainConfirmed(context.Context, WorkspaceDomainEvent) error
+	OnWorkspaceDomainPolicyUpdated(context.Context, WorkspaceDomainEvent) error
+	OnWorkspaceDomainRemoved(context.Context, WorkspaceDomainEvent) error
 	OnPasswordChanged(context.Context, PasswordChangedEvent) error
 	OnPasswordRehashed(context.Context, PasswordRehashedEvent) error
 	OnAuthenticationSucceeded(context.Context, AuthenticationEvent) error
@@ -818,6 +863,7 @@ type EventListener interface {
 	OnSSOLinked(context.Context, SSOLinkedEvent) error
 	OnSSOUnlinked(context.Context, SSOUnlinkedEvent) error
 	OnSSOAuthenticated(context.Context, SSOAuthenticatedEvent) error
+	OnSSOJITProvisioned(context.Context, SSOJITProvisionedEvent) error
 	OnRoleGranted(context.Context, RoleGrantedEvent) error
 	OnInstanceRoleChanged(context.Context, InstanceRoleChangedEvent) error
 	OnInstanceRoleRemoved(context.Context, InstanceRoleRemovedEvent) error
