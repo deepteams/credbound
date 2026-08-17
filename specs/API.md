@@ -194,6 +194,7 @@ CreateOAuthInitialAccessToken(ctx, authn, TrustedRequest, issuerID, CreateOAuthI
 RevokeOAuthInitialAccessToken(ctx, authn, TrustedRequest, tokenID) error
 RegisterOAuthClient(ctx, issuer, initialAccessToken, OAuthClientRegistrationInput) (IssuedOAuthClient, error)
 BeginOAuthAuthorization(ctx, authn, BeginOAuthAuthorizationInput) (OAuthConsent, error)
+ValidateOAuthAuthorizationRedirect(ctx, issuerURL, clientID, redirectURI) error
 CompleteOAuthAuthorization(ctx, authn, continuation, approved) (OAuthAuthorizationResult, error)
 ExchangeOAuthAuthorizationCode(ctx, ExchangeOAuthAuthorizationCodeInput) (OAuthTokenResponse, error)
 RefreshOAuthToken(ctx, RefreshOAuthTokenInput) (OAuthTokenResponse, error)
@@ -444,6 +445,10 @@ type TransactionHook interface {
     ApplyWorkspaceInvitationChange(context.Context, Tx, WorkspaceInvitationChange) error
     ApplyUserCredentialRevocation(context.Context, Tx, UserCredentialRevocation) error
     ApplyOAuthChange(context.Context, Tx, OAuthChange) error
+    ApplyWorkspaceDomainChange(context.Context, Tx, WorkspaceDomainChange) error
+    ApplySessionCreation(context.Context, Tx, SessionCreation) error
+    ApplySessionRevocation(context.Context, Tx, SessionRevocation) error
+    ApplyUserSessionRevocation(context.Context, Tx, UserSessionRevocation) error
     ApplySCIMConfigurationCreate(context.Context, Tx, SCIMConfigurationChange) error
     ApplySCIMUserProvision(context.Context, Tx, SCIMUserChange) error
     ApplySCIMUserUpdate(context.Context, Tx, SCIMUserChange) error
@@ -472,13 +477,18 @@ other listeners.
 
 Events cover:
 
-- bootstrap and user and workspace creation;
-- passwords and authentication;
+- bootstrap, self-service signup, and user and workspace creation;
+- workspace lifecycle, memberships, and invitations;
+- passwords and authentication (email OTP reuses the email-authentication
+  and generic authentication events, distinguishable by their `Operation`);
 - email addresses;
 - TOTP, recovery codes, passkeys, and PATs;
-- SSO;
+- server-side sessions (created, revoked, user-wide revocation);
+- SSO, including JIT provisioning;
+- workspace domains (created, confirmed, policy updated, removed);
 - RBAC and instance roles;
 - SCIM configuration, users, and groups;
+- OAuth clients, issuers, resources, CIMD, authorizations, and tokens;
 - client-supplied audit and audit unavailability.
 
 Each `EventMeta.ID` is a UUIDv7. The `Name` field contains a stable, unversioned

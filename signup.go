@@ -33,6 +33,12 @@ func (m *Manager) SignUp(ctx context.Context, input SignUpInput) (_ SignUpResult
 	if err != nil {
 		return SignUpResult{}, err
 	}
+	// SSO-006: a confirmed EnforceSSO domain also refuses password signup —
+	// the account could never authenticate afterwards. The answer depends
+	// only on the domain, so it opens no enumeration oracle.
+	if err := m.domainRequiresSSO(ctx, email, "signup"); err != nil {
+		return SignUpResult{}, err
+	}
 	displayName := strings.TrimSpace(input.DisplayName)
 	if displayName == "" {
 		return SignUpResult{}, &ValidationError{Field: "display_name", Rule: "required", Message: "display name is required"}

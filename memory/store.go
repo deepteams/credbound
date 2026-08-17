@@ -2673,3 +2673,5 @@ var _ credbound.SCIMStore = (*Store)(nil)
 var _ credbound.SignupStore = (*Store)(nil)
 var _ credbound.SessionStore = (*Store)(nil)
 var _ credbound.DomainStore = (*Store)(nil)
+
+var _ credbound.OAuthStore = (*Store)(nil)

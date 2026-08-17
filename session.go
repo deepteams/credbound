@@ -109,6 +109,15 @@ func (m *Manager) AuthenticateSession(ctx context.Context, raw string) (_ Authen
 		}
 		return Authentication{}, Session{}, lookupErr
 	}
+	// The digest is verified before any state check so a caller who only
+	// knows a session identifier — without the secret — cannot distinguish
+	// revoked from expired from nonexistent.
+	if !m.matchTokenDigest(session.Digest, "session:"+raw) {
+		if auditErr := m.appendAuthenticationAudit(ctx, session.UserID, "session.authenticate", AuditFailed, "invalid_credentials"); auditErr != nil {
+			return Authentication{}, Session{}, auditErr
+		}
+		return Authentication{}, Session{}, ErrInvalidCredentials
+	}
 	if session.RevokedAt != nil {
 		if auditErr := m.appendAuthenticationAudit(ctx, session.UserID, "session.authenticate", AuditFailed, "revoked"); auditErr != nil {
 			return Authentication{}, Session{}, auditErr
@@ -120,12 +129,6 @@ func (m *Manager) AuthenticateSession(ctx context.Context, raw string) (_ Authen
 			return Authentication{}, Session{}, auditErr
 		}
 		return Authentication{}, Session{}, ErrExpired
-	}
-	if !m.matchTokenDigest(session.Digest, "session:"+raw) {
-		if auditErr := m.appendAuthenticationAudit(ctx, session.UserID, "session.authenticate", AuditFailed, "invalid_credentials"); auditErr != nil {
-			return Authentication{}, Session{}, auditErr
-		}
-		return Authentication{}, Session{}, ErrInvalidCredentials
 	}
 	user, userErr := m.store.UserByID(ctx, session.UserID)
 	if userErr != nil || user.Disabled {

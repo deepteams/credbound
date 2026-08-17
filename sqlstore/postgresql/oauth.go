@@ -551,3 +551,5 @@ func oauthQuery(query string) string {
 	}
 	return result.String()
 }
+
+var _ credbound.OAuthStore = (*Store)(nil)

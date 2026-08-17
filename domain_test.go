@@ -779,3 +779,62 @@ func TestWorkspaceDomainAuditAndFaultPaths(t *testing.T) {
 		t.Fatalf("JIT fault propagation = %v", err)
 	}
 }
+
+func TestSSOJITRefusedOnDisabledWorkspace(t *testing.T) {
+	provider := jitProvider("subject-disabled-ws", "bob@corp.example.com", true)
+	f := newFixture(t, provider)
+	ctx := context.Background()
+	authn, workspace := f.bootstrap(t)
+	stepUp := aal2(authn.UserID, f.now)
+	setupJITDomain(t, f, workspace.ID, stepUp, credbound.WorkspaceDomainPolicyInput{
+		AutoJoin: true, SSOProviderConfigurationID: domainProviderA,
+	})
+	if err := f.manager.DisableWorkspace(ctx, stepUp, workspace.ID); err != nil {
+		t.Fatal(err)
+	}
+	challenge, err := f.manager.BeginSSO(ctx, domainProviderA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishSSO(ctx, challenge.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("JIT into disabled workspace = %v", err)
+	}
+	if _, err := f.store.UserByEmail(ctx, "bob@corp.example.com"); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("disabled workspace still provisioned a user: %v", err)
+	}
+}
+
+func TestDomainEnforcedSSOBlocksSignup(t *testing.T) {
+	provider := jitProvider("subject-signup", "root@example.com", true)
+	f := newFixture(t, provider)
+	ctx := context.Background()
+	authn, workspace := f.bootstrap(t)
+	stepUp := aal2(authn.UserID, f.now)
+	setupJITDomain(t, f, workspace.ID, stepUp, credbound.WorkspaceDomainPolicyInput{
+		AutoJoin: true, SSOProviderConfigurationID: domainProviderA, EnforceSSO: true,
+	})
+
+	// A second manager sharing the store enables self-service signup; the
+	// enforced domain must refuse a password signup that could never sign in.
+	signup, err := credbound.New(credbound.Config{
+		Store: f.store, Passwords: f.passwords, TOTP: fakeTOTP{}, Passkeys: f.passkeys,
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		Clock: func() time.Time { return f.now }, Random: &counterReader{next: 0x51},
+		SignUp: &credbound.SignUpConfig{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := signup.SignUp(ctx, credbound.SignUpInput{
+		Email: "newcomer@corp.example.com", DisplayName: "Newcomer",
+		Password: "another strong password", WorkspaceName: "Side project",
+	}); !errors.Is(err, credbound.ErrSSORequired) {
+		t.Fatalf("signup under enforced domain = %v", err)
+	}
+	if _, err := signup.SignUp(ctx, credbound.SignUpInput{
+		Email: "newcomer@elsewhere.example", DisplayName: "Newcomer",
+		Password: "another strong password", WorkspaceName: "Side project",
+	}); err != nil {
+		t.Fatalf("signup outside enforced domain = %v", err)
+	}
+}

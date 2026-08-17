@@ -535,3 +535,5 @@ func oauthJSON(value any) []byte {
 func oauthParam(value any) string { return string(oauthJSON(value)) }
 
 func oauthQuery(query string) string { return query }
+
+var _ credbound.OAuthStore = (*Store)(nil)

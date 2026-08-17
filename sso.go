@@ -207,6 +207,18 @@ func (m *Manager) finishSSOJIT(ctx context.Context, provider SSOProvider, state 
 	if !domain.AutoJoin || domain.SSOProviderConfigurationID != state.ProviderConfigurationID {
 		return Authentication{}, ErrInvalidCredentials
 	}
+	// A disabled workspace accepts no new members (TENANT-002): JIT refuses
+	// exactly like any other ineligible identity.
+	workspace, err := m.store.WorkspaceByID(ctx, domain.WorkspaceID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return Authentication{}, ErrInvalidCredentials
+		}
+		return Authentication{}, err
+	}
+	if workspace.DisabledAt != nil {
+		return Authentication{}, ErrInvalidCredentials
+	}
 	if _, ownerErr := m.store.UserByEmail(ctx, claims.Email); ownerErr == nil {
 		// SSO-002 holds: an existing account is never auto-linked and the
 		// login fails exactly like any unknown identity.
