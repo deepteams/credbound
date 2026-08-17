@@ -257,7 +257,29 @@ bundled stores; auditors can recompute it over exported logs.
 
 `TrustedRequest.Local` must be set only by a server adapter that has verified
 that the network peer is loopback. It must never be copied from a request
-parameter, header, or body.
+parameter, header, or body. `TrustedRequestFromAddr(remoteAddr)` derives it
+correctly from `http.Request.RemoteAddr`.
+
+`Config.TOTP` and `Config.Passkeys` are optional; a manager built without one
+reports `ErrNotSupported` from the corresponding enrollment, verification, and
+ceremony operations, exactly like the optional SCIM and OAuth store
+capabilities. `Config.Store` and `Config.Passwords` remain required.
+
+`CollectPage(seq)` drains a paginated sequence into `([]T, PageEnd, error)`
+for callers that want one page and a cursor; streaming callers range over the
+sequence and forward each `PageEvent` themselves.
+
+User-input validation failures (addresses, passwords, names, roles, PAT
+inputs) return a `*ValidationError{Field, Rule, Message}` retrievable with
+`errors.As`; every `ValidationError` also satisfies
+`errors.Is(err, ErrInvalidInput)`. Protocol-level rejections may return a
+plain `ErrInvalidInput`.
+
+Operation naming convention: `Begin.../Finish...` frame a ceremony whose
+opaque state round-trips through the caller (WebAuthn, SSO);
+`Begin.../Complete...` frame a flow finished by presenting a token or code
+(reset, magic link, email OTP, OAuth authorization); `Confirm...` proves
+possession to activate a pending resource (email addition, TOTP enrollment).
 
 `Config.WorkspaceRoles` extends workspace roles only. Every custom role
 implicitly inherits from `member`; its inheritance and additional permissions

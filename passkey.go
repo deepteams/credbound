@@ -14,6 +14,9 @@ const (
 )
 
 func (m *Manager) BeginPasskeyRegistration(ctx context.Context, actor Authentication, name string) (_ PasskeyChallenge, err error) {
+	if err := m.requirePasskeyProvider(); err != nil {
+		return PasskeyChallenge{}, err
+	}
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.passkey.registration.begin", started, err) }()
 	if err := m.requireRecentInteractive(ctx, actor); err != nil {
@@ -42,6 +45,9 @@ func (m *Manager) BeginPasskeyRegistration(ctx context.Context, actor Authentica
 }
 
 func (m *Manager) FinishPasskeyRegistration(ctx context.Context, actor Authentication, continuation string, response []byte) (_ Passkey, err error) {
+	if err := m.requirePasskeyProvider(); err != nil {
+		return Passkey{}, err
+	}
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.passkey.registration.finish", started, err) }()
 	if err := m.requireRecentInteractive(ctx, actor); err != nil {
@@ -103,6 +109,9 @@ func (m *Manager) FinishPasskeyRegistration(ctx context.Context, actor Authentic
 }
 
 func (m *Manager) BeginPasskeyAuthentication(ctx context.Context, email string) (_ PasskeyChallenge, err error) {
+	if err := m.requirePasskeyProvider(); err != nil {
+		return PasskeyChallenge{}, err
+	}
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.passkey.authentication.begin", started, err) }()
 	userRecord, err := m.store.UserByEmail(ctx, normalizeEmail(email))
@@ -128,6 +137,9 @@ func (m *Manager) BeginPasskeyAuthentication(ctx context.Context, email string) 
 }
 
 func (m *Manager) FinishPasskeyAuthentication(ctx context.Context, continuation string, response []byte) (_ Authentication, err error) {
+	if err := m.requirePasskeyProvider(); err != nil {
+		return Authentication{}, err
+	}
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.passkey.authentication.finish", started, err) }()
 	state, err := m.decodeContinuation(continuation, passkeyAuthentication)
@@ -264,4 +276,14 @@ func (m *Manager) passkeyUser(ctx context.Context, userID string) (PasskeyUser, 
 		}
 	}
 	return PasskeyUser{User: user, Credentials: credentials}, nil
+}
+
+// requirePasskeyProvider gates the WebAuthn ceremonies that need
+// Config.Passkeys; a manager built without one supports every other
+// capability and reports ErrNotSupported here.
+func (m *Manager) requirePasskeyProvider() error {
+	if m.passkeys == nil {
+		return fmt.Errorf("%w: no passkey provider configured", ErrNotSupported)
+	}
+	return nil
 }

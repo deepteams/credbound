@@ -2,6 +2,7 @@ package credbound
 
 import (
 	"encoding/json"
+	"iter"
 	"time"
 )
 
@@ -554,6 +555,31 @@ type PageEvent[T any] struct {
 	Type string   `json:"type"`
 	Data *T       `json:"data,omitempty"`
 	End  *PageEnd `json:"page_end,omitempty"`
+}
+
+// CollectPage drains a paginated sequence into its items and final PageEnd —
+// the common case when a caller wants one page and a cursor rather than a
+// stream:
+//
+//	pats, page, err := credbound.CollectPage(manager.PATs(ctx, authn, credbound.PageRequest{Limit: 50}))
+//
+// Streaming callers range over the sequence directly and forward each
+// PageEvent (for example as NDJSON) instead.
+func CollectPage[T any](seq iter.Seq2[PageEvent[T], error]) ([]T, PageEnd, error) {
+	var items []T
+	var end PageEnd
+	for event, err := range seq {
+		if err != nil {
+			return nil, PageEnd{}, err
+		}
+		if event.Data != nil {
+			items = append(items, *event.Data)
+		}
+		if event.End != nil {
+			end = *event.End
+		}
+	}
+	return items, end, nil
 }
 
 func ItemEvent[T any](value T) PageEvent[T] {

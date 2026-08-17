@@ -20,7 +20,7 @@ func (m *Manager) CreateWorkspace(ctx context.Context, actor Authentication, inp
 	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" || len(name) > 200 {
-		return Workspace{}, fmt.Errorf("%w: workspace name must contain between 1 and 200 characters", ErrInvalidInput)
+		return Workspace{}, &ValidationError{Field: "name", Rule: "length", Message: "workspace name must contain between 1 and 200 characters"}
 	}
 	id, err := m.newID()
 	if err != nil {
@@ -76,7 +76,7 @@ func (m *Manager) updateWorkspace(ctx context.Context, actor Authentication, wor
 	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" || len(name) > 200 {
-		return Workspace{}, fmt.Errorf("%w: workspace name must contain between 1 and 200 characters", ErrInvalidInput)
+		return Workspace{}, &ValidationError{Field: "name", Rule: "length", Message: "workspace name must contain between 1 and 200 characters"}
 	}
 	previous, err := m.store.WorkspaceByID(ctx, workspaceID)
 	if err != nil {

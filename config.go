@@ -99,8 +99,8 @@ type Manager struct {
 }
 
 func New(cfg Config) (*Manager, error) {
-	if cfg.Store == nil || cfg.Passwords == nil || cfg.TOTP == nil || cfg.Passkeys == nil {
-		return nil, fmt.Errorf("%w: store, passwords, totp and passkeys are required", ErrInvalidInput)
+	if cfg.Store == nil || cfg.Passwords == nil {
+		return nil, fmt.Errorf("%w: store and passwords are required", ErrInvalidInput)
 	}
 	if len(cfg.SecretKey) != 32 {
 		return nil, fmt.Errorf("%w: secret key must contain exactly 32 bytes", ErrInvalidInput)

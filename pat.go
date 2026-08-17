@@ -19,10 +19,10 @@ func (m *Manager) CreatePAT(ctx context.Context, actor Authentication, input Cre
 	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" || len(name) > 100 {
-		return IssuedPAT{}, fmt.Errorf("%w: PAT name is required and limited to 100 characters", ErrInvalidInput)
+		return IssuedPAT{}, &ValidationError{Field: "name", Rule: "length", Message: "PAT name is required and limited to 100 characters"}
 	}
 	if input.ExpiresAt != nil && !input.ExpiresAt.After(m.now()) {
-		return IssuedPAT{}, fmt.Errorf("%w: PAT expiration must be in the future", ErrInvalidInput)
+		return IssuedPAT{}, &ValidationError{Field: "expires_at", Rule: "past", Message: "PAT expiration must be in the future"}
 	}
 	if input.WorkspaceID != "" {
 		if err := m.AuthorizePermission(ctx, actor, input.WorkspaceID, PermissionWorkspaceAccess); err != nil {
@@ -203,14 +203,14 @@ func parsePAT(raw string) (string, bool) {
 
 func normalizeScopes(scopes []string) ([]string, error) {
 	if len(scopes) == 0 {
-		return nil, fmt.Errorf("%w: at least one PAT scope is required", ErrInvalidInput)
+		return nil, &ValidationError{Field: "scopes", Rule: "required", Message: "at least one PAT scope is required"}
 	}
 	seen := make(map[string]struct{}, len(scopes))
 	result := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
 		scope = strings.TrimSpace(scope)
 		if scope == "" || len(scope) > 100 {
-			return nil, fmt.Errorf("%w: invalid PAT scope", ErrInvalidInput)
+			return nil, &ValidationError{Field: "scopes", Rule: "format", Message: "invalid PAT scope"}
 		}
 		if _, duplicate := seen[scope]; duplicate {
 			continue

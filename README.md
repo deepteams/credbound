@@ -76,6 +76,29 @@ cookies, CSRF, rate limiting, its TLS/H2/H3 reverse proxy, and its UI. WebAuthn
 ceremonies remain transport-agnostic: the JSON produced by the library is sent
 to the browser, whose response is then passed back to the library.
 
+### Sessions and the `Authentication` capability
+
+Every successful sign-in (`AuthenticatePassword`, `CompleteEmailAuthentication`,
+`CompleteEmailOTP`, `FinishPasskeyAuthentication`, `FinishSSO`, `VerifyTOTP`)
+returns an `Authentication` value. It is a **security capability, not a lookup
+result**: `Level`, `Method`, and `AuthenticatedAt` directly drive step-up
+checks and per-workspace MFA enforcement. The host owns sessions and must:
+
+- store the `Authentication` server-side (or in a tamper-proof, signed and
+  encrypted cookie) and reconstruct it verbatim on each request;
+- never rebuild one from client-supplied fields and never upgrade `Level`
+  itself — only `VerifyTOTP`, a passkey, or SSO reauthentication may
+  produce AAL2;
+- treat `SecondFactorRequired: true` as a *pending* session: keep it out of
+  authorized paths, send the user to `VerifyTOTP`, and store the AAL2
+  `Authentication` that it returns;
+- terminate its own sessions for a user when `CompletePasswordReset`,
+  `DisableUser`, or `RevokeUserCredentials` fires — the library revokes PATs
+  and OAuth grants but cannot see host sessions.
+
+`RequireStepUp` accepts only interactive AAL2 authentications newer than
+`Config.StepUpMaxAge`; a PAT can never satisfy it.
+
 ### Minimal setup
 
 ```go

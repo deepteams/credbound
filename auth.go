@@ -17,8 +17,11 @@ func (m *Manager) Bootstrap(ctx context.Context, input BootstrapInput) (_ Authen
 	if err != nil {
 		return Authentication{}, Workspace{}, err
 	}
-	if strings.TrimSpace(input.DisplayName) == "" || strings.TrimSpace(input.WorkspaceName) == "" {
-		return Authentication{}, Workspace{}, fmt.Errorf("%w: display name and workspace name are required", ErrInvalidInput)
+	if strings.TrimSpace(input.DisplayName) == "" {
+		return Authentication{}, Workspace{}, &ValidationError{Field: "display_name", Rule: "required", Message: "display name is required"}
+	}
+	if strings.TrimSpace(input.WorkspaceName) == "" {
+		return Authentication{}, Workspace{}, &ValidationError{Field: "workspace_name", Rule: "required", Message: "workspace name is required"}
 	}
 	if err := m.validatePassword(ctx, input.Password); err != nil {
 		return Authentication{}, Workspace{}, err
@@ -99,7 +102,7 @@ func (m *Manager) CreateUser(ctx context.Context, actor Authentication, workspac
 		return User{}, err
 	}
 	if strings.TrimSpace(input.DisplayName) == "" {
-		return User{}, fmt.Errorf("%w: display name is required", ErrInvalidInput)
+		return User{}, &ValidationError{Field: "display_name", Rule: "required", Message: "display name is required"}
 	}
 	role, err := m.workspaceRoles.normalize(input.Role)
 	if err != nil {
@@ -344,10 +347,10 @@ func (m *Manager) requireActiveUser(ctx context.Context, userID string) error {
 func (m *Manager) validatePassword(ctx context.Context, password string) error {
 	length := len([]rune(password))
 	if length < m.minPasswordLen {
-		return fmt.Errorf("%w: password must contain at least %d characters", ErrInvalidInput, m.minPasswordLen)
+		return &ValidationError{Field: "password", Rule: "too_short", Message: fmt.Sprintf("password must contain at least %d characters", m.minPasswordLen)}
 	}
 	if length > 1024 {
-		return fmt.Errorf("%w: password cannot exceed 1024 characters", ErrInvalidInput)
+		return &ValidationError{Field: "password", Rule: "too_long", Message: "password cannot exceed 1024 characters"}
 	}
 	if m.passwordPolicy != nil {
 		if err := m.passwordPolicy.ValidatePassword(ctx, password); err != nil {
@@ -361,7 +364,7 @@ func validEmail(value string) (string, error) {
 	normalized := normalizeEmail(value)
 	parsed, err := mail.ParseAddress(normalized)
 	if err != nil || parsed.Address != normalized || len(normalized) > 320 {
-		return "", fmt.Errorf("%w: invalid email", ErrInvalidInput)
+		return "", &ValidationError{Field: "email", Rule: "format", Message: "invalid email address"}
 	}
 	return normalized, nil
 }

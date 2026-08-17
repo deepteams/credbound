@@ -324,6 +324,17 @@ func (h *Handler) userInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, info)
 }
 
+// Protect wraps next with bearer-token validation at the resource boundary.
+// resource is the canonical protected-resource identifier registered with the
+// manager, requiredScope the minimum scope for this route, and metadataURL the
+// absolute URL of the resource's protected-resource metadata document echoed
+// in WWW-Authenticate challenges. Mount it per route:
+//
+//	mux.Handle("/mcp", oauthhttp.Protect(manager,
+//		"https://api.example.com/mcp", // resource
+//		"mcp.read",                    // requiredScope
+//		"https://api.example.com/.well-known/oauth-protected-resource", // metadataURL
+//		mcpHandler))
 func Protect(manager *credbound.Manager, resource, requiredScope, metadataURL string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authentication, err := manager.AuthenticateOAuthAccessToken(r.Context(), resource, bearerToken(r))

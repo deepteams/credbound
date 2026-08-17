@@ -161,7 +161,7 @@ func (m *Manager) RegisterFromInvitation(ctx context.Context, raw string, input 
 	}
 	displayName := strings.TrimSpace(input.DisplayName)
 	if displayName == "" {
-		return Authentication{}, User{}, fmt.Errorf("%w: display name is required", ErrInvalidInput)
+		return Authentication{}, User{}, &ValidationError{Field: "display_name", Rule: "required", Message: "display name is required"}
 	}
 	if err := m.validatePassword(ctx, input.Password); err != nil {
 		return Authentication{}, User{}, err

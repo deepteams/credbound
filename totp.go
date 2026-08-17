@@ -11,6 +11,9 @@ import (
 const recoveryCodeCount = 10
 
 func (m *Manager) BeginTOTPEnrollment(ctx context.Context, actor Authentication) (_ TOTPEnrollment, err error) {
+	if err := m.requireTOTPProvider(); err != nil {
+		return TOTPEnrollment{}, err
+	}
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.totp.enroll.begin", started, err) }()
 	if err := m.requireRecentInteractive(ctx, actor); err != nil {
@@ -51,6 +54,9 @@ func (m *Manager) BeginTOTPEnrollment(ctx context.Context, actor Authentication)
 }
 
 func (m *Manager) ConfirmTOTPEnrollment(ctx context.Context, actor Authentication, code string) (_ []string, err error) {
+	if err := m.requireTOTPProvider(); err != nil {
+		return nil, err
+	}
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.totp.enroll.confirm", started, err) }()
 	if err := m.requireRecentInteractive(ctx, actor); err != nil {
@@ -98,6 +104,9 @@ func (m *Manager) ConfirmTOTPEnrollment(ctx context.Context, actor Authenticatio
 }
 
 func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code string) (_ Authentication, err error) {
+	if err := m.requireTOTPProvider(); err != nil {
+		return Authentication{}, err
+	}
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.totp.verify", started, err) }()
 	if actor.UserID == "" || !actor.Interactive() {
@@ -176,6 +185,9 @@ func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code str
 }
 
 func (m *Manager) DisableTOTP(ctx context.Context, actor Authentication, code string) (err error) {
+	if err := m.requireTOTPProvider(); err != nil {
+		return err
+	}
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.totp.disable", started, err) }()
 	promoted, err := m.VerifyTOTP(ctx, actor, code)
@@ -272,4 +284,14 @@ func normalizeRecoveryCode(code string) string {
 
 func (m *Manager) promoteTOTP(actor Authentication) Authentication {
 	return Authentication{UserID: actor.UserID, Method: MethodTOTP, Level: AAL2, AuthenticatedAt: m.now()}
+}
+
+// requireTOTPProvider gates the flows that need Config.TOTP; a manager built
+// without one supports every other capability and reports ErrNotSupported
+// here, mirroring the optional SCIM and OAuth stores.
+func (m *Manager) requireTOTPProvider() error {
+	if m.totp == nil {
+		return fmt.Errorf("%w: no TOTP provider configured", ErrNotSupported)
+	}
+	return nil
 }

@@ -29,7 +29,7 @@ type Store struct {
 	streamTimeout time.Duration
 }
 
-// Tx is the SQLite transaction capability exposed only during a Credbound
+// Tx is the PostgreSQL transaction capability exposed only during a Credbound
 // TransactionHook. SQL returns nil after the callback has completed.
 type Tx struct {
 	sqlTx atomic.Pointer[sql.Tx]
@@ -59,7 +59,7 @@ func (t *Tx) close() {
 	}
 }
 
-// TxFrom converts a generic Credbound transaction into the live SQLite
+// TxFrom converts a generic Credbound transaction into the live PostgreSQL
 // capability. It returns false for another store or an expired callback.
 func TxFrom(tx credbound.Tx) (*Tx, bool) {
 	handle, ok := tx.(*Tx)
@@ -75,6 +75,12 @@ func WithStreamTimeout(timeout time.Duration) Option {
 	return func(store *Store) { store.streamTimeout = timeout }
 }
 
+// New builds the PostgreSQL store from two views of the same database: a
+// *sql.DB used by the sqlc-generated queries for transactional mutations
+// (open one with pgx's stdlib.OpenDB or stdlib.OpenDBFromPool), and a pgx
+// RowQuerier used to stream paginated reads. In production pass a
+// *pgxpool.Pool as the RowQuerier — a single *pgx.Conn is not safe for
+// concurrent use.
 func New(database *sql.DB, rows RowQuerier, options ...Option) (*Store, error) {
 	if database == nil || rows == nil {
 		return nil, fmt.Errorf("%w: PostgreSQL database/sql and pgx row querier are required", credbound.ErrInvalidInput)

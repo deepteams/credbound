@@ -20,10 +20,18 @@ func main() {
 	code = strings.Replace(code, "package sqlite", "package postgresql", 1)
 	code = strings.Replace(code, `db "github.com/deepteams/credbound/internal/sqlc/sqlite"`, `db "github.com/deepteams/credbound/internal/sqlc/postgresql"`, 1)
 	code = strings.ReplaceAll(code, "credbound.StoreSQLite", "credbound.StorePostgreSQL")
+	code = strings.Replace(code, "// Tx is the SQLite transaction capability", "// Tx is the PostgreSQL transaction capability", 1)
+	code = strings.Replace(code, "into the live SQLite", "into the live PostgreSQL", 1)
 	code = strings.Replace(code, `"github.com/deepteams/credbound"`, `"github.com/deepteams/credbound"
 	"github.com/jackc/pgx/v5"`, 1)
 	code = strings.Replace(code, "type Store struct {\n\tdb            *sql.DB\n\tqueries", "type RowQuerier interface {\n\tQuery(context.Context, string, ...any) (pgx.Rows, error)\n}\n\ntype Store struct {\n\tdb *sql.DB\n\trows RowQuerier\n\tqueries", 1)
-	code = strings.Replace(code, "func New(database *sql.DB, options ...Option)", "func New(database *sql.DB, rows RowQuerier, options ...Option)", 1)
+	code = strings.Replace(code, "func New(database *sql.DB, options ...Option)", `// New builds the PostgreSQL store from two views of the same database: a
+// *sql.DB used by the sqlc-generated queries for transactional mutations
+// (open one with pgx's stdlib.OpenDB or stdlib.OpenDBFromPool), and a pgx
+// RowQuerier used to stream paginated reads. In production pass a
+// *pgxpool.Pool as the RowQuerier — a single *pgx.Conn is not safe for
+// concurrent use.
+func New(database *sql.DB, rows RowQuerier, options ...Option)`, 1)
 	code = strings.Replace(code, "if database == nil {", "if database == nil || rows == nil {", 1)
 	code = strings.Replace(code, "sqlite database is required", "PostgreSQL database/sql and pgx row querier are required", 1)
 	code = strings.Replace(code, "&Store{db: database, queries: db.New(database),", "&Store{db: database, rows: rows, queries: db.New(database),", 1)
