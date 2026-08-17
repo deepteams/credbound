@@ -23,6 +23,10 @@ type Config struct {
 	StepUpMaxAge   time.Duration
 	CeremonyTTL    time.Duration
 	MinPasswordLen int
+	// PasswordPolicy optionally vets candidate passwords beyond the built-in
+	// length rules (for example against a breached-password corpus). Nil
+	// keeps only the built-in validation.
+	PasswordPolicy PasswordPolicy
 	// MaxFailedLogins locks an account after that many consecutive password
 	// or TOTP failures. Zero keeps the default of 10; a negative value
 	// disables the built-in lockout for hosts that throttle upstream.
@@ -71,6 +75,7 @@ type Manager struct {
 	stepUpMaxAge         time.Duration
 	ceremonyTTL          time.Duration
 	minPasswordLen       int
+	passwordPolicy       PasswordPolicy
 	maxFailedLogins      int64
 	lockoutDuration      time.Duration
 	clock                func() time.Time
@@ -208,6 +213,7 @@ func New(cfg Config) (*Manager, error) {
 		stepUpMaxAge:         cfg.StepUpMaxAge,
 		ceremonyTTL:          cfg.CeremonyTTL,
 		minPasswordLen:       cfg.MinPasswordLen,
+		passwordPolicy:       cfg.PasswordPolicy,
 		maxFailedLogins:      int64(cfg.MaxFailedLogins),
 		lockoutDuration:      cfg.LockoutDuration,
 		clock:                cfg.Clock,

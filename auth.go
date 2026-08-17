@@ -20,7 +20,7 @@ func (m *Manager) Bootstrap(ctx context.Context, input BootstrapInput) (_ Authen
 	if strings.TrimSpace(input.DisplayName) == "" || strings.TrimSpace(input.WorkspaceName) == "" {
 		return Authentication{}, Workspace{}, fmt.Errorf("%w: display name and workspace name are required", ErrInvalidInput)
 	}
-	if err := m.validatePassword(input.Password); err != nil {
+	if err := m.validatePassword(ctx, input.Password); err != nil {
 		return Authentication{}, Workspace{}, err
 	}
 	hash, err := m.passwords.Hash(input.Password)
@@ -105,7 +105,7 @@ func (m *Manager) CreateUser(ctx context.Context, actor Authentication, workspac
 	if err != nil {
 		return User{}, err
 	}
-	if err := m.validatePassword(input.Password); err != nil {
+	if err := m.validatePassword(ctx, input.Password); err != nil {
 		return User{}, err
 	}
 	hash, err := m.passwords.Hash(input.Password)
@@ -246,7 +246,7 @@ func (m *Manager) ChangePassword(ctx context.Context, actor Authentication, curr
 	if err := m.requireRecentInteractive(ctx, actor); err != nil {
 		return err
 	}
-	if err := m.validatePassword(newPassword); err != nil {
+	if err := m.validatePassword(ctx, newPassword); err != nil {
 		return err
 	}
 	credential, err := m.store.PasswordByUserID(ctx, actor.UserID)
@@ -341,13 +341,18 @@ func (m *Manager) requireActiveUser(ctx context.Context, userID string) error {
 	return nil
 }
 
-func (m *Manager) validatePassword(password string) error {
+func (m *Manager) validatePassword(ctx context.Context, password string) error {
 	length := len([]rune(password))
 	if length < m.minPasswordLen {
 		return fmt.Errorf("%w: password must contain at least %d characters", ErrInvalidInput, m.minPasswordLen)
 	}
 	if length > 1024 {
 		return fmt.Errorf("%w: password cannot exceed 1024 characters", ErrInvalidInput)
+	}
+	if m.passwordPolicy != nil {
+		if err := m.passwordPolicy.ValidatePassword(ctx, password); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -416,7 +421,7 @@ func (m *Manager) recordAuthenticationFailure(ctx context.Context, userID, actio
 	}
 	if throttle.LockedUntil != nil && throttle.FailedAttempts == m.maxFailedLogins {
 		if meta, metaErr := m.newEventMeta(EventUserLocked, action, userID, "", event); metaErr == nil {
-			locked := UserLockedEvent{EventMeta: meta, UserID: userID, LockedUntil: *throttle.LockedUntil}
+			locked := UserLockedEvent{EventMeta: meta, UserID: userID, LockedUntil: *throttle.LockedUntil, Request: requestMetadataFromContext(ctx)}
 			m.events.emit(ctx, EventUserLocked, func(listener EventListener) error { return listener.OnUserLocked(ctx, locked) })
 		}
 	}

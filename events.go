@@ -341,6 +341,10 @@ type PasswordRehashedEvent struct {
 type AuthenticationEvent struct {
 	EventMeta
 	Authentication Authentication
+	// Request carries the client network context supplied by the host through
+	// WithRequestMetadata, so listeners can throttle or alert by address
+	// without re-reading the audit log.
+	Request RequestMetadata
 }
 
 type AuthenticationFailureEvent struct {
@@ -348,6 +352,10 @@ type AuthenticationFailureEvent struct {
 	Method AuthMethod
 	UserID string
 	Reason string
+	// Request carries the client network context supplied by the host through
+	// WithRequestMetadata, so listeners can throttle or alert by address
+	// without re-reading the audit log.
+	Request RequestMetadata
 }
 
 type StepUpDeniedEvent struct {
@@ -458,6 +466,10 @@ type UserLockedEvent struct {
 	EventMeta
 	UserID      string
 	LockedUntil time.Time
+	// Request carries the client network context supplied by the host through
+	// WithRequestMetadata, so listeners can throttle or alert by address
+	// without re-reading the audit log.
+	Request RequestMetadata
 }
 
 type PasswordResetRequestedEvent struct {
@@ -915,7 +927,7 @@ func (m *Manager) emitAuthenticationSucceeded(ctx context.Context, operation str
 	if err != nil {
 		return
 	}
-	event := AuthenticationEvent{EventMeta: meta, Authentication: cloneAuthentication(authentication)}
+	event := AuthenticationEvent{EventMeta: meta, Authentication: cloneAuthentication(authentication), Request: requestMetadataFromContext(ctx)}
 	m.events.emit(ctx, EventAuthenticationSucceeded, func(listener EventListener) error {
 		return listener.OnAuthenticationSucceeded(ctx, event)
 	})
@@ -926,7 +938,7 @@ func (m *Manager) emitAuthenticationFailed(ctx context.Context, operation string
 	if err != nil {
 		return
 	}
-	event := AuthenticationFailureEvent{EventMeta: meta, Method: method, UserID: userID, Reason: reason}
+	event := AuthenticationFailureEvent{EventMeta: meta, Method: method, UserID: userID, Reason: reason, Request: requestMetadataFromContext(ctx)}
 	m.events.emit(ctx, EventAuthenticationFailed, func(listener EventListener) error {
 		return listener.OnAuthenticationFailed(ctx, event)
 	})

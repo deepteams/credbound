@@ -188,6 +188,18 @@ type PasswordHasher interface {
 	Verify(string, string) (match bool, rehash bool, err error)
 }
 
+// PasswordPolicy lets the host reject candidate passwords beyond the built-in
+// length rules — typically against a breached-password corpus such as Have I
+// Been Pwned via k-anonymity, per NIST 800-63B. Return an error wrapping
+// ErrInvalidInput to reject the password; any other error is treated as an
+// infrastructure failure and aborts the operation. The policy runs on every
+// password acceptance path (bootstrap, user creation, change, reset, and
+// invitation registration) and always after the built-in length validation.
+// The candidate password must never be logged or persisted by implementations.
+type PasswordPolicy interface {
+	ValidatePassword(ctx context.Context, password string) error
+}
+
 type TOTPProvider interface {
 	Generate(accountName string) (secret string, uri string, err error)
 	Validate(code, secret string, at time.Time) (step int64, valid bool)

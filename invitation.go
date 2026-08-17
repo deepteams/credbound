@@ -163,7 +163,7 @@ func (m *Manager) RegisterFromInvitation(ctx context.Context, raw string, input 
 	if displayName == "" {
 		return Authentication{}, User{}, fmt.Errorf("%w: display name is required", ErrInvalidInput)
 	}
-	if err := m.validatePassword(input.Password); err != nil {
+	if err := m.validatePassword(ctx, input.Password); err != nil {
 		return Authentication{}, User{}, err
 	}
 	if _, lookupErr := m.store.UserByEmail(ctx, invitation.Email); lookupErr == nil {

@@ -103,6 +103,8 @@ BeginPasswordReset(ctx, email) (IssuedPasswordReset, error)
 CompletePasswordReset(ctx, resetToken, newPassword) (User, error)
 BeginEmailAuthentication(ctx, email) (IssuedEmailAuthentication, error)
 CompleteEmailAuthentication(ctx, linkToken) (Authentication, error)
+BeginEmailOTP(ctx, email) (IssuedEmailOTP, error)
+CompleteEmailOTP(ctx, continuation, code) (Authentication, error)
 RevokeUserCredentials(ctx, authn, TrustedRequest, userID) error
 
 BeginEmailAddition(ctx, authn, email) (IssuedEmailVerification, error)
@@ -221,6 +223,26 @@ without a password credential exactly like a wrong password. `ErrLocked` is
 returned only for an existing account; a host that relays it verbatim to an
 unauthenticated caller reveals that the account exists — prefer a neutral
 "try again later" message on that path.
+
+`BeginEmailOTP` issues an 8-digit single-use code bound to a sealed
+continuation that the host keeps on its side of the exchange and passes back
+to `CompleteEmailOTP` with the code the user typed. Ineligible addresses
+receive a well-formed decoy continuation with an empty `Code`. A wrong code
+counts toward the account lockout exactly like a wrong password; completion
+otherwise behaves like `CompleteEmailAuthentication` (AAL1, `MethodEmail`,
+second-factor reporting).
+
+`Config.PasswordPolicy` optionally vets candidate passwords beyond the
+built-in length rules on every acceptance path (bootstrap, user creation,
+change, reset, invitation registration); an error wrapping `ErrInvalidInput`
+rejects the password and any other error aborts the operation. The intended
+implementation checks a breached-password corpus (for example HIBP over
+k-anonymity).
+
+`AuthenticationEvent`, `AuthenticationFailureEvent`, and `UserLockedEvent`
+carry the `RequestMetadata` supplied through `WithRequestMetadata`, so
+listeners can throttle or alert by client address without re-reading the audit
+log.
 `CompletePasswordReset` atomically installs the password, revokes the user's
 PATs and OAuth grants, and clears the lockout counter; host-owned sessions must
 be terminated by the host alongside it.

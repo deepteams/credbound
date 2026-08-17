@@ -436,6 +436,14 @@ func TestMagicLinkAuthentication(t *testing.T) {
 	if err != nil || !mfaLogin.SecondFactorRequired {
 		t.Fatalf("second factor flag = %#v, %v", mfaLogin, err)
 	}
+	otpIssued, err := f.manager.BeginEmailOTP(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otpLogin, err := f.manager.CompleteEmailOTP(ctx, otpIssued.Continuation, otpIssued.Code)
+	if err != nil || !otpLogin.SecondFactorRequired {
+		t.Fatalf("OTP second factor flag = %#v, %v", otpLogin, err)
+	}
 
 	expired, err := f.manager.BeginEmailAuthentication(ctx, "root@example.com")
 	if err != nil {
@@ -650,6 +658,10 @@ func TestTokenForgeryAndDisabledUserPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	otp, err := f.manager.BeginEmailOTP(ctx, "member@example.com")
+	if err != nil || otp.Code == "" {
+		t.Fatalf("member OTP = %#v, %v", otp, err)
+	}
 	// A forged secret with a valid identifier is rejected.
 	if _, err := f.manager.CompletePasswordReset(ctx, forgeSecret(reset.Token), "some new password"); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("forged reset error = %v", err)
@@ -681,6 +693,12 @@ func TestTokenForgeryAndDisabledUserPaths(t *testing.T) {
 	}
 	if issued, err := f.manager.BeginEmailAuthentication(ctx, "member@example.com"); err != nil || issued.Token != "" {
 		t.Fatalf("link request for disabled user = %#v, %v", issued, err)
+	}
+	if _, err := f.manager.CompleteEmailOTP(ctx, otp.Continuation, otp.Code); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("OTP for disabled user error = %v", err)
+	}
+	if issued, err := f.manager.BeginEmailOTP(ctx, "member@example.com"); err != nil || issued.Code != "" || issued.Continuation == "" {
+		t.Fatalf("OTP request for disabled user = %#v, %v", issued, err)
 	}
 }
 
@@ -766,6 +784,10 @@ func TestHardeningAuditUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	otp, err := f.manager.BeginEmailOTP(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
 	invitation, err := f.manager.InviteToWorkspace(ctx, stepUp, workspace.ID, credbound.InviteToWorkspaceInput{
 		Email: "invitee@example.com", Role: credbound.RoleMember,
 	})
@@ -796,6 +818,42 @@ func TestHardeningAuditUnavailable(t *testing.T) {
 	if _, err := f.manager.CompleteEmailAuthentication(ctx, forgeSecret(link.Token)); !errors.Is(err, credbound.ErrAuditUnavailable) {
 		t.Fatalf("link forged audit failure = %v", err)
 	}
+	if _, err := f.manager.BeginEmailOTP(ctx, "unknown@example.com"); !errors.Is(err, credbound.ErrAuditUnavailable) {
+		t.Fatalf("OTP request audit failure = %v", err)
+	}
+	if _, err := f.manager.BeginEmailOTP(ctx, "root@example.com"); !errors.Is(err, credbound.ErrAuditUnavailable) {
+		t.Fatalf("OTP begin audit failure = %v", err)
+	}
+	if _, err := f.manager.CompleteEmailOTP(ctx, otp.Continuation, otp.Code); !errors.Is(err, credbound.ErrAuditUnavailable) {
+		t.Fatalf("OTP complete audit failure = %v", err)
+	}
+	if _, err := f.manager.CompleteEmailOTP(ctx, otp.Continuation, "00000000"); !errors.Is(err, credbound.ErrAuditUnavailable) && !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("OTP wrong-code audit failure = %v", err)
+	}
+	f.store.SetAuditFailure(nil)
+	decoy, err := f.manager.BeginEmailOTP(ctx, "ghost@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.CompleteEmailOTP(ctx, otp.Continuation, otp.Code); err != nil {
+		t.Fatalf("OTP baseline completion = %v", err)
+	}
+	expiredOTP, err := f.manager.BeginEmailOTP(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.store.SetAuditFailure(errors.New("disk full"))
+	if _, err := f.manager.CompleteEmailOTP(ctx, decoy.Continuation, "00000000"); !errors.Is(err, credbound.ErrAuditUnavailable) {
+		t.Fatalf("OTP decoy audit failure = %v", err)
+	}
+	if _, err := f.manager.CompleteEmailOTP(ctx, otp.Continuation, otp.Code); !errors.Is(err, credbound.ErrAuditUnavailable) {
+		t.Fatalf("OTP reuse audit failure = %v", err)
+	}
+	f.now = f.now.Add(15*time.Minute + 30*time.Second)
+	if _, err := f.manager.CompleteEmailOTP(ctx, expiredOTP.Continuation, expiredOTP.Code); !errors.Is(err, credbound.ErrAuditUnavailable) && !errors.Is(err, credbound.ErrExpired) {
+		t.Fatalf("OTP expired audit failure = %v", err)
+	}
+	f.now = f.now.Add(-(15*time.Minute + 30*time.Second))
 	if err := f.manager.RevokeUserCredentials(ctx, stepUp, credbound.TrustedRequest{}, ""); !errors.Is(err, credbound.ErrAuditUnavailable) {
 		t.Fatalf("revocation audit failure = %v", err)
 	}
@@ -1035,6 +1093,36 @@ func TestHardeningInfrastructureFailures(t *testing.T) {
 		t.Fatalf("invitation workspace lookup failure = %v", err)
 	}
 	fault.workspaceErr = nil
+
+	fault.userByEmailErr = boom
+	if _, err := manager.BeginEmailOTP(ctx, "root@example.com"); !errors.Is(err, boom) {
+		t.Fatalf("OTP user lookup failure = %v", err)
+	}
+	fault.userByEmailErr = nil
+	fault.emailsErr = boom
+	if _, err := manager.BeginEmailOTP(ctx, "root@example.com"); !errors.Is(err, boom) {
+		t.Fatalf("OTP email enumeration failure = %v", err)
+	}
+	fault.emailsErr = nil
+	freshOTP, err := f.manager.BeginEmailOTP(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fault.linkErr = boom
+	if _, err := manager.CompleteEmailOTP(ctx, freshOTP.Continuation, freshOTP.Code); !errors.Is(err, boom) {
+		t.Fatalf("OTP lookup failure = %v", err)
+	}
+	fault.linkErr = nil
+	fault.totpErr = boom
+	if _, err := manager.CompleteEmailOTP(ctx, freshOTP.Continuation, freshOTP.Code); !errors.Is(err, boom) {
+		t.Fatalf("OTP factor lookup failure = %v", err)
+	}
+	fault.totpErr = nil
+	fault.consumeLinkErr = credbound.ErrConflict
+	if _, err := manager.CompleteEmailOTP(ctx, freshOTP.Continuation, freshOTP.Code); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("OTP consume race = %v", err)
+	}
+	fault.consumeLinkErr = nil
 }
 
 func TestHardeningReadAuthorization(t *testing.T) {

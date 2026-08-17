@@ -12,8 +12,9 @@ be reimplemented in every project:
 - local password authentication;
 - WebAuthn passkeys;
 - TOTP second factor and recovery codes;
-- password reset and magic-link sign-in through single-use, expiring
-  email-proof tokens with enumeration-resistant initiation;
+- password reset, magic-link, and email OTP sign-in through single-use,
+  expiring email proofs with enumeration-resistant initiation;
+- an optional password policy port for breached-password (HIBP) vetting;
 - built-in account lockout after consecutive password or TOTP failures;
 - multiple verified email addresses per user, with one primary address;
 - transactional tracking of the latest authentication (`last_seen_at`);

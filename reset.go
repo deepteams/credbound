@@ -107,7 +107,7 @@ func (m *Manager) CompletePasswordReset(ctx context.Context, raw, newPassword st
 		}
 		return User{}, ErrInvalidCredentials
 	}
-	if err := m.validatePassword(newPassword); err != nil {
+	if err := m.validatePassword(ctx, newPassword); err != nil {
 		return User{}, err
 	}
 	user, err := m.store.UserByID(ctx, credential.UserID)

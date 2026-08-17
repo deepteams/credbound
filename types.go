@@ -166,6 +166,18 @@ type IssuedEmailAuthentication struct {
 	ExpiresAt time.Time
 }
 
+// IssuedEmailOTP carries the single-use numeric code exactly once, with the
+// sealed continuation the host must hand back to CompleteEmailOTP. Code is
+// empty when the address was not eligible; the host then sends no email but
+// answers the end user identically.
+type IssuedEmailOTP struct {
+	UserID       string
+	EmailID      string
+	Code         string
+	Continuation string
+	ExpiresAt    time.Time
+}
+
 type Workspace struct {
 	ID   string
 	Name string
