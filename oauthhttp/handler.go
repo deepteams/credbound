@@ -434,18 +434,39 @@ func bearerToken(r *http.Request) string {
 func bearerChallenge(metadataURL, scope, problem string) string {
 	parts := []string{}
 	if metadataURL != "" {
-		parts = append(parts, `resource_metadata="`+strings.ReplaceAll(metadataURL, `"`, ``)+`"`)
+		parts = append(parts, `resource_metadata=`+quoteAuthParam(metadataURL))
 	}
 	if scope != "" {
-		parts = append(parts, `scope="`+strings.ReplaceAll(scope, `"`, ``)+`"`)
+		parts = append(parts, `scope=`+quoteAuthParam(scope))
 	}
 	if problem != "" {
-		parts = append(parts, `error="`+problem+`"`)
+		parts = append(parts, `error=`+quoteAuthParam(problem))
 	}
 	if len(parts) == 0 {
 		return "Bearer"
 	}
 	return "Bearer " + strings.Join(parts, ", ")
+}
+
+// quoteAuthParam renders value as an RFC 9110 quoted-string for a
+// WWW-Authenticate challenge: double-quote and backslash are backslash-escaped
+// so a value carrying either (a resource_metadata URL with query parameters,
+// say) stays a single well-formed parameter instead of being silently mangled.
+// Control characters are dropped so nothing can break the header.
+func quoteAuthParam(value string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			continue
+		}
+		if r == '"' || r == '\\' {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, err error) {

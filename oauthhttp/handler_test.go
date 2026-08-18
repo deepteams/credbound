@@ -414,8 +414,18 @@ func TestHandlerAdditionalProtocolBranches(t *testing.T) {
 	if bearerToken(badBearer) != "" {
 		t.Fatal("Basic token accepted as bearer")
 	}
-	if bearerChallenge("", "", "") != "Bearer" || !strings.Contains(bearerChallenge("meta", "scope\"", "problem"), `scope="scope"`) {
-		t.Fatal("bearer challenge escaping failed")
+	if bearerChallenge("", "", "") != "Bearer" {
+		t.Fatal("empty bearer challenge should be bare")
+	}
+	// A quote is backslash-escaped, not stripped, so the value stays one
+	// well-formed quoted-string parameter (RFC 9110).
+	if got := bearerChallenge("https://rs.example/.well-known?x=1", "scope\"", "insufficient_scope"); !strings.Contains(got, `scope="scope\""`) ||
+		!strings.Contains(got, `resource_metadata="https://rs.example/.well-known?x=1"`) || !strings.Contains(got, `error="insufficient_scope"`) {
+		t.Fatalf("bearer challenge escaping failed: %q", got)
+	}
+	// A control character cannot break out of the header.
+	if strings.ContainsAny(bearerChallenge("a\r\nb", "", ""), "\r\n") {
+		t.Fatal("bearer challenge leaked a control character")
 	}
 	if _, ok := AuthenticationFromContext(httptest.NewRequest(http.MethodGet, "/", nil)); ok {
 		t.Fatal("empty request context contained OAuth authentication")
