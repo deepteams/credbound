@@ -52,6 +52,10 @@ type Store struct {
 	pats               map[string]credbound.PAT
 	patPrefixes        map[string]string
 	sessions           map[string]credbound.Session
+	// ceremonies records consumed single-use ceremony ids. It is deliberately
+	// outside the snapshot/restore cycle: a ceremony is burned by the commit
+	// attempt even when a hook rejects the transaction afterwards.
+	ceremonies         map[string]time.Time
 	domains            map[string]credbound.WorkspaceDomain
 	domainNames        map[string]string
 	scimConfigurations map[string]credbound.SCIMConfiguration
@@ -140,7 +144,8 @@ func New() *Store {
 		totp: make(map[string]credbound.TOTPFactor), recovery: make(map[string][]credbound.RecoveryCode),
 		passkeys: make(map[string]map[string]credbound.Passkey), pats: make(map[string]credbound.PAT),
 		patPrefixes: make(map[string]string), sessions: make(map[string]credbound.Session),
-		domains: make(map[string]credbound.WorkspaceDomain), domainNames: make(map[string]string), auditIDs: make(map[string]struct{}),
+		ceremonies: make(map[string]time.Time),
+		domains:    make(map[string]credbound.WorkspaceDomain), domainNames: make(map[string]string), auditIDs: make(map[string]struct{}),
 		auditHead: make([]byte, 32), throttles: make(map[string]credbound.LoginThrottle),
 		passwordResets: make(map[string]credbound.PasswordResetCredential),
 		emailAuths:     make(map[string]credbound.EmailAuthenticationCredential),
@@ -2629,6 +2634,18 @@ func (s *Store) restoreLocked(state storeState) {
 func (s *Store) prepareCommitLocked(commit credbound.Commit) (storeState, error) {
 	if err := s.canAudit(commit.Audit); err != nil {
 		return storeState{}, err
+	}
+	if commit.Ceremony != nil {
+		now := commit.Audit.OccurredAt
+		for id, expires := range s.ceremonies {
+			if expires.Before(now) {
+				delete(s.ceremonies, id)
+			}
+		}
+		if _, used := s.ceremonies[commit.Ceremony.ID]; used {
+			return storeState{}, credbound.ErrConflict
+		}
+		s.ceremonies[commit.Ceremony.ID] = commit.Ceremony.ExpiresAt
 	}
 	if commit.Transactional == nil {
 		return storeState{}, nil

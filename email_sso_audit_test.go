@@ -187,6 +187,11 @@ func TestSSOLinkLoginStepUpAndUnlink(t *testing.T) {
 	if err != nil || ssoAuth.Level != credbound.AAL2 || ssoAuth.UserID != authn.UserID {
 		t.Fatalf("SSO login = %#v, %v", ssoAuth, err)
 	}
+	// The ceremony is single use: replaying the same continuation and
+	// captured response can never authenticate again within the TTL.
+	if _, err := f.manager.FinishSSO(ctx, login.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("replayed SSO ceremony = %v", err)
+	}
 	user, err := f.store.UserByID(ctx, authn.UserID)
 	if err != nil || user.LastSeenAt == nil || !user.LastSeenAt.Equal(f.now) {
 		t.Fatalf("SSO last seen = %#v, %v", user.LastSeenAt, err)

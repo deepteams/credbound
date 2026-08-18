@@ -34,6 +34,11 @@ type CredboundAuditEvent struct {
 	Hash         []byte         `json:"hash"`
 }
 
+type CredboundConsumedCeremony struct {
+	ID        string    `json:"id"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
 type CredboundEmailAuthentication struct {
 	ID        string       `json:"id"`
 	UserID    string       `json:"user_id"`

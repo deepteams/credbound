@@ -1141,6 +1141,20 @@ func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error 
 	return err
 }
 
+const insertConsumedCeremony = `-- name: InsertConsumedCeremony :exec
+INSERT INTO credbound_consumed_ceremonies (id, expires_at) VALUES (?1, ?2)
+`
+
+type InsertConsumedCeremonyParams struct {
+	ID        string    `json:"id"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func (q *Queries) InsertConsumedCeremony(ctx context.Context, arg InsertConsumedCeremonyParams) error {
+	_, err := q.db.ExecContext(ctx, insertConsumedCeremony, arg.ID, arg.ExpiresAt)
+	return err
+}
+
 const insertEmailAuthentication = `-- name: InsertEmailAuthentication :exec
 INSERT INTO credbound_email_authentications (id, user_id, email_id, digest, created_at, expires_at, used_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)
 `
@@ -2396,6 +2410,15 @@ func (q *Queries) OAuthUseInitialAccessToken(ctx context.Context, arg OAuthUseIn
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const pruneConsumedCeremonies = `-- name: PruneConsumedCeremonies :exec
+DELETE FROM credbound_consumed_ceremonies WHERE expires_at < ?1
+`
+
+func (q *Queries) PruneConsumedCeremonies(ctx context.Context, expiresAt time.Time) error {
+	_, err := q.db.ExecContext(ctx, pruneConsumedCeremonies, expiresAt)
+	return err
 }
 
 const replacePassword = `-- name: ReplacePassword :execrows

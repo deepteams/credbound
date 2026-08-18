@@ -37,6 +37,20 @@ type Tx interface {
 type Commit struct {
 	Audit         AuditEvent
 	Transactional func(context.Context, Tx) error
+	// Ceremony, when set, marks the single-use ceremony that authorized
+	// this mutation as consumed in the same transaction: the store records
+	// the ceremony id and fails the whole commit with ErrConflict when it
+	// was already recorded, so a replayed ceremony can never commit twice.
+	// Records may be pruned once ExpiresAt has passed.
+	Ceremony *CeremonyConsumption
+}
+
+// CeremonyConsumption identifies a single-use ceremony continuation being
+// consumed by a Commit. ID is the UUIDv7 minted when the ceremony began and
+// ExpiresAt bounds how long the store must remember it.
+type CeremonyConsumption struct {
+	ID        string
+	ExpiresAt time.Time
 }
 
 // EventName is the stable, unversioned name of an event, such as

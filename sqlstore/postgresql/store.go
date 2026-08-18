@@ -1593,6 +1593,16 @@ func (s *Store) mutateIf(ctx context.Context, commit credbound.Commit, fn func(*
 	}
 	defer tx.Rollback()
 	q := s.queries.WithTx(tx)
+	if commit.Ceremony != nil {
+		// A single-use ceremony id commits at most once: the primary-key
+		// insert makes a replay fail the whole transaction with ErrConflict.
+		if err := q.PruneConsumedCeremonies(ctx, commit.Audit.OccurredAt); err != nil {
+			return mapError(err)
+		}
+		if err := q.InsertConsumedCeremony(ctx, db.InsertConsumedCeremonyParams{ID: commit.Ceremony.ID, ExpiresAt: commit.Ceremony.ExpiresAt}); err != nil {
+			return mapError(err)
+		}
+	}
 	changed, err := fn(q)
 	if err != nil {
 		return err

@@ -18,11 +18,25 @@ const (
 )
 
 type ssoContinuation struct {
+	// ID is the single-use ceremony identity consumed by the success
+	// commit; continuations sealed before ceremony ids existed carry none
+	// and stay bounded by the TTL alone.
+	ID                      string    `json:"id,omitempty"`
 	ProviderConfigurationID string    `json:"provider_configuration_id"`
 	Operation               string    `json:"operation"`
 	UserID                  string    `json:"user_id,omitempty"`
 	ExpiresAt               time.Time `json:"expires_at"`
 	Session                 []byte    `json:"session"`
+}
+
+// consumption reports the single-use ceremony this continuation carries,
+// or nil for a continuation sealed before ceremony ids existed, which stays
+// bounded by its TTL alone.
+func (c ssoContinuation) consumption() *CeremonyConsumption {
+	if c.ID == "" {
+		return nil
+	}
+	return &CeremonyConsumption{ID: c.ID, ExpiresAt: c.ExpiresAt}
 }
 
 // BeginSSO starts a sign-in ceremony with a registered provider and returns
@@ -69,8 +83,12 @@ func (m *Manager) beginSSO(ctx context.Context, actor Authentication, providerCo
 	if strings.TrimSpace(providerChallenge.RedirectURL) == "" || len(providerChallenge.Session) == 0 {
 		return SSOChallenge{}, fmt.Errorf("%w: SSO provider returned an incomplete challenge", ErrInvalidInput)
 	}
+	ceremonyID, err := m.newID()
+	if err != nil {
+		return SSOChallenge{}, err
+	}
 	state := ssoContinuation{
-		ProviderConfigurationID: providerConfigurationID, Operation: operation,
+		ID: ceremonyID, ProviderConfigurationID: providerConfigurationID, Operation: operation,
 		UserID: actor.UserID, ExpiresAt: m.now().Add(m.ceremonyTTL), Session: providerChallenge.Session,
 	}
 	continuation, err := m.encodeSSOContinuation(state)
@@ -164,7 +182,12 @@ func (m *Manager) FinishSSO(ctx context.Context, continuation string, response [
 	if err != nil {
 		return Authentication{}, err
 	}
-	if err := m.store.TouchSSO(ctx, user.ID, identity.ID, now, Commit{Audit: event}); err != nil {
+	if err := m.store.TouchSSO(ctx, user.ID, identity.ID, now, Commit{Audit: event, Ceremony: state.consumption()}); err != nil {
+		if errors.Is(err, ErrConflict) {
+			// The ceremony was already consumed: a replayed response can
+			// never commit twice, and answers like any invalid credential.
+			return Authentication{}, ErrInvalidCredentials
+		}
 		return Authentication{}, m.mapStoreError(ctx, "auth.sso.finish", err)
 	}
 	authentication := Authentication{UserID: user.ID, Method: MethodSSO, Level: AAL2, AuthenticatedAt: now}
@@ -272,7 +295,7 @@ func (m *Manager) finishSSOJIT(ctx context.Context, provider SSOProvider, state 
 	}
 	userChange := UserCreateChange{EventMeta: userMeta, User: user, Email: primaryEmail, Membership: membership}
 	linkChange := SSOLink{EventMeta: linkMeta, Identity: identity}
-	commit := Commit{Audit: event, Transactional: func(ctx context.Context, tx Tx) error {
+	commit := Commit{Audit: event, Ceremony: state.consumption(), Transactional: func(ctx context.Context, tx Tx) error {
 		if err := m.events.apply(ctx, "user.create", func(hook TransactionHook) error {
 			return hook.ApplyUserCreate(ctx, tx, userChange)
 		}); err != nil {
@@ -325,6 +348,7 @@ func (m *Manager) finishSSOLink(ctx context.Context, provider SSOProvider, state
 	commit := m.transactionalCommit(event, "sso.link", func(ctx context.Context, tx Tx, hook TransactionHook) error {
 		return hook.ApplySSOLink(ctx, tx, change)
 	})
+	commit.Ceremony = state.consumption()
 	if err := m.store.LinkSSO(ctx, identity, commit); err != nil {
 		return Authentication{}, m.mapStoreError(ctx, "auth.sso.link", err)
 	}

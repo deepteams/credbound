@@ -32,8 +32,10 @@ parses as a valid address, and dropped — never fatal — otherwise. Validation
 errors never include assertion XML.
 
 The adapter is stateless like `ssoadapter`: the AuthnRequest id travels as
-opaque `Session` bytes inside credbound's sealed continuation, which also
-bounds replay with the ceremony TTL. Static `MetadataXML` is the primary
+opaque `Session` bytes inside credbound's sealed continuation. Replay is not
+bounded by the ceremony TTL alone: every SSO continuation carries a
+single-use ceremony id that the success commit consumes atomically in the
+store, so a captured response can never complete the same ceremony twice. Static `MetadataXML` is the primary
 configuration path — parsed eagerly, no network dependency; a `MetadataURL`
 is supported for IdPs that rotate certificates frequently and is fetched
 lazily, once, over HTTPS with a 10-second timeout and a size cap, under the

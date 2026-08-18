@@ -41,6 +41,7 @@ Credbound provides a reusable, testable, transport-independent core.
 | PAT-002 | Multiplicity | A user may own multiple named PATs that can be revoked independently. |
 | PAT-003 | Visibility | Lists expose metadata, prefix, creation time, expiration, and latest use, but never the secret. |
 | PAT-004 | Scope enforcement | A PAT scope is either the `*` wildcard or a workspace permission string, validated at creation. The canonical permission authorization denies a scoped credential any permission outside its scopes, and the coarse role authorization requires the wildcard, so the member's role never widens a narrow token. |
+| SSO-007 | Single-use ceremony | Completing an SSO ceremony consumes its sealed continuation atomically with the success commit; replaying the continuation or a captured provider response within the TTL fails like an invalid credential. |
 | TENANT-001 | Isolation | Every resource-access authorization is evaluated for an explicit `workspace_id`. |
 | TENANT-002 | Workspace lifecycle | An AAL2 user can create a workspace and becomes its `admin`; authorized administrators can rename or disable it atomically. A disabled workspace denies every tenant-scoped capability. |
 | TENANT-003 | Membership lifecycle | Authorized administrators can add, suspend, reactivate, and remove local memberships. SCIM-managed memberships remain directory-owned and the last active workspace administrator cannot be removed, suspended, or demoted. |
