@@ -3,6 +3,7 @@ package githubadapter
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
@@ -118,6 +119,11 @@ type Provider struct {
 // clear text: credbound encrypts it with its AEAD seal.
 type session struct {
 	State string `json:"state"`
+	// Verifier is the PKCE code verifier whose S256 challenge Begin sent to
+	// the authorization endpoint. Empty only for a continuation sealed by a
+	// pre-PKCE Begin; Finish then omits code_verifier, matching the
+	// challenge-less authorization it belongs to.
+	Verifier string `json:"verifier,omitempty"`
 }
 
 // New validates the configuration and returns a Provider ready to register in
@@ -172,10 +178,11 @@ func (p *Provider) ConfigurationID() string { return p.configurationID }
 // Kind implements credbound.SSOProvider.
 func (p *Provider) Kind() credbound.SSOProviderKind { return credbound.SSOProviderGitHub }
 
-// Begin implements credbound.SSOProvider. It generates a fresh state, builds
-// the GitHub authorization URL (with allow_signup=false so the ceremony only
-// authenticates existing GitHub accounts), and returns the state as opaque
-// Session bytes for credbound to seal into its continuation.
+// Begin implements credbound.SSOProvider. It generates a fresh state and a
+// PKCE S256 challenge, builds the GitHub authorization URL (with
+// allow_signup=false so the ceremony only authenticates existing GitHub
+// accounts), and returns the state and verifier as opaque Session bytes for
+// credbound to seal into its continuation.
 //
 // A request with ForceReauthentication set fails with ErrStepUpUnsupported:
 // GitHub's authorization endpoint has no prompt/max_age equivalent, so the
@@ -189,16 +196,23 @@ func (p *Provider) Begin(_ context.Context, request credbound.SSORequest) (credb
 	if err != nil {
 		return credbound.SSOProviderChallenge{}, err
 	}
-	payload, err := json.Marshal(session{State: state})
+	verifier, err := randomToken()
+	if err != nil {
+		return credbound.SSOProviderChallenge{}, err
+	}
+	payload, err := json.Marshal(session{State: state, Verifier: verifier})
 	if err != nil {
 		return credbound.SSOProviderChallenge{}, fmt.Errorf("githubadapter: encode session: %w", err)
 	}
+	challenge := sha256.Sum256([]byte(verifier))
 	query := url.Values{
-		"client_id":    {p.clientID},
-		"redirect_uri": {p.redirectURL},
-		"scope":        {strings.Join(p.scopes, " ")},
-		"state":        {state},
-		"allow_signup": {"false"},
+		"client_id":             {p.clientID},
+		"redirect_uri":          {p.redirectURL},
+		"scope":                 {strings.Join(p.scopes, " ")},
+		"state":                 {state},
+		"allow_signup":          {"false"},
+		"code_challenge":        {base64.RawURLEncoding.EncodeToString(challenge[:])},
+		"code_challenge_method": {"S256"},
 	}
 	return credbound.SSOProviderChallenge{
 		RedirectURL: p.authorizeURL + "?" + query.Encode(),
@@ -239,7 +253,7 @@ func (p *Provider) Finish(ctx context.Context, sessionBytes, response []byte) (c
 	if code == "" {
 		return credbound.SSOClaims{}, errors.New("githubadapter: callback carries no authorization code")
 	}
-	accessToken, err := p.exchange(ctx, code)
+	accessToken, err := p.exchange(ctx, code, state.Verifier)
 	if err != nil {
 		return credbound.SSOClaims{}, err
 	}
@@ -270,15 +284,19 @@ func (p *Provider) Finish(ctx context.Context, sessionBytes, response []byte) (c
 	return claims, nil
 }
 
-// exchange redeems the authorization code at the token endpoint. GitHub
-// answers HTTP 200 even for protocol errors, carrying error/error_description
-// in the JSON body, so both channels are checked.
-func (p *Provider) exchange(ctx context.Context, code string) (string, error) {
+// exchange redeems the authorization code at the token endpoint, presenting
+// the PKCE verifier matching the challenge Begin sent. GitHub answers HTTP
+// 200 even for protocol errors, carrying error/error_description in the JSON
+// body, so both channels are checked.
+func (p *Provider) exchange(ctx context.Context, code, verifier string) (string, error) {
 	form := url.Values{
 		"client_id":     {p.clientID},
 		"client_secret": {p.clientSecret},
 		"code":          {code},
 		"redirect_uri":  {p.redirectURL},
+	}
+	if verifier != "" {
+		form.Set("code_verifier", verifier)
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, p.tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {

@@ -7,9 +7,9 @@
 // # Responsibilities
 //
 // The adapter owns the protocol exchange only: the authorization redirect
-// (with a random state and allow_signup=false), the code exchange at
-// GitHub's token endpoint, and the REST reads of GET /user and
-// GET /user/emails. Credbound keeps everything else — the sealed
+// (with a random state, a PKCE S256 challenge, and allow_signup=false), the
+// code exchange at GitHub's token endpoint (presenting the PKCE verifier),
+// and the REST reads of GET /user and GET /user/emails. Credbound keeps everything else — the sealed
 // continuation carrying the adapter's opaque session, ceremony TTL, identity
 // linking, persistence, audit, and revocation.
 //

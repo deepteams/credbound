@@ -2,6 +2,8 @@ package githubadapter
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -94,11 +96,28 @@ func TestBeginBuildsAuthorizationURL(t *testing.T) {
 	if s.State != params["state"] {
 		t.Fatal("session must carry the state from the URL")
 	}
+	if params["code_challenge_method"] != "S256" {
+		t.Fatalf("code_challenge_method = %q, want S256", params["code_challenge_method"])
+	}
+	if s.Verifier == "" {
+		t.Fatal("session must carry the PKCE verifier")
+	}
+	digest := sha256.Sum256([]byte(s.Verifier))
+	if params["code_challenge"] != base64.RawURLEncoding.EncodeToString(digest[:]) {
+		t.Fatal("code_challenge must be the S256 digest of the session verifier")
+	}
 
 	// Two ceremonies never share material.
-	_, second := begin(t, provider)
+	secondChallenge, second := begin(t, provider)
 	if second["state"] == params["state"] {
 		t.Fatal("state must be fresh per ceremony")
+	}
+	var secondSession session
+	if err := json.Unmarshal(secondChallenge.Session, &secondSession); err != nil {
+		t.Fatalf("second session must be JSON: %v", err)
+	}
+	if secondSession.Verifier == s.Verifier {
+		t.Fatal("verifier must be fresh per ceremony")
 	}
 }
 
@@ -139,6 +158,13 @@ func TestFinishHappyPathWithVerifiedPrimaryEmail(t *testing.T) {
 	if form.Get("redirect_uri") != "https://app.example.com/sso/callback" {
 		t.Fatalf("token redirect_uri = %q", form.Get("redirect_uri"))
 	}
+	var s session
+	if err := json.Unmarshal(challenge.Session, &s); err != nil {
+		t.Fatalf("session must be JSON: %v", err)
+	}
+	if got := form.Get("code_verifier"); got == "" || got != s.Verifier {
+		t.Fatalf("code_verifier = %q, want the session verifier", got)
+	}
 
 	user := github.userRequest()
 	if got := user.Header.Get("Authorization"); got != "Bearer gho_test-token" {
@@ -149,6 +175,30 @@ func TestFinishHappyPathWithVerifiedPrimaryEmail(t *testing.T) {
 	}
 	if got := user.Header.Get("X-GitHub-Api-Version"); got != apiVersion {
 		t.Fatalf("user X-GitHub-Api-Version = %q", got)
+	}
+}
+
+func TestFinishOmitsVerifierForPrePKCESession(t *testing.T) {
+	github := newTestGitHub(t)
+	provider := newTestProvider(t, github, nil)
+	challenge, params := begin(t, provider)
+
+	// A continuation sealed by a pre-PKCE Begin carries no verifier; the
+	// exchange must then omit code_verifier, matching the challenge-less
+	// authorization it belongs to.
+	var s session
+	if err := json.Unmarshal(challenge.Session, &s); err != nil {
+		t.Fatalf("session must be JSON: %v", err)
+	}
+	legacy, err := json.Marshal(session{State: s.State})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.Finish(context.Background(), legacy, callbackURL(params["state"])); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	if form := github.tokenRequest(); form.Has("code_verifier") {
+		t.Fatalf("legacy session must not send code_verifier: %v", form)
 	}
 }
 

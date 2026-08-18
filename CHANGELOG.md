@@ -9,6 +9,12 @@ breaking changes may land in any release and are called out explicitly.
 
 ### Security
 
+- `githubadapter` now runs PKCE (S256) end to end: `Begin` sends a
+  `code_challenge` and seals the verifier into the ceremony continuation,
+  and the code exchange presents `code_verifier`. GitHub recommends PKCE
+  for OAuth apps since July 2025; a continuation sealed by a pre-PKCE
+  `Begin` still completes without one.
+
 - `Authorize` and `AuthorizePermission` now reject a TOTP-pending context
   (`Authentication.SecondFactorRequired`) with `ErrStepUpRequired` in every
   workspace, so a first factor alone never authorizes workspace operations
