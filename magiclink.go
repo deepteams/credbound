@@ -163,12 +163,12 @@ func (m *Manager) CompleteEmailAuthentication(ctx context.Context, raw string) (
 
 // verifiedEmailID resolves the verified address record used by a magic link.
 func (m *Manager) verifiedEmailID(ctx context.Context, userID, address string) (string, error) {
-	for email, err := range m.store.Emails(ctx, userID, PageRequest{Limit: 100}) {
+	for email, err := range m.userEmails(ctx, userID) {
 		if err != nil {
 			return "", err
 		}
-		if email.Data != nil && email.Data.Address == address && email.Data.VerifiedAt != nil {
-			return email.Data.ID, nil
+		if email.Address == address && email.VerifiedAt != nil {
+			return email.ID, nil
 		}
 	}
 	return "", ErrNotFound

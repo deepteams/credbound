@@ -287,6 +287,35 @@ func (m *Manager) Emails(ctx context.Context, actor Authentication, userID strin
 	return m.store.Emails(ctx, userID, page)
 }
 
+// userEmails streams every email address of the user, following the store's
+// cursor across all pages. Internal predicates must range over this — not a
+// single fixed-limit page — so an account holding more addresses than one
+// page never has an address silently skipped.
+func (m *Manager) userEmails(ctx context.Context, userID string) iter.Seq2[EmailAddress, error] {
+	return func(yield func(EmailAddress, error) bool) {
+		cursor := ""
+		for {
+			next, more := "", false
+			for event, err := range m.store.Emails(ctx, userID, PageRequest{Cursor: cursor, Limit: 100}) {
+				if err != nil {
+					yield(EmailAddress{}, err)
+					return
+				}
+				if event.Data != nil && !yield(*event.Data, nil) {
+					return
+				}
+				if event.End != nil {
+					next, more = event.End.NextCursor, event.End.HasMore
+				}
+			}
+			if !more || next == "" {
+				return
+			}
+			cursor = next
+		}
+	}
+}
+
 // allowEmailIssuance enforces the per-address issuance cooldown. It returns
 // true when issuance is permitted — always so when the cooldown is disabled or
 // the store lacks the capability — and false when the address is still within

@@ -3,6 +3,7 @@ package credbound_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -567,5 +568,36 @@ func TestSSOAAL1WithoutAssurance(t *testing.T) {
 	signedIn, err := manager.FinishSSO(ctx, login.Continuation, []byte("valid"))
 	if err != nil || signedIn.Level != credbound.AAL1 {
 		t.Fatalf("unverified SSO sign-in level = %#v, %v", signedIn, err)
+	}
+}
+
+// TestManyEmailsPaginateInternally guards AUTH-006 for accounts holding more
+// addresses than one store page: magic-link issuance, invitation matching and
+// OIDC claims must follow the cursor across pages instead of silently
+// stopping after the first 100 addresses.
+func TestManyEmailsPaginateInternally(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	authn, _ := f.bootstrap(t)
+
+	last := ""
+	for index := range 105 {
+		last = fmt.Sprintf("alias-%03d@example.com", index)
+		stepUp := aal2(authn.UserID, f.now)
+		issued, err := f.manager.BeginEmailAddition(ctx, stepUp, last)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.manager.ConfirmEmail(ctx, issued.Token); err != nil {
+			t.Fatal(err)
+		}
+		f.now = f.now.Add(time.Second)
+	}
+	link, err := f.manager.BeginEmailAuthentication(ctx, last)
+	if err != nil || link.Token == "" {
+		t.Fatalf("magic link beyond the first email page = %#v, %v", link, err)
+	}
+	if _, err := f.manager.CompleteEmailAuthentication(ctx, link.Token); err != nil {
+		t.Fatalf("magic link completion = %v", err)
 	}
 }

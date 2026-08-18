@@ -87,6 +87,10 @@ breaking changes may land in any release and are called out explicitly.
 
 ### Fixed
 
+- Internal email predicates (magic-link issuance, invitation email
+  matching, OIDC UserInfo claims) now follow the store cursor across all
+  pages instead of reading a single fixed-limit page, so accounts holding
+  more than 100 addresses no longer see silent mismatches on the tail.
 - The generated PostgreSQL store no longer ships the SQLite package
   documentation or a dead `writeMu` field: the generator fails on unmatched
   replacements instead of silently skipping them.

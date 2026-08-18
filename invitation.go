@@ -351,11 +351,11 @@ func (m *Manager) usableInvitation(ctx context.Context, raw, action string) (Wor
 // ownsVerifiedEmail reports whether the user owns the address as a verified
 // email.
 func (m *Manager) ownsVerifiedEmail(ctx context.Context, userID, address string) (bool, error) {
-	for event, err := range m.store.Emails(ctx, userID, PageRequest{Limit: 100}) {
+	for email, err := range m.userEmails(ctx, userID) {
 		if err != nil {
 			return false, err
 		}
-		if event.Data != nil && event.Data.Address == address && event.Data.VerifiedAt != nil {
+		if email.Address == address && email.VerifiedAt != nil {
 			return true, nil
 		}
 	}

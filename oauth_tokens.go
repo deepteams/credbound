@@ -771,12 +771,12 @@ func (m *Manager) oauthPrimaryEmail(ctx context.Context, userID string) (string,
 		return "", nil
 	}
 	verified := false
-	for event, eventErr := range m.store.Emails(ctx, userID, PageRequest{Limit: 100}) {
-		if eventErr != nil {
+	for email, emailErr := range m.userEmails(ctx, userID) {
+		if emailErr != nil {
 			break
 		}
-		if event.Data != nil && event.Data.Primary && event.Data.Address == user.Email {
-			verified = event.Data.VerifiedAt != nil
+		if email.Primary && email.Address == user.Email {
+			verified = email.VerifiedAt != nil
 			break
 		}
 	}
