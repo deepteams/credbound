@@ -11,6 +11,7 @@
 package totpadapter
 
 import (
+	"crypto/subtle"
 	"errors"
 	"strings"
 	"time"
@@ -74,12 +75,32 @@ func (p *Provider) Generate(accountName string) (string, string, error) {
 }
 
 // Validate checks code against secret at the given time, accepting the
-// configured skew. It always returns the current time step so the store can
-// reject replays of an already-used step, and reports whether the code was
-// valid.
+// configured skew. It returns the time step of the code that actually matched
+// — not the wall-clock step — so the store's monotonic replay guard
+// (last_used_step) rejects reuse of a code across every step in the skew
+// window. Returning the wall-clock step would let a code accepted at an earlier
+// step be replayed at each later step still inside the window. The reported
+// step is meaningful only when the boolean is true; otherwise it is the current
+// wall-clock step.
 func (p *Provider) Validate(code, secret string, at time.Time) (int64, bool) {
-	valid, err := totp.ValidateCustom(code, secret, at, totp.ValidateOpts{
-		Period: p.period, Skew: p.skew, Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1,
-	})
-	return at.Unix() / int64(p.period), err == nil && valid
+	period := int64(p.period)
+	current := at.Unix() / period
+	skew := int64(p.skew)
+	opts := totp.ValidateOpts{Period: p.period, Skew: 0, Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1}
+	matched := false
+	step := current
+	// Scan the whole window without early exit so timing does not reveal which
+	// step matched.
+	for offset := -skew; offset <= skew; offset++ {
+		counter := current + offset
+		expected, err := totp.GenerateCodeCustom(secret, time.Unix(counter*period, 0), opts)
+		if err != nil {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(expected), []byte(code)) == 1 {
+			matched = true
+			step = counter
+		}
+	}
+	return step, matched
 }
