@@ -32,6 +32,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -390,9 +391,32 @@ func (v *JWTAssertionVerifier) fetchJWKS(ctx context.Context, rawURL string) ([]
 	return raw, nil
 }
 
+// publicIP reports whether a resolved address may be dialed for a jwks_uri
+// fetch. It applies the same block list as oauthhttp's SSRF-hardened metadata
+// fetcher: net.IP's IsPrivate covers only the RFC 1918 / ULA ranges, so CGNAT
+// (100.64.0.0/10), the reserved and TEST-NET blocks, and 240.0.0.0/4 must be
+// rejected explicitly or a jwks_uri resolving into them could reach internal
+// services (cloud metadata behind CGNAT, carrier-internal hosts).
 func publicIP(ip net.IP) bool {
-	return ip != nil && !ip.IsUnspecified() && !ip.IsLoopback() && !ip.IsPrivate() &&
-		!ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsMulticast()
+	address, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return false
+	}
+	address = address.Unmap()
+	if !address.IsValid() || !address.IsGlobalUnicast() || address.IsPrivate() || address.IsLoopback() ||
+		address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() || address.IsMulticast() || address.IsUnspecified() {
+		return false
+	}
+	for _, raw := range []string{
+		"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15",
+		"198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
+		"2001:db8::/32", "2001::/23", "fc00::/7", "fe80::/10", "ff00::/8",
+	} {
+		if netip.MustParsePrefix(raw).Contains(address) {
+			return false
+		}
+	}
+	return true
 }
 
 var _ credbound.OAuthClientAssertionVerifier = (*JWTAssertionVerifier)(nil)

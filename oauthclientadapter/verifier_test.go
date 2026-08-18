@@ -131,13 +131,20 @@ func TestJWTAssertionVerifierFetchPolicy(t *testing.T) {
 	if err := verifier.Verify(t.Context(), client, "audience", assertion, now); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("private JWKS address = %v", err)
 	}
-	for _, raw := range []string{"", "0.0.0.0", "127.0.0.1", "10.0.0.1", "169.254.1.1", "224.0.0.1", "::1"} {
+	for _, raw := range []string{
+		"", "0.0.0.0", "127.0.0.1", "10.0.0.1", "169.254.1.1", "224.0.0.1", "::1",
+		// Ranges net.IP.IsPrivate does not cover but SSRF must still block.
+		"100.64.0.1", "100.127.255.255", "192.0.0.1", "192.0.2.5", "198.18.0.1",
+		"198.51.100.7", "203.0.113.9", "240.0.0.1", "255.255.255.255", "2001:db8::1", "fe80::1",
+	} {
 		if publicIP(net.ParseIP(raw)) {
 			t.Fatalf("non-public address accepted: %q", raw)
 		}
 	}
-	if !publicIP(net.ParseIP("8.8.8.8")) {
-		t.Fatal("public address rejected")
+	for _, raw := range []string{"8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"} {
+		if !publicIP(net.ParseIP(raw)) {
+			t.Fatalf("public address rejected: %q", raw)
+		}
 	}
 }
 
