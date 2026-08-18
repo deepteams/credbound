@@ -204,8 +204,14 @@ func (c assertionClaims) hasAudience(expected string) bool {
 }
 
 func parseAssertion(raw string) (assertionHeader, assertionClaims, string, []byte, error) {
+	// Bound the input before splitting so a multi-megabyte assertion made of
+	// dots cannot force a huge allocation for a caller that has not already
+	// capped the request body.
+	if len(raw) > 64<<10 {
+		return assertionHeader{}, assertionClaims{}, "", nil, credbound.ErrInvalidCredentials
+	}
 	parts := strings.Split(raw, ".")
-	if len(parts) != 3 || len(raw) > 64<<10 {
+	if len(parts) != 3 {
 		return assertionHeader{}, assertionClaims{}, "", nil, credbound.ErrInvalidCredentials
 	}
 	decode := func(value string, destination any) error {
