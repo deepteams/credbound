@@ -767,6 +767,27 @@ func (m *Manager) newOAuthClient(issuer OAuthIssuer, source OAuthClientSource, i
 	if err != nil {
 		return OAuthClient{}, "", err
 	}
+	ccResources, err := normalizeClientCredentialsResources(input.ClientCredentialsResources)
+	if err != nil {
+		return OAuthClient{}, "", err
+	}
+	// client_credentials never derives from client resolution alone: only an
+	// administrator pre-registering the client may grant it, and the grant is
+	// meaningless without an explicit resource allowlist and a registered
+	// scope ceiling (an unrestricted scope list must not mean "everything").
+	if slices.Contains(grants, "client_credentials") {
+		if source != OAuthClientPreRegistered {
+			return OAuthClient{}, "", fmt.Errorf("%w: client_credentials requires a pre-registered client", ErrInvalidInput)
+		}
+		if len(scopes) == 0 {
+			return OAuthClient{}, "", fmt.Errorf("%w: client_credentials requires registered scopes", ErrInvalidInput)
+		}
+		if len(ccResources) == 0 {
+			return OAuthClient{}, "", fmt.Errorf("%w: client_credentials requires a resource allowlist", ErrInvalidInput)
+		}
+	} else if len(ccResources) > 0 {
+		return OAuthClient{}, "", fmt.Errorf("%w: a resource allowlist requires the client_credentials grant", ErrInvalidInput)
+	}
 	// Without sector_identifier_uri support, an OIDC issuer can only provide a
 	// stable pairwise subject when every redirect URI belongs to one host. This
 	// must also cover clients with an empty (unrestricted) registered scope list
@@ -811,7 +832,8 @@ func (m *Manager) newOAuthClient(issuer OAuthIssuer, source OAuthClientSource, i
 		ApplicationType: input.ApplicationType, RedirectURIs: redirects,
 		SectorIdentifier: sectorIdentifier,
 		GrantTypes:       grants, ResponseTypes: responses, Scopes: scopes,
-		TokenEndpointAuthMethod: method, JWKSURI: input.JWKSURI,
+		ClientCredentialsResources: ccResources,
+		TokenEndpointAuthMethod:    method, JWKSURI: input.JWKSURI,
 		JWKS: slices.Clone(input.JWKS), Trusted: input.Trusted && source == OAuthClientPreRegistered,
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -1021,6 +1043,27 @@ func validateIssuerURL(raw string) (string, error) {
 	return strings.TrimSuffix(value.String(), "/"), nil
 }
 
+// normalizeClientCredentialsResources validates and deduplicates the resource
+// URIs a client_credentials client may target. Each entry must be a valid
+// resource URL; the list is bounded to keep the allowlist reviewable.
+func normalizeClientCredentialsResources(raw []string) ([]string, error) {
+	if len(raw) > 32 {
+		return nil, fmt.Errorf("%w: at most 32 client_credentials resources", ErrInvalidInput)
+	}
+	result := make([]string, 0, len(raw))
+	for _, entry := range raw {
+		value, err := validateResourceURL(entry)
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid client_credentials resource", ErrInvalidInput)
+		}
+		if !slices.Contains(result, value) {
+			result = append(result, value)
+		}
+	}
+	slices.Sort(result)
+	return result, nil
+}
+
 func validateResourceURL(raw string) (string, error) {
 	value, err := validatePublicHTTPSURL(raw, false)
 	if err != nil || value.RawQuery != "" {
@@ -1190,15 +1233,16 @@ func oauthScopeDefinition(definitions []OAuthScopeDefinition, name string) (OAut
 
 func oauthClientMetadataHash(client OAuthClient) []byte {
 	value := struct {
-		ClientID, Name, ApplicationType, AuthMethod, JWKSURI, SectorIdentifier string
-		RedirectURIs, GrantTypes, ResponseTypes, Scopes                        []string
-		JWKS                                                                   json.RawMessage
+		ClientID, Name, ApplicationType, AuthMethod, JWKSURI, SectorIdentifier      string
+		RedirectURIs, GrantTypes, ResponseTypes, Scopes, ClientCredentialsResources []string
+		JWKS                                                                        json.RawMessage
 	}{
 		ClientID: client.ClientID, Name: client.Name, ApplicationType: string(client.ApplicationType),
 		AuthMethod: string(client.TokenEndpointAuthMethod), JWKSURI: client.JWKSURI,
 		SectorIdentifier: client.SectorIdentifier,
 		RedirectURIs:     client.RedirectURIs, GrantTypes: client.GrantTypes,
-		ResponseTypes: client.ResponseTypes, Scopes: client.Scopes, JWKS: client.JWKS,
+		ResponseTypes: client.ResponseTypes, Scopes: client.Scopes,
+		ClientCredentialsResources: client.ClientCredentialsResources, JWKS: client.JWKS,
 	}
 	payload, _ := json.Marshal(value)
 	sum := sha256.Sum256(payload)

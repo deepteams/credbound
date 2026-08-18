@@ -835,6 +835,7 @@ func cloneOAuthClient(v credbound.OAuthClient) credbound.OAuthClient {
 	v.GrantTypes = slices.Clone(v.GrantTypes)
 	v.ResponseTypes = slices.Clone(v.ResponseTypes)
 	v.Scopes = slices.Clone(v.Scopes)
+	v.ClientCredentialsResources = slices.Clone(v.ClientCredentialsResources)
 	v.JWKS = slices.Clone(v.JWKS)
 	v.SecretDigest = slices.Clone(v.SecretDigest)
 	v.MetadataHash = slices.Clone(v.MetadataHash)

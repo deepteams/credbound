@@ -996,7 +996,9 @@ func TestOAuthClientCredentials(t *testing.T) {
 	}
 	client, err := f.manager.PreRegisterOAuthClient(ctx, root, credbound.TrustedRequest{Local: true}, issuer.ID, credbound.OAuthClientRegistrationInput{
 		Name: "Service", ApplicationType: credbound.OAuthApplicationWeb, RedirectURIs: []string{"https://svc.example.com/cb"},
-		GrantTypes: []string{"client_credentials"}, Scopes: []string{"documents.read"}, TokenEndpointAuthMethod: credbound.OAuthAuthClientSecretBasic,
+		GrantTypes: []string{"client_credentials"}, Scopes: []string{"documents.read"},
+		ClientCredentialsResources: []string{resource.Resource},
+		TokenEndpointAuthMethod:    credbound.OAuthAuthClientSecretBasic,
 	})
 	if err != nil || client.ClientSecret == "" {
 		t.Fatalf("client = %#v, %v", client, err)
@@ -1013,6 +1015,24 @@ func TestOAuthClientCredentials(t *testing.T) {
 		Issuer: issuer.Issuer, ClientID: client.Client.ClientID, ClientSecret: client.ClientSecret, Resource: resource.Resource, Scopes: []string{"documents.write"},
 	}); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("unregistered scope = %v", err)
+	}
+	// A resource outside the client's allowlist is refused even when it lives
+	// under the same issuer: another tenant's resource is never reachable.
+	otherWorkspace, err := f.manager.CreateWorkspace(ctx, root, credbound.CreateWorkspaceInput{Name: "Globex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherResource, err := f.manager.CreateOAuthProtectedResource(ctx, root, otherWorkspace.ID, credbound.CreateOAuthProtectedResourceInput{
+		IssuerID: issuer.ID, Resource: "https://mcp.example.com/workspaces/globex",
+		Scopes: []credbound.OAuthScopeDefinition{{Name: "documents.read", Description: "Read", Permissions: []credbound.WorkspacePermission{credbound.PermissionWorkspaceAccess}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.IssueOAuthClientCredentials(ctx, credbound.OAuthClientCredentialsInput{
+		Issuer: issuer.Issuer, ClientID: client.Client.ClientID, ClientSecret: client.ClientSecret, Resource: otherResource.Resource,
+	}); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("cross-workspace resource = %v", err)
 	}
 
 	// The happy path issues a Bearer token with no refresh token.

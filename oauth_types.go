@@ -132,13 +132,19 @@ type OAuthClient struct {
 	RedirectURIs    []string
 	// SectorIdentifier is the single redirect-URI host used to derive
 	// pairwise OIDC subjects.
-	SectorIdentifier        string
-	GrantTypes              []string
-	ResponseTypes           []string
-	Scopes                  []string
-	TokenEndpointAuthMethod OAuthTokenEndpointAuthMethod
-	JWKSURI                 string
-	JWKS                    json.RawMessage
+	SectorIdentifier string
+	GrantTypes       []string
+	ResponseTypes    []string
+	Scopes           []string
+	// ClientCredentialsResources is the explicit allowlist of protected
+	// resource URIs the client may target with the client_credentials grant.
+	// Resolving a client never authorizes it: a machine-to-machine token is
+	// only minted for a resource named here, and only for a pre-registered
+	// client with a non-empty registered scope list.
+	ClientCredentialsResources []string
+	TokenEndpointAuthMethod    OAuthTokenEndpointAuthMethod
+	JWKSURI                    string
+	JWKS                       json.RawMessage
 	// Trusted may only be set on pre-registered clients; CIMD and DCR
 	// clients are never trusted.
 	Trusted      bool
@@ -416,16 +422,21 @@ type UpdateOAuthIssuerInput struct {
 // authorization_code with code; Trusted is honored only for
 // pre-registration.
 type OAuthClientRegistrationInput struct {
-	Name                    string
-	ApplicationType         OAuthApplicationType
-	RedirectURIs            []string
-	GrantTypes              []string
-	ResponseTypes           []string
-	Scopes                  []string
-	TokenEndpointAuthMethod OAuthTokenEndpointAuthMethod
-	JWKSURI                 string
-	JWKS                    json.RawMessage
-	Trusted                 bool
+	Name            string
+	ApplicationType OAuthApplicationType
+	RedirectURIs    []string
+	GrantTypes      []string
+	ResponseTypes   []string
+	Scopes          []string
+	// ClientCredentialsResources allowlists the protected resource URIs a
+	// client_credentials client may target. The grant is pre-registration
+	// only and requires both this list and Scopes to be non-empty; the field
+	// is rejected without the grant.
+	ClientCredentialsResources []string
+	TokenEndpointAuthMethod    OAuthTokenEndpointAuthMethod
+	JWKSURI                    string
+	JWKS                       json.RawMessage
+	Trusted                    bool
 }
 
 // CreateOAuthInitialAccessTokenInput describes a protected-DCR bootstrap
@@ -458,9 +469,10 @@ type BeginOAuthAuthorizationInput struct {
 }
 
 // OAuthClientCredentialsInput authenticates a confidential client and requests
-// a machine-to-machine access token bound to a protected resource. Scopes may
-// be empty to receive every non-reserved scope the resource defines that the
-// client is registered for.
+// a machine-to-machine access token bound to a protected resource. The
+// resource must appear in the client's ClientCredentialsResources allowlist.
+// Scopes may be empty to receive every non-reserved scope the client is
+// registered for that the resource defines.
 type OAuthClientCredentialsInput struct {
 	Issuer              string
 	ClientID            string

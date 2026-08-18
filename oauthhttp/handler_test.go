@@ -474,7 +474,9 @@ func TestHandlerClientCredentials(t *testing.T) {
 	f := newHandlerFixture(t)
 	client, err := f.manager.PreRegisterOAuthClient(t.Context(), f.actor, credbound.TrustedRequest{Local: true}, f.issuerID, credbound.OAuthClientRegistrationInput{
 		Name: "Service", ApplicationType: credbound.OAuthApplicationWeb, RedirectURIs: []string{"https://svc.example.com/cb"},
-		GrantTypes: []string{"client_credentials"}, Scopes: []string{"documents.read"}, TokenEndpointAuthMethod: credbound.OAuthAuthClientSecretBasic,
+		GrantTypes: []string{"client_credentials"}, Scopes: []string{"documents.read"},
+		ClientCredentialsResources: []string{testResource},
+		TokenEndpointAuthMethod:    credbound.OAuthAuthClientSecretBasic,
 	})
 	if err != nil || client.ClientSecret == "" {
 		t.Fatalf("client = %#v, %v", client, err)

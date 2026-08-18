@@ -97,12 +97,18 @@ func (m *Manager) IssueOAuthClientCredentials(ctx context.Context, input OAuthCl
 	if err != nil {
 		return OAuthTokenResponse{}, err
 	}
-	if client.TokenEndpointAuthMethod == OAuthAuthNone || !slices.Contains(client.GrantTypes, "client_credentials") {
+	// Belt and braces with newOAuthClient: only an administratively
+	// pre-registered confidential client holds this grant, and only for the
+	// resources an administrator explicitly allowlisted.
+	if client.TokenEndpointAuthMethod == OAuthAuthNone || client.Source != OAuthClientPreRegistered || !slices.Contains(client.GrantTypes, "client_credentials") {
 		return OAuthTokenResponse{}, ErrForbidden
 	}
 	resourceURL, err := validateResourceURL(input.Resource)
 	if err != nil {
 		return OAuthTokenResponse{}, err
+	}
+	if !slices.Contains(client.ClientCredentialsResources, resourceURL) {
+		return OAuthTokenResponse{}, ErrForbidden
 	}
 	resource, err := store.OAuthProtectedResourceByURI(ctx, resourceURL)
 	if err != nil || resource.IssuerID != issuer.ID || resource.DisabledAt != nil {
@@ -142,7 +148,9 @@ func (m *Manager) IssueOAuthClientCredentials(ctx context.Context, input OAuthCl
 
 // clientCredentialsScopes resolves the scopes a client-credentials token may
 // carry: non-reserved scopes the resource defines and the client is registered
-// for. An empty request grants every eligible resource scope.
+// for. The registered scope list is the ceiling — newOAuthClient guarantees it
+// is non-empty for this grant, so an empty request grants the intersection of
+// the registered scopes and the resource's, never everything.
 func clientCredentialsScopes(client OAuthClient, resource OAuthProtectedResource, requested []string) ([]string, error) {
 	allowed := func(scope string) bool {
 		if oauthReservedScope(scope) {
@@ -151,7 +159,7 @@ func clientCredentialsScopes(client OAuthClient, resource OAuthProtectedResource
 		if _, ok := oauthScopeDefinition(resource.Scopes, scope); !ok {
 			return false
 		}
-		return len(client.Scopes) == 0 || slices.Contains(client.Scopes, scope)
+		return slices.Contains(client.Scopes, scope)
 	}
 	if len(requested) == 0 {
 		granted := make([]string, 0, len(resource.Scopes))
@@ -352,7 +360,7 @@ func (m *Manager) authenticateOAuthClientToken(ctx context.Context, store OAuthS
 		return OAuthAuthentication{}, ErrInvalidCredentials
 	}
 	client, err := store.OAuthClientByID(ctx, token.ClientRecordID)
-	if err != nil || client.DisabledAt != nil {
+	if err != nil || client.DisabledAt != nil || client.IssuerID != token.IssuerID || client.Source != OAuthClientPreRegistered {
 		return OAuthAuthentication{}, ErrInvalidCredentials
 	}
 	issuer, err := store.OAuthIssuerByID(ctx, token.IssuerID)
@@ -361,6 +369,11 @@ func (m *Manager) authenticateOAuthClientToken(ctx context.Context, store OAuthS
 	}
 	resource, err := store.OAuthProtectedResourceByID(ctx, token.ResourceID)
 	if err != nil || resource.DisabledAt != nil || resource.IssuerID != issuer.ID || resource.WorkspaceID != token.WorkspaceID {
+		return OAuthAuthentication{}, ErrInvalidCredentials
+	}
+	// An administrator shrinking the allowlist retires outstanding tokens for
+	// the removed resource on their next use.
+	if !slices.Contains(client.ClientCredentialsResources, resource.Resource) {
 		return OAuthAuthentication{}, ErrInvalidCredentials
 	}
 	if resourceURI != "" {

@@ -233,11 +233,54 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 		}(), false},
 		{func() OAuthClientRegistrationInput { v := base; v.JWKSURI = "http://keys.example.com"; return v }(), false},
 		{func() OAuthClientRegistrationInput { v := base; v.JWKS = json.RawMessage(`{`); return v }(), false},
+		// client_credentials is pre-registration only: a DCR client cannot
+		// self-declare it, even as a confidential private_key_jwt client with
+		// scopes and an allowlist.
+		{func() OAuthClientRegistrationInput {
+			v := base
+			v.GrantTypes = []string{"client_credentials"}
+			v.TokenEndpointAuthMethod, v.JWKS = OAuthAuthPrivateKeyJWT, json.RawMessage(`{"keys":[]}`)
+			v.Scopes = []string{"documents.read"}
+			v.ClientCredentialsResources = []string{"https://mcp.example.com/acme"}
+			return v
+		}(), false},
+		// An allowlist without the grant is rejected.
+		{func() OAuthClientRegistrationInput {
+			v := base
+			v.ClientCredentialsResources = []string{"https://mcp.example.com/acme"}
+			return v
+		}(), false},
 	}
 	for _, test := range invalidClients {
 		if _, _, err := manager.newOAuthClient(issuer, OAuthClientDCR, test.input, test.allowSecret); err == nil {
 			t.Fatalf("invalid client accepted: %#v", test.input)
 		}
+	}
+	// CIMD resolution can never mint a client_credentials client either.
+	cimdCC := base
+	cimdCC.GrantTypes = []string{"client_credentials"}
+	cimdCC.TokenEndpointAuthMethod, cimdCC.JWKS = OAuthAuthPrivateKeyJWT, json.RawMessage(`{"keys":[]}`)
+	cimdCC.Scopes = []string{"documents.read"}
+	cimdCC.ClientCredentialsResources = []string{"https://mcp.example.com/acme"}
+	if _, _, err := manager.newOAuthClient(issuer, OAuthClientCIMD, cimdCC, false); err == nil {
+		t.Fatal("CIMD client_credentials client accepted")
+	}
+	// Pre-registration still requires registered scopes and an allowlist.
+	for _, mutate := range []func(*OAuthClientRegistrationInput){
+		func(v *OAuthClientRegistrationInput) { v.Scopes = nil },
+		func(v *OAuthClientRegistrationInput) { v.ClientCredentialsResources = nil },
+		func(v *OAuthClientRegistrationInput) {
+			v.ClientCredentialsResources = []string{"http://plain.example.com"}
+		},
+	} {
+		v := cimdCC
+		mutate(&v)
+		if _, _, err := manager.newOAuthClient(issuer, OAuthClientPreRegistered, v, true); err == nil {
+			t.Fatalf("under-specified client_credentials client accepted: %#v", v)
+		}
+	}
+	if cc, _, err := manager.newOAuthClient(issuer, OAuthClientPreRegistered, cimdCC, true); err != nil || len(cc.ClientCredentialsResources) != 1 {
+		t.Fatalf("pre-registered client_credentials client = %#v, %v", cc, err)
 	}
 	confidential := base
 	confidential.TokenEndpointAuthMethod = OAuthAuthClientSecretBasic
