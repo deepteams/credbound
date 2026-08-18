@@ -5,8 +5,8 @@
 // event atomically with the change.
 //
 // Open the database with the modernc.org/sqlite driver using a DSN that
-// carries "_pragma=foreign_keys(1)" and "_texttotime=1" (see New for why
-// the store silently relies on both), apply the schema from the module's
+// carries "_pragma=foreign_keys(1)" and "_texttotime=1" (New probes both
+// and rejects a misconfigured DSN), apply the schema from the module's
 // migrations directory, and wire the store into credbound.Config.Store:
 //
 //	db, err := sql.Open("sqlite", "file:auth.db?_pragma=foreign_keys(1)&_texttotime=1")
@@ -98,15 +98,16 @@ func WithStreamTimeout(timeout time.Duration) Option {
 }
 
 // New wraps an already-opened SQLite database. The store issues no PRAGMAs
-// itself and silently relies on the connection being opened with the
-// modernc.org/sqlite driver and a DSN carrying "_pragma=foreign_keys(1)"
-// (referential integrity, which the revocation cascades depend on) and
-// "_texttotime=1" (TEXT timestamp scanning):
+// itself: the connection must be opened with the modernc.org/sqlite driver
+// and a DSN carrying "_pragma=foreign_keys(1)" (referential integrity,
+// which the revocation cascades depend on) and "_texttotime=1" (TEXT
+// timestamp scanning):
 //
 //	sql.Open("sqlite", "file:auth.db?_pragma=foreign_keys(1)&_texttotime=1")
 //
-// Omitting either parameter corrupts behavior quietly rather than failing
-// construction.
+// New probes the connection and reports ErrInvalidInput when either
+// parameter is missing, so a misconfigured DSN fails construction instead
+// of corrupting behavior quietly at runtime.
 func New(database *sql.DB, options ...Option) (*Store, error) {
 	if database == nil {
 		return nil, fmt.Errorf("%w: sqlite database is required", credbound.ErrInvalidInput)
@@ -118,7 +119,29 @@ func New(database *sql.DB, options ...Option) (*Store, error) {
 	if store.streamTimeout <= 0 {
 		return nil, fmt.Errorf("%w: stream timeout must be positive", credbound.ErrInvalidInput)
 	}
+	if err := verifyConnection(database); err != nil {
+		return nil, err
+	}
 	return store, nil
+}
+
+// verifyConnection probes the DSN parameters the store depends on.
+// foreign_keys is per-connection in SQLite, so only a DSN pragma — applied
+// by the driver to every pooled connection — makes the check meaningful
+// beyond the probed connection.
+func verifyConnection(database *sql.DB) error {
+	var enforced int
+	if err := database.QueryRow("PRAGMA foreign_keys").Scan(&enforced); err != nil {
+		return fmt.Errorf("probe sqlite foreign_keys: %w", err)
+	}
+	if enforced != 1 {
+		return fmt.Errorf("%w: the sqlite DSN must carry _pragma=foreign_keys(1)", credbound.ErrInvalidInput)
+	}
+	var probe time.Time
+	if err := database.QueryRow("SELECT CAST('2000-01-02 03:04:05' AS TEXT)").Scan(&probe); err != nil {
+		return fmt.Errorf("%w: the sqlite DSN must carry _texttotime=1", credbound.ErrInvalidInput)
+	}
+	return nil
 }
 
 // Bootstrap atomically creates the first user with its primary email,

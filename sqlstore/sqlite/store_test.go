@@ -564,6 +564,17 @@ func TestNewValidationAndContextCancellation(t *testing.T) {
 	if _, err := sqlitestore.New(database, sqlitestore.WithStreamTimeout(0)); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid timeout error = %v", err)
 	}
+	if _, err := sqlitestore.New(database); !errors.Is(err, credbound.ErrInvalidInput) || !strings.Contains(err.Error(), "foreign_keys") {
+		t.Fatalf("missing foreign_keys pragma error = %v", err)
+	}
+	noTextToTime, err := sql.Open("sqlite", "file:validation_fk?mode=memory&cache=shared&_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer noTextToTime.Close()
+	if _, err := sqlitestore.New(noTextToTime); !errors.Is(err, credbound.ErrInvalidInput) || !strings.Contains(err.Error(), "_texttotime") {
+		t.Fatalf("missing _texttotime error = %v", err)
+	}
 	f := newFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
