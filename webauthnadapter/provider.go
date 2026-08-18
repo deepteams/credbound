@@ -168,9 +168,34 @@ func (p *Provider) BeginAuthentication(ctx context.Context, input credbound.Pass
 		return nil, nil, err
 	}
 	if len(user.credentials) == 0 {
-		return nil, nil, errors.New("webauthn: user has no passkey")
+		return nil, nil, credbound.ErrNoPasskey
 	}
 	assertion, session, err := p.webAuthn.BeginLogin(user, webauthn.WithUserVerification(protocol.VerificationRequired))
+	if err != nil {
+		return nil, nil, err
+	}
+	return marshalCeremony(assertion, session)
+}
+
+// BeginDecoyAuthentication fabricates a stable synthetic credential from the
+// seed and runs the same assertion ceremony, so a caller cannot tell whether
+// the address actually has a passkey. The seed is the manager's per-address
+// digest; equal seeds yield an equal challenge shape across probes.
+func (p *Provider) BeginDecoyAuthentication(ctx context.Context, seed []byte) (json.RawMessage, []byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	credentialMAC := hmac.New(sha256.New, p.userHandleKey)
+	_, _ = credentialMAC.Write([]byte("credbound-passkey-decoy-credential"))
+	_, _ = credentialMAC.Write(seed)
+	handleMAC := hmac.New(sha256.New, p.userHandleKey)
+	_, _ = handleMAC.Write([]byte("credbound-passkey-decoy-handle"))
+	_, _ = handleMAC.Write(seed)
+	decoy := user{
+		id:          handleMAC.Sum(nil),
+		credentials: []webauthn.Credential{{ID: credentialMAC.Sum(nil)}},
+	}
+	assertion, session, err := p.webAuthn.BeginLogin(decoy, webauthn.WithUserVerification(protocol.VerificationRequired))
 	if err != nil {
 		return nil, nil, err
 	}

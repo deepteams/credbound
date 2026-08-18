@@ -101,6 +101,12 @@ func (Passkeys) BeginAuthentication(_ context.Context, user credbound.PasskeyUse
 	return json.RawMessage(`{"publicKey":{}}`), []byte("authentication-session"), nil
 }
 
+// BeginDecoyAuthentication returns a fixed challenge for an address with no
+// passkey, so the manager's answer never reveals whether an account has one.
+func (Passkeys) BeginDecoyAuthentication(_ context.Context, _ []byte) (json.RawMessage, []byte, error) {
+	return json.RawMessage(`{"publicKey":{}}`), []byte("decoy-session"), nil
+}
+
 // FinishAuthentication validates the session issued by BeginAuthentication
 // and accepts exactly []byte(ValidPasskeyResponse), returning the fixed
 // credential with its counter advanced.

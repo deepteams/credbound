@@ -3,6 +3,7 @@ package credbound
 import (
 	"context"
 	"crypto/hmac"
+	"errors"
 	"fmt"
 	"iter"
 	"strings"
@@ -119,9 +120,12 @@ func (m *Manager) FinishPasskeyRegistration(ctx context.Context, actor Authentic
 }
 
 // BeginPasskeyAuthentication starts a WebAuthn authentication ceremony for
-// the account owning the address. No actor is required; an unknown or
-// disabled account fails with the same ErrInvalidCredentials as a failed
-// ceremony. Returns ErrNotSupported without Config.Passkeys.
+// the account owning the address. No actor is required. An address that
+// cannot authenticate — unknown, disabled, or with no passkey — is answered
+// with a decoy challenge indistinguishable from a real one, so the response
+// never reveals whether the account exists or holds a passkey; the decoy
+// fails at FinishPasskeyAuthentication like any wrong credential. Returns
+// ErrNotSupported without Config.Passkeys.
 func (m *Manager) BeginPasskeyAuthentication(ctx context.Context, email string) (_ PasskeyChallenge, err error) {
 	if err := m.requirePasskeyProvider(); err != nil {
 		return PasskeyChallenge{}, err
@@ -136,9 +140,18 @@ func (m *Manager) BeginPasskeyAuthentication(ctx context.Context, email string) 
 	if err := m.domainRequiresSSO(ctx, normalizeEmail(email), "passkey.authentication.begin"); err != nil {
 		return PasskeyChallenge{}, err
 	}
-	userRecord, err := m.store.UserByEmail(ctx, normalizeEmail(email))
-	if err != nil || userRecord.Disabled {
-		return PasskeyChallenge{}, ErrInvalidCredentials
+	normalized := normalizeEmail(email)
+	userRecord, err := m.store.UserByEmail(ctx, normalized)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			// An unknown address is answered with a decoy challenge, not an
+			// error: the response never reveals whether the account exists.
+			return m.decoyPasskeyChallenge(ctx, normalized)
+		}
+		return PasskeyChallenge{}, err
+	}
+	if userRecord.Disabled {
+		return m.decoyPasskeyChallenge(ctx, normalized)
 	}
 	user, err := m.passkeyUser(ctx, userRecord.ID)
 	if err != nil {
@@ -146,10 +159,41 @@ func (m *Manager) BeginPasskeyAuthentication(ctx context.Context, email string) 
 	}
 	options, session, err := m.passkeys.BeginAuthentication(ctx, user)
 	if err != nil {
+		// A user with no passkey is answered with a decoy so passkey presence
+		// stays hidden; any other ceremony error (a corrupt stored credential,
+		// an offline provider) still fails closed.
+		if errors.Is(err, ErrNoPasskey) {
+			return m.decoyPasskeyChallenge(ctx, normalized)
+		}
 		return PasskeyChallenge{}, ErrInvalidCredentials
 	}
 	continuation, err := m.encodeContinuation(ceremonyContinuation{
 		UserID: userRecord.ID, Operation: passkeyAuthentication,
+		ExpiresAt: m.now().Add(m.ceremonyTTL), Session: session,
+	})
+	if err != nil {
+		return PasskeyChallenge{}, err
+	}
+	return PasskeyChallenge{Options: options, Continuation: continuation}, nil
+}
+
+// decoyPasskeyChallenge answers an address that cannot authenticate with a
+// passkey — unknown, disabled, or without one — with a challenge structurally
+// indistinguishable from a real one, closing the passkey-presence and
+// account-existence enumeration oracle. The seed is stable per address so
+// repeated probes see the same fabricated credentials. Its continuation carries
+// no user id, so FinishPasskeyAuthentication fails it as invalid credentials.
+// A residual signal remains — the fabricated allowCredentials list holds one
+// entry, so an account with several passkeys is still distinguishable by count;
+// closing that fully needs discoverable-credential ceremonies.
+func (m *Manager) decoyPasskeyChallenge(ctx context.Context, normalizedEmail string) (PasskeyChallenge, error) {
+	seed := digest(m.digestKey, "passkey-decoy:"+normalizedEmail)
+	options, session, err := m.passkeys.BeginDecoyAuthentication(ctx, seed)
+	if err != nil {
+		return PasskeyChallenge{}, ErrInvalidCredentials
+	}
+	continuation, err := m.encodeContinuation(ceremonyContinuation{
+		Operation: passkeyAuthentication,
 		ExpiresAt: m.now().Add(m.ceremonyTTL), Session: session,
 	})
 	if err != nil {

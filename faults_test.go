@@ -616,6 +616,12 @@ func (f *failingPasskeys) BeginAuthentication(context.Context, credbound.Passkey
 	}
 	return json.RawMessage(`{}`), []byte("session"), nil
 }
+func (f *failingPasskeys) BeginDecoyAuthentication(context.Context, []byte) (json.RawMessage, []byte, error) {
+	if f.beginAuthenticationErr != nil {
+		return nil, nil, f.beginAuthenticationErr
+	}
+	return json.RawMessage(`{}`), []byte("decoy-session"), nil
+}
 func (f *failingPasskeys) FinishAuthentication(context.Context, credbound.PasskeyUser, []byte, []byte) ([]byte, []byte, error) {
 	if f.finishAuthenticationErr != nil {
 		return nil, nil, f.finishAuthenticationErr

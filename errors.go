@@ -17,6 +17,7 @@ var (
 	ErrLocked              = errors.New("credbound: account temporarily locked")
 	ErrSSORequired         = errors.New("credbound: single sign-on required by domain policy")
 	ErrDomainVerification  = errors.New("credbound: domain ownership not verified")
+	ErrNoPasskey           = errors.New("credbound: user has no passkey")
 	ErrAuditUnavailable    = errors.New("credbound: audit unavailable")
 	ErrAuditCompromised    = errors.New("credbound: audit chain verification failed")
 	ErrTransactionRejected = errors.New("credbound: transaction rejected by hook")

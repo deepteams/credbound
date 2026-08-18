@@ -8,7 +8,22 @@ import (
 	"iter"
 	"net"
 	"strings"
+
+	"golang.org/x/net/idna"
 )
+
+// canonicalDomainForLookup folds a domain to the ASCII (punycode), lowercase
+// form domains are stored in, so a policy lookup catches an address written
+// with the Unicode form of an enforced domain instead of silently missing it.
+// A domain that cannot be canonicalized is returned lowercased unchanged; it
+// then matches no stored ASCII domain, which is the fail-safe outcome.
+func canonicalDomainForLookup(domain string) string {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	if ascii, err := idna.Lookup.ToASCII(domain); err == nil {
+		return ascii
+	}
+	return domain
+}
 
 // domainChallengePrefix frames the DNS TXT value proving domain control. The
 // value is deliberately not a secret: the host publishes it in public DNS.
@@ -293,10 +308,10 @@ func validWorkspaceDomainName(value string) (string, error) {
 // user@sub.corp.example is NOT covered by a policy on corp.example, by
 // design — over-matching would let a subdomain identity join or be forced
 // into the parent workspace. Hosts that need subdomain coverage register
-// each subdomain explicitly. Domains are stored in their ASCII form; an
-// address written with a Unicode domain does not match its punycode
-// registration and simply falls outside the policy (fail-safe: no
-// enforcement, no auto-join).
+// each subdomain explicitly. Domains are stored in their ASCII form and the
+// address domain is folded to the same ASCII (punycode) form before the
+// lookup, so an address written with the Unicode form of an enforced domain
+// is caught rather than slipping past enforcement.
 func (m *Manager) domainRequiresSSO(ctx context.Context, email, action string) error {
 	if m.domainStore == nil {
 		return nil
@@ -305,7 +320,7 @@ func (m *Manager) domainRequiresSSO(ctx context.Context, email, action string) e
 	if at < 0 || at == len(email)-1 {
 		return nil
 	}
-	domain, err := m.domainStore.ConfirmedWorkspaceDomainByName(ctx, email[at+1:])
+	domain, err := m.domainStore.ConfirmedWorkspaceDomainByName(ctx, canonicalDomainForLookup(email[at+1:]))
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil

@@ -9,6 +9,7 @@ import (
 
 	"github.com/deepteams/credbound"
 	"github.com/deepteams/credbound/memory"
+	"golang.org/x/net/idna"
 )
 
 const (
@@ -899,5 +900,37 @@ func TestConfirmWorkspaceDomainVerifier(t *testing.T) {
 	}
 	if listed, _ := collectDomains(t, manager.WorkspaceDomains(ctx, actor, workspace.ID, credbound.PageRequest{})); len(listed) != 1 || listed[0].ConfirmedAt == nil {
 		t.Fatalf("domain not confirmed after verification: %#v", listed)
+	}
+}
+
+func TestDomainEnforcementCanonicalizesUnicodeDomain(t *testing.T) {
+	f := newFixture(t, jitProvider("subject-idn", "user@example.com", true))
+	ctx := context.Background()
+	authn, workspace := f.bootstrap(t)
+	actor := aal2(authn.UserID, f.now)
+	const unicodeDomain = "café.example.com"
+	asciiDomain, err := idna.Lookup.ToASCII(unicodeDomain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued, err := f.manager.CreateWorkspaceDomain(ctx, actor, workspace.ID, asciiDomain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.ConfirmWorkspaceDomain(ctx, actor, issued.Domain.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.UpdateWorkspaceDomainPolicy(ctx, actor, issued.Domain.ID, credbound.WorkspaceDomainPolicyInput{
+		EnforceSSO: true, SSOProviderConfigurationID: domainProviderA,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Both the ASCII (punycode) form the domain was registered under and the
+	// Unicode form an attacker might type are folded to the same name, so SSO
+	// enforcement catches the Unicode homograph instead of letting it past.
+	for _, address := range []string{"user@" + asciiDomain, "user@" + unicodeDomain} {
+		if _, err := f.manager.AuthenticatePassword(ctx, address, "whatever password"); !errors.Is(err, credbound.ErrSSORequired) {
+			t.Fatalf("enforcement for %q = %v", address, err)
+		}
 	}
 }

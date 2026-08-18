@@ -41,6 +41,9 @@ func (testPasskeys) FinishRegistration(context.Context, credbound.PasskeyUser, [
 func (testPasskeys) BeginAuthentication(context.Context, credbound.PasskeyUser) (json.RawMessage, []byte, error) {
 	return nil, nil, errors.New("unused")
 }
+func (testPasskeys) BeginDecoyAuthentication(context.Context, []byte) (json.RawMessage, []byte, error) {
+	return nil, nil, errors.New("unused")
+}
 func (testPasskeys) FinishAuthentication(context.Context, credbound.PasskeyUser, []byte, []byte) ([]byte, []byte, error) {
 	return nil, nil, errors.New("unused")
 }

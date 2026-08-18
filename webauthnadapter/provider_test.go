@@ -12,6 +12,41 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 )
 
+func TestBeginDecoyAuthentication(t *testing.T) {
+	provider := newProvider(t, 2)
+	ctx := context.Background()
+	parse := func(seed string) protocol.CredentialAssertion {
+		t.Helper()
+		options, session, err := provider.BeginDecoyAuthentication(ctx, []byte(seed))
+		if err != nil || len(options) == 0 || len(session) == 0 {
+			t.Fatalf("decoy(%q) = %s, %x, %v", seed, options, session, err)
+		}
+		var assertion protocol.CredentialAssertion
+		if err := json.Unmarshal(options, &assertion); err != nil {
+			t.Fatal(err)
+		}
+		return assertion
+	}
+	// Structurally a real assertion challenge: user verification required and
+	// exactly one allowed credential.
+	first := parse("seed-a")
+	if first.Response.UserVerification != protocol.VerificationRequired {
+		t.Fatalf("user verification = %q", first.Response.UserVerification)
+	}
+	if len(first.Response.AllowedCredentials) != 1 {
+		t.Fatalf("allowed credentials = %d, want 1", len(first.Response.AllowedCredentials))
+	}
+	// Stable for the same address, distinct across addresses, so probes cannot
+	// tell a decoy from a real challenge by its variation.
+	firstID := string(first.Response.AllowedCredentials[0].CredentialID)
+	if firstID != string(parse("seed-a").Response.AllowedCredentials[0].CredentialID) {
+		t.Fatal("decoy credential id not stable for the same seed")
+	}
+	if firstID == string(parse("seed-b").Response.AllowedCredentials[0].CredentialID) {
+		t.Fatal("decoy credential id must differ across seeds")
+	}
+}
+
 func TestRegistrationOptionsRequireUserVerification(t *testing.T) {
 	provider := newProvider(t, 2)
 	input := emptyUser()

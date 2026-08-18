@@ -180,8 +180,14 @@ func TestPasskeyAndAdminFailureBoundaries(t *testing.T) {
 	if _, err := f.manager.FinishPasskeyRegistration(ctx, authn, challenge.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrExpired) {
 		t.Fatalf("expired registration = %v", err)
 	}
-	if _, err := f.manager.BeginPasskeyAuthentication(ctx, "missing@example.com"); !errors.Is(err, credbound.ErrInvalidCredentials) {
-		t.Fatalf("unknown passkey user = %v", err)
+	// An unknown address returns a decoy challenge rather than an error, so it
+	// never reveals whether the account exists; finishing it fails closed.
+	decoy, err := f.manager.BeginPasskeyAuthentication(ctx, "missing@example.com")
+	if err != nil || len(decoy.Options) == 0 || decoy.Continuation == "" {
+		t.Fatalf("unknown passkey user decoy = %#v, %v", decoy, err)
+	}
+	if _, err := f.manager.FinishPasskeyAuthentication(ctx, decoy.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("decoy finish = %v", err)
 	}
 	if err := f.manager.DeletePasskey(ctx, aal2(authn.UserID, f.now), ""); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("empty passkey deletion = %v", err)

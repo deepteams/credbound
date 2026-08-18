@@ -481,6 +481,9 @@ func (f *fakePasskeys) BeginAuthentication(_ context.Context, user credbound.Pas
 	}
 	return json.RawMessage(`{"publicKey":{}}`), []byte("authentication-session"), nil
 }
+func (f *fakePasskeys) BeginDecoyAuthentication(_ context.Context, _ []byte) (json.RawMessage, []byte, error) {
+	return json.RawMessage(`{"publicKey":{}}`), []byte("decoy-session"), nil
+}
 func (f *fakePasskeys) FinishAuthentication(_ context.Context, _ credbound.PasskeyUser, session, response []byte) ([]byte, []byte, error) {
 	if string(session) != "authentication-session" || string(response) != "valid" {
 		return nil, nil, errors.New("invalid ceremony")

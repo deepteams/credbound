@@ -321,7 +321,17 @@ type TOTPProvider interface {
 type PasskeyProvider interface {
 	BeginRegistration(context.Context, PasskeyUser) (json.RawMessage, []byte, error)
 	FinishRegistration(context.Context, PasskeyUser, []byte, []byte) (credentialID, credentialJSON []byte, err error)
+	// BeginAuthentication starts an assertion ceremony over the user's stored
+	// passkeys. It returns ErrNoPasskey when the user has none, which the
+	// manager answers with a decoy so the response never reveals whether an
+	// account has a passkey.
 	BeginAuthentication(context.Context, PasskeyUser) (json.RawMessage, []byte, error)
+	// BeginDecoyAuthentication produces an assertion challenge for an address
+	// with no passkey (or no account), structurally indistinguishable from
+	// BeginAuthentication. The seed makes the fabricated credential descriptors
+	// stable for a given address, so repeated probes cannot tell a decoy from a
+	// real challenge by its variation.
+	BeginDecoyAuthentication(ctx context.Context, seed []byte) (json.RawMessage, []byte, error)
 	FinishAuthentication(context.Context, PasskeyUser, []byte, []byte) (credentialID, credentialJSON []byte, err error)
 }
 
