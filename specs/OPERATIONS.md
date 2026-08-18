@@ -69,7 +69,11 @@ writer with full database access who deletes the newest events and rewinds the
 chain head to a consistent earlier state is indistinguishable from a shorter
 history. For guarantees against tail truncation, periodically anchor the chain
 head hash and sequence number outside the database (an object-lock bucket, a
-transparency log, or a signed release note) and compare during audits.
+transparency log, or a signed release note) and compare during audits. The
+anchored head doubles as the `AuditChainCheckpoint` for
+`VerifyAuditChainFrom`, which verifies only the events appended since, so
+routine verification stays cheap as the log grows; run the full
+`VerifyAuditChain` when the anchor itself is in question.
 
 ## OAuth, CIMD, and DCR
 

@@ -2706,7 +2706,7 @@ func (s *Store) AuditChainHead(ctx context.Context) (int64, []byte, error) {
 
 // ChainedAuditEvents streams every chained audit event in sequence order for
 // verification with credbound.VerifyAuditChain.
-func (s *Store) ChainedAuditEvents(ctx context.Context) iter.Seq2[credbound.AuditEvent, error] {
+func (s *Store) ChainedAuditEvents(ctx context.Context, afterSequence int64) iter.Seq2[credbound.AuditEvent, error] {
 	return func(yield func(credbound.AuditEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(credbound.AuditEvent{}, err)
@@ -2715,7 +2715,7 @@ func (s *Store) ChainedAuditEvents(ctx context.Context) iter.Seq2[credbound.Audi
 		s.mu.RLock()
 		chained := make([]credbound.AuditEvent, 0, len(s.audits))
 		for _, event := range s.audits {
-			if event.Sequence > 0 {
+			if event.Sequence > afterSequence {
 				chained = append(chained, cloneAuditEvent(event))
 			}
 		}

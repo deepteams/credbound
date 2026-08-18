@@ -311,7 +311,8 @@ func nullableString(value string) sql.NullString {`, 1)
 		panic("audit section markers not found")
 	}
 	code = code[:start] + postgresAuditSection + code[end:]
-	code = strings.Replace(code, "s.db.QueryContext(streamCtx, chainedAuditQuery)", "s.rows.Query(streamCtx, chainedAuditQuery)", 1)
+	code = strings.Replace(code, "AND sequence > ? ORDER BY sequence", "AND sequence > $1 ORDER BY sequence", 1)
+	code = strings.Replace(code, "s.db.QueryContext(streamCtx, chainedAuditQuery, afterSequence)", "s.rows.Query(streamCtx, chainedAuditQuery, afterSequence)", 1)
 	// PostgreSQL objects live in the dedicated `credbound` schema; every raw
 	// SQL table reference is schema-qualified instead of prefix-namespaced.
 	code = strings.ReplaceAll(code, "credbound_", "credbound.")

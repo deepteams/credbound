@@ -59,7 +59,7 @@ func TestHardeningCanceledOperations(t *testing.T) {
 	if _, _, err := f.store.AuditChainHead(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled chain head = %v", err)
 	}
-	for _, err := range f.store.ChainedAuditEvents(ctx) {
+	for _, err := range f.store.ChainedAuditEvents(ctx, 0) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("canceled chained events = %v", err)
 		}
@@ -107,7 +107,7 @@ func TestHardeningEarlyBreaks(t *testing.T) {
 	for range f.store.WorkspaceInvitations(ctx, f.workspace.ID, credbound.PageRequest{Limit: 1}) {
 		break
 	}
-	for range f.store.ChainedAuditEvents(ctx) {
+	for range f.store.ChainedAuditEvents(ctx, 0) {
 		break
 	}
 	// Cursor-driven second page of the invitation listing.

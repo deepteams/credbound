@@ -45,18 +45,39 @@ func ComputeAuditHash(previous []byte, event AuditEvent) []byte {
 	return h.Sum(nil)
 }
 
-// VerifyAuditChain recomputes the whole audit hash chain and compares it with
-// the persisted chain head. Any edited, deleted or reordered chained event
-// yields ErrAuditCompromised. It requires admin audit read.
+// VerifyAuditChain recomputes the whole audit hash chain from the genesis
+// and compares it with the persisted chain head. Any edited, deleted or
+// reordered chained event yields ErrAuditCompromised. It requires admin
+// audit read; VerifyAuditChainFrom verifies only the delta after a trusted
+// checkpoint when the full scan grows too expensive.
 func (m *Manager) VerifyAuditChain(ctx context.Context, actor Authentication) (_ AuditChainReport, err error) {
+	return m.VerifyAuditChainFrom(ctx, actor, AuditChainCheckpoint{})
+}
+
+// VerifyAuditChainFrom recomputes the chain from a previously verified
+// checkpoint — the HeadSequence and HeadHash of an earlier report — to the
+// current head, so periodic verification costs the delta instead of a full
+// scan. The zero checkpoint verifies from the genesis. The checkpoint must
+// come from the caller's own trusted record (the previous run's report,
+// ideally anchored outside the database as OPERATIONS.md recommends): a
+// checkpoint read back from compromised storage would vouch for a
+// rewritten prefix, since events at or below its sequence are not re-read.
+func (m *Manager) VerifyAuditChainFrom(ctx context.Context, actor Authentication, checkpoint AuditChainCheckpoint) (_ AuditChainReport, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "audit.chain.verify", started, err) }()
 	if err := m.AuthorizeAdmin(ctx, actor, PermissionAuditRead); err != nil {
 		return AuditChainReport{}, err
 	}
+	if checkpoint.Sequence < 0 || (checkpoint.Sequence == 0) != (len(checkpoint.Hash) == 0) {
+		return AuditChainReport{}, fmt.Errorf("%w: an audit checkpoint pairs a positive sequence with its hash", ErrInvalidInput)
+	}
 	previous := auditChainGenesis
 	sequence := int64(0)
-	for event, iterErr := range m.store.ChainedAuditEvents(ctx) {
+	if checkpoint.Sequence > 0 {
+		previous = checkpoint.Hash
+		sequence = checkpoint.Sequence
+	}
+	for event, iterErr := range m.store.ChainedAuditEvents(ctx, sequence) {
 		if iterErr != nil {
 			return AuditChainReport{}, iterErr
 		}

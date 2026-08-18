@@ -223,6 +223,7 @@ AuditEvents(ctx, authn, workspaceID, PageRequest) iter.Seq2[PageEvent[AuditEvent
 InstanceAuditEvents(ctx, authn, PageRequest) iter.Seq2[PageEvent[AuditEvent], error]
 RecordAudit(ctx, authn, AuditInput) error
 VerifyAuditChain(ctx, authn) (AuditChainReport, error)
+VerifyAuditChainFrom(ctx, authn, AuditChainCheckpoint) (AuditChainReport, error)
 
 AddTransactionHook(TransactionHook) Subscription
 AddEventListener(EventListener) Subscription
@@ -303,6 +304,11 @@ failing toward the peer address on malformed input.
 
 `ComputeAuditHash(previous, event)` is the canonical chain hash used by the
 bundled stores; auditors can recompute it over exported logs.
+`VerifyAuditChain` recomputes the whole chain from the genesis;
+`VerifyAuditChainFrom` verifies only the delta after an
+`AuditChainCheckpoint` — the `HeadSequence` and `HeadHash` of an earlier
+report, kept in the caller's own trusted record — so periodic verification
+stays proportional to new events instead of the full history.
 
 `TrustedRequest.Local` must be set only by a server adapter that has verified
 that the network peer is loopback. It must never be copied from a request

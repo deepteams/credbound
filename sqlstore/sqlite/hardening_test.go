@@ -278,7 +278,7 @@ func TestHardeningStreamEarlyBreak(t *testing.T) {
 		}
 	}
 	seen := 0
-	for _, err := range f.store.ChainedAuditEvents(ctx) {
+	for _, err := range f.store.ChainedAuditEvents(ctx, 0) {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -416,7 +416,7 @@ func TestAuditChainPersistence(t *testing.T) {
 	}
 	previous := make([]byte, 32)
 	expected := int64(0)
-	for event, err := range f.store.ChainedAuditEvents(ctx) {
+	for event, err := range f.store.ChainedAuditEvents(ctx, 0) {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -443,7 +443,7 @@ func TestAuditChainPersistence(t *testing.T) {
 	}
 	previous = make([]byte, 32)
 	broken := false
-	for event, err := range f.store.ChainedAuditEvents(ctx) {
+	for event, err := range f.store.ChainedAuditEvents(ctx, 0) {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -467,7 +467,7 @@ func TestAuditMetadataRoundTrip(t *testing.T) {
 	if err := f.store.AppendAudit(ctx, commit); err != nil {
 		t.Fatal(err)
 	}
-	for event, err := range f.store.ChainedAuditEvents(ctx) {
+	for event, err := range f.store.ChainedAuditEvents(ctx, 0) {
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -597,11 +597,21 @@ type AuditEvent struct {
 	Hash         []byte
 }
 
-// AuditChainReport summarizes a successful audit chain verification.
+// AuditChainReport summarizes a successful audit chain verification. Its
+// HeadSequence and HeadHash form the AuditChainCheckpoint a later
+// VerifyAuditChainFrom resumes from.
 type AuditChainReport struct {
 	Events       int64
 	HeadSequence int64
 	HeadHash     []byte
+}
+
+// AuditChainCheckpoint is a previously verified chain position: the
+// HeadSequence and HeadHash of an earlier report, kept by the caller in a
+// trusted place. The zero value means the genesis.
+type AuditChainCheckpoint struct {
+	Sequence int64
+	Hash     []byte
 }
 
 // SCIMGroupRoleMapping maps a directory group (by its external identifier)

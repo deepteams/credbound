@@ -1653,15 +1653,15 @@ func (s *Store) AuditChainHead(ctx context.Context) (int64, []byte, error) {
 }
 
 const chainedAuditQuery = `SELECT id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash
-FROM credbound_audit_events WHERE sequence IS NOT NULL ORDER BY sequence`
+FROM credbound_audit_events WHERE sequence IS NOT NULL AND sequence > ? ORDER BY sequence`
 
 // ChainedAuditEvents streams every chained audit event in sequence order for
 // verification with credbound.VerifyAuditChain.
-func (s *Store) ChainedAuditEvents(ctx context.Context) iter.Seq2[credbound.AuditEvent, error] {
+func (s *Store) ChainedAuditEvents(ctx context.Context, afterSequence int64) iter.Seq2[credbound.AuditEvent, error] {
 	return func(yield func(credbound.AuditEvent, error) bool) {
 		streamCtx, cancel := context.WithTimeout(ctx, s.streamTimeout)
 		defer cancel()
-		rows, err := s.db.QueryContext(streamCtx, chainedAuditQuery)
+		rows, err := s.db.QueryContext(streamCtx, chainedAuditQuery, afterSequence)
 		if err != nil {
 			yield(credbound.AuditEvent{}, mapError(err))
 			return

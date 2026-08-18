@@ -129,9 +129,10 @@ type Store interface {
 	// AuditChainHead returns the sequence and hash of the latest chained
 	// audit event; sequence 0 with a 32-zero-byte hash for an empty chain.
 	AuditChainHead(context.Context) (int64, []byte, error)
-	// ChainedAuditEvents streams every chained audit event in ascending
-	// sequence order so the chain can be recomputed and verified.
-	ChainedAuditEvents(context.Context) iter.Seq2[AuditEvent, error]
+	// ChainedAuditEvents streams every chained audit event with a sequence
+	// strictly greater than afterSequence, in ascending order, so the chain
+	// can be recomputed from the genesis (0) or from a checkpoint.
+	ChainedAuditEvents(ctx context.Context, afterSequence int64) iter.Seq2[AuditEvent, error]
 }
 
 // SignupStore is an optional persistence capability required by SignUp.

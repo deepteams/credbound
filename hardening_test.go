@@ -1249,10 +1249,10 @@ type tamperedChainStore struct {
 	corruptedHead bool
 }
 
-func (s *tamperedChainStore) ChainedAuditEvents(ctx context.Context) iter.Seq2[credbound.AuditEvent, error] {
+func (s *tamperedChainStore) ChainedAuditEvents(ctx context.Context, afterSequence int64) iter.Seq2[credbound.AuditEvent, error] {
 	return func(yield func(credbound.AuditEvent, error) bool) {
 		first := true
-		for event, err := range s.Store.ChainedAuditEvents(ctx) {
+		for event, err := range s.Store.ChainedAuditEvents(ctx, afterSequence) {
 			if err != nil {
 				yield(credbound.AuditEvent{}, err)
 				return
@@ -1458,5 +1458,45 @@ func TestPATScopeEnforcement(t *testing.T) {
 	}
 	if err := f.manager.Authorize(ctx, wildcardAuthn, workspace.ID, credbound.RoleAdmin); err != nil {
 		t.Fatalf("wildcard role authorization = %v", err)
+	}
+}
+
+func TestVerifyAuditChainFromCheckpoint(t *testing.T) {
+	f := newFixture(t)
+	authn, _ := f.bootstrap(t)
+	ctx := context.Background()
+
+	first, err := f.manager.VerifyAuditChain(ctx, authn)
+	if err != nil || first.HeadSequence == 0 {
+		t.Fatalf("initial verification = %#v, %v", first, err)
+	}
+	checkpoint := credbound.AuditChainCheckpoint{Sequence: first.HeadSequence, Hash: first.HeadHash}
+
+	// Grow the chain, then verify only the delta from the checkpoint.
+	if _, err := f.manager.CreatePAT(ctx, aal2(authn.UserID, f.now), credbound.CreatePATInput{Name: "delta", Scopes: []string{"*"}}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := f.manager.VerifyAuditChainFrom(ctx, authn, checkpoint)
+	if err != nil || second.HeadSequence <= first.HeadSequence {
+		t.Fatalf("delta verification = %#v, %v", second, err)
+	}
+	// An idempotent re-run from the new head verifies zero events.
+	if _, err := f.manager.VerifyAuditChainFrom(ctx, authn, credbound.AuditChainCheckpoint{Sequence: second.HeadSequence, Hash: second.HeadHash}); err != nil {
+		t.Fatalf("head checkpoint verification = %v", err)
+	}
+
+	// A checkpoint with a wrong hash vouches for nothing.
+	forged := credbound.AuditChainCheckpoint{Sequence: first.HeadSequence, Hash: bytesOf(9, 32)}
+	if _, err := f.manager.VerifyAuditChainFrom(ctx, authn, forged); !errors.Is(err, credbound.ErrAuditCompromised) {
+		t.Fatalf("forged checkpoint error = %v", err)
+	}
+	// A checkpoint beyond the head reports a rewound chain.
+	beyond := credbound.AuditChainCheckpoint{Sequence: second.HeadSequence + 10, Hash: second.HeadHash}
+	if _, err := f.manager.VerifyAuditChainFrom(ctx, authn, beyond); !errors.Is(err, credbound.ErrAuditCompromised) {
+		t.Fatalf("rewound chain error = %v", err)
+	}
+	// A sequence without its hash is rejected before any store read.
+	if _, err := f.manager.VerifyAuditChainFrom(ctx, authn, credbound.AuditChainCheckpoint{Sequence: 3}); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("hashless checkpoint error = %v", err)
 	}
 }
