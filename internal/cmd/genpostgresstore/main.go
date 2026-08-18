@@ -443,6 +443,8 @@ func generateOAuth() {
 	code := string(raw)
 	code = strings.Replace(code, "package sqlite", "package postgresql", 1)
 	code = strings.Replace(code, `db "github.com/deepteams/credbound/internal/sqlc/sqlite"`, `db "github.com/deepteams/credbound/internal/sqlc/postgresql"`, 1)
+	// PostgreSQL relies on row locks, not the SQLite write mutex.
+	code = strings.Replace(code, "\tdefer s.lockWrites()()\n", "", 1)
 	code = strings.Replace(code, "func oauthParam(value any) string { return string(oauthJSON(value)) }", "func oauthParam(value any) []byte { return oauthJSON(value) }", 1)
 	code = strings.ReplaceAll(code, "int64(token.RegistrationCount)", "int32(token.RegistrationCount)")
 	code = strings.ReplaceAll(code, "int64(previousCount)", "int32(previousCount)")

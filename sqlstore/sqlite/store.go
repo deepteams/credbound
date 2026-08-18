@@ -52,6 +52,11 @@ type Store struct {
 	// concurrent. Across processes sharing one database file, open the
 	// connection with "_txlock=immediate" so the file-level write lock provides
 	// the same guarantee.
+	//
+	// It is held across the TransactionHook callback, so a hook must append to
+	// the commit's transaction through TxFrom and must not call back into a
+	// Store mutation — doing so self-deadlocks on this non-reentrant mutex (it
+	// would also be a nested-transaction error on the same connection).
 	writeMu sync.Mutex
 }
 
