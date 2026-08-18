@@ -290,6 +290,48 @@ func TestAnonymizeUserScrubsSCIMAndInvitations(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The inventory reads see the configuration, its credential (digest
+	// omitted) and the instance role roster.
+	configurations := 0
+	for value, err := range f.store.SCIMConfigurations(ctx, workspace.ID) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value.ID != configuration.ID {
+			t.Fatalf("inventoried SCIM configuration = %#v", value)
+		}
+		configurations++
+	}
+	if configurations != 1 {
+		t.Fatalf("SCIM configurations = %d, want 1", configurations)
+	}
+	scimCredentials := 0
+	for value, err := range f.store.SCIMCredentials(ctx, configuration.ID) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value.ID != credential.ID || value.Digest != nil {
+			t.Fatalf("inventoried SCIM credential = %#v", value)
+		}
+		scimCredentials++
+	}
+	if scimCredentials != 1 {
+		t.Fatalf("SCIM credentials = %d, want 1", scimCredentials)
+	}
+	roster := 0
+	for value, err := range f.store.InstanceAdministrators(ctx) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value.UserID != root.ID || value.Role != credbound.InstanceRoleRoot {
+			t.Fatalf("instance role roster = %#v", value)
+		}
+		roster++
+	}
+	if roster != 1 {
+		t.Fatalf("instance administrators = %d, want 1", roster)
+	}
+
 	if err := f.store.AnonymizeUser(ctx, user.ID, f.now, f.event(root.ID, "user.anonymize", user.ID, "")); err != nil {
 		t.Fatal(err)
 	}
@@ -331,4 +373,43 @@ func TestAnonymizeUserScrubsSCIMAndInvitations(t *testing.T) {
 	if err != nil || untouched.Email != "other@example.com" {
 		t.Fatalf("unrelated invitation mutated: %#v, %v", untouched, err)
 	}
+
+	// The streaming contract: a consumer breaking early ends each inventory
+	// without another yield, and a cancelled context surfaces as the stream
+	// error.
+	for range f.store.SCIMConfigurations(ctx, workspace.ID) {
+		break
+	}
+	for range f.store.SCIMCredentials(ctx, configuration.ID) {
+		break
+	}
+	for range f.store.SCIMUsersByUser(ctx, user.ID) {
+		break
+	}
+	for range f.store.AcceptedWorkspaceInvitations(ctx, user.ID) {
+		break
+	}
+	for range f.store.InstanceAdministrators(ctx) {
+		break
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	for name, sequenceErr := range map[string]error{
+		"scim configurations":     firstIterError(f.store.SCIMConfigurations(cancelled, workspace.ID)),
+		"scim credentials":        firstIterError(f.store.SCIMCredentials(cancelled, configuration.ID)),
+		"scim users by user":      firstIterError(f.store.SCIMUsersByUser(cancelled, user.ID)),
+		"accepted invitations":    firstIterError(f.store.AcceptedWorkspaceInvitations(cancelled, user.ID)),
+		"instance administrators": firstIterError(f.store.InstanceAdministrators(cancelled)),
+	} {
+		if sequenceErr == nil {
+			t.Fatalf("%s with a cancelled context must fail", name)
+		}
+	}
+}
+
+func firstIterError[T any](sequence func(func(T, error) bool)) error {
+	for _, err := range sequence {
+		return err
+	}
+	return nil
 }

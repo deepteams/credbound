@@ -344,6 +344,16 @@ func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 			t.Fatalf("non-admin SCIM credential inventory = %v", err)
 		}
 	}
+	for _, err := range manager.SCIMConfigurations(context.Background(), credbound.Authentication{UserID: link.UserID}, workspace.ID) {
+		if !errors.Is(err, credbound.ErrForbidden) {
+			t.Fatalf("non-admin SCIM configuration inventory = %v", err)
+		}
+	}
+	for _, err := range manager.SCIMConfigurations(context.Background(), admin, "not-a-uuid") {
+		if !errors.Is(err, credbound.ErrInvalidInput) {
+			t.Fatalf("invalid workspace id inventory = %v", err)
+		}
+	}
 	if err := manager.DisableSCIMConfiguration(context.Background(), admin, issued.Configuration.ID); err != nil {
 		t.Fatal(err)
 	}

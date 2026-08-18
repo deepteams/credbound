@@ -614,6 +614,17 @@ func TestMetadataURLSSRFGuard(t *testing.T) {
 	}
 }
 
+func TestLoopbackHostExemption(t *testing.T) {
+	for host, want := range map[string]bool{
+		"localhost": true, "LOCALHOST": true, "127.0.0.1": true, "::1": true,
+		"idp.example.com": false, "10.0.0.1": false, "": false,
+	} {
+		if loopbackHost(host) != want {
+			t.Fatalf("loopbackHost(%q) = %v, want %v", host, !want, want)
+		}
+	}
+}
+
 // TestMetadataURLPinsDialToVettedAddress proves the DNS rebinding defense:
 // the connection dials the address the resolver vetted, never a fresh
 // resolution of the hostname.

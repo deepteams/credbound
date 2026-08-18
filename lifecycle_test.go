@@ -275,8 +275,9 @@ func TestWorkspaceMembersAndInstanceAdministratorReads(t *testing.T) {
 	if emails[member.ID] != "developer@example.com" || emails[admin.ID] != "wsadmin@example.com" {
 		t.Fatalf("member emails = %#v", emails)
 	}
-	// A plain member cannot read the roster.
+	// A plain member cannot read the roster, and page limits are validated.
 	assertLifecycleError(t, f.manager.WorkspaceMembers(ctx, aal2(member.ID, f.now), workspace.ID, credbound.PageRequest{}), credbound.ErrForbidden)
+	assertLifecycleError(t, f.manager.WorkspaceMembers(ctx, workspaceAdmin, workspace.ID, credbound.PageRequest{Limit: 101}), credbound.ErrInvalidInput)
 
 	// The instance role roster requires admin.instance_roles.read.
 	roster := []credbound.InstanceAdministrator{}

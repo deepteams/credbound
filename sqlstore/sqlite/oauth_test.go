@@ -90,6 +90,19 @@ func TestOAuthStoreLifecycle(t *testing.T) {
 	if err := f.store.RevokeOAuthInitialAccessToken(ctx, initial.ID, f.now, f.event(user.ID, "oauth.iat.revoke", initial.ID, "")); err != nil {
 		t.Fatal(err)
 	}
+	inventoried := 0
+	for token, err := range f.store.OAuthInitialAccessTokens(ctx, issuer.ID) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if token.ID != initial.ID || token.Digest != nil || token.RevokedAt == nil {
+			t.Fatalf("inventoried initial token = %#v", token)
+		}
+		inventoried++
+	}
+	if inventoried != 1 {
+		t.Fatalf("initial token inventory = %d, want 1", inventoried)
+	}
 	grant := credbound.OAuthGrant{ID: f.id(), IssuerID: issuer.ID, ClientRecordID: client.ID, UserID: user.ID, WorkspaceID: workspace.ID, ResourceID: resource.ID, Scopes: []string{"documents.read"}, CreatedAt: f.now, UpdatedAt: f.now}
 	code := credbound.OAuthAuthorizationCode{ID: f.id(), Prefix: "code", GrantID: grant.ID, ClientRecordID: client.ID, ResourceID: resource.ID, ExpiresAt: f.now.Add(time.Minute), CreatedAt: f.now}
 	if err := f.store.CreateOAuthGrantAndCode(ctx, grant, code, f.event(user.ID, "oauth.authorization", grant.ID, workspace.ID)); err != nil {

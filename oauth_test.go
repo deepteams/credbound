@@ -314,6 +314,11 @@ func TestOAuthAuthorizationRefreshAndDCR(t *testing.T) {
 			t.Fatalf("anonymous initial access token inventory = %v", err)
 		}
 	}
+	for _, err := range f.manager.OAuthInitialAccessTokens(ctx, actor, "not-a-uuid") {
+		if !errors.Is(err, credbound.ErrInvalidInput) {
+			t.Fatalf("invalid issuer id inventory = %v", err)
+		}
+	}
 	metadata, err := f.manager.OAuthAuthorizationServerMetadata(ctx, issuer.Issuer)
 	if err != nil || metadata.RegistrationEndpoint == "" || metadata.ClientIDMetadataDocumentSupported {
 		t.Fatalf("metadata = %#v, %v", metadata, err)

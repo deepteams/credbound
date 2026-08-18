@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"iter"
 	"testing"
 	"time"
 
@@ -151,4 +152,35 @@ func TestAnonymizeUserScrubsSCIMAndInvitations(t *testing.T) {
 	if err != nil || untouched.Email != "other@example.com" {
 		t.Fatalf("unrelated invitation mutated: %#v, %v", untouched, err)
 	}
+}
+
+// TestInventoryReadsHonorContextAndBreak pins the streaming contract of the
+// unpaginated list reads: a cancelled context surfaces as the stream error,
+// and a consumer breaking early ends the stream without another yield.
+func TestInventoryReadsHonorContextAndBreak(t *testing.T) {
+	f := newStoreFixture(t)
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for name, err := range map[string]error{
+		"instance administrators": firstSeqError(f.store.InstanceAdministrators(cancelled)),
+		"scim configurations":     firstSeqError(f.store.SCIMConfigurations(cancelled, f.workspace.ID)),
+		"scim credentials":        firstSeqError(f.store.SCIMCredentials(cancelled, f.id())),
+		"scim users by user":      firstSeqError(f.store.SCIMUsersByUser(cancelled, f.user.ID)),
+		"accepted invitations":    firstSeqError(f.store.AcceptedWorkspaceInvitations(cancelled, f.user.ID)),
+		"oauth initial tokens":    firstSeqError(f.store.OAuthInitialAccessTokens(cancelled, f.id())),
+	} {
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("%s with a cancelled context = %v", name, err)
+		}
+	}
+	for range f.store.InstanceAdministrators(context.Background()) {
+		break
+	}
+}
+
+func firstSeqError[T any](sequence iter.Seq2[T, error]) error {
+	for _, err := range sequence {
+		return err
+	}
+	return nil
 }
