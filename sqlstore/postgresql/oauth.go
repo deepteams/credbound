@@ -40,7 +40,7 @@ func (s *Store) SetOAuthIssuerDisabled(ctx context.Context, id string, disabled 
 			return err
 		}
 		if disabled {
-			return s.revokeOAuthGrants(ctx, q, at, func(grant credbound.OAuthGrant) bool { return grant.IssuerID == id })
+			return s.revokeOAuthGrantsByIssuer(ctx, q, at, id)
 		}
 		return nil
 	})
@@ -94,7 +94,7 @@ func (s *Store) SetOAuthProtectedResourceDisabled(ctx context.Context, id string
 			return err
 		}
 		if disabled {
-			return s.revokeOAuthGrants(ctx, q, at, func(grant credbound.OAuthGrant) bool { return grant.ResourceID == id })
+			return s.revokeOAuthGrantsByResource(ctx, q, at, id)
 		}
 		return nil
 	})
@@ -128,6 +128,9 @@ func (s *Store) CreateOAuthClient(ctx context.Context, value credbound.OAuthClie
 			return err
 		}
 		if value.Source == credbound.OAuthClientDCR && issuer.DCRMode == credbound.OAuthDCROpen {
+			if _, err := q.OAuthLockIssuer(ctx, value.IssuerID); err != nil {
+				return mapError(err)
+			}
 			records, err := q.OAuthClientJSONsByIssuer(ctx, value.IssuerID)
 			if err != nil {
 				return mapError(err)
@@ -191,7 +194,7 @@ func (s *Store) SetOAuthClientDisabled(ctx context.Context, id string, disabled 
 			return err
 		}
 		if disabled {
-			return s.revokeOAuthGrants(ctx, q, at, func(grant credbound.OAuthGrant) bool { return grant.ClientRecordID == id })
+			return s.revokeOAuthGrantsByClient(ctx, q, at, id)
 		}
 		return nil
 	})
@@ -389,7 +392,47 @@ func (s *Store) RevokeOAuthRefreshFamily(ctx context.Context, familyID string, a
 	})
 }
 
-func (s *Store) revokeOAuthGrants(ctx context.Context, q *db.Queries, at time.Time, include func(credbound.OAuthGrant) bool) error {
+func (s *Store) revokeOAuthGrantIDs(ctx context.Context, q *db.Queries, at time.Time, ids []string) error {
+	for _, id := range ids {
+		if err := s.revokeOAuthGrant(ctx, q, id, at); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// revokeOAuthGrantsByUser and its siblings push the filter into SQL against the
+// indexed columns instead of scanning and JSON-decoding the whole table. The
+// reset and anonymize paths reach this inside the audit-committing transaction,
+// so a full-table scan there is a denial-of-service amplifier.
+func (s *Store) revokeOAuthGrantsByUser(ctx context.Context, q *db.Queries, at time.Time, userID string) error {
+	ids, err := q.OAuthGrantIDsByUser(ctx, userID)
+	if err != nil {
+		return mapError(err)
+	}
+	return s.revokeOAuthGrantIDs(ctx, q, at, ids)
+}
+
+func (s *Store) revokeOAuthGrantsByClient(ctx context.Context, q *db.Queries, at time.Time, clientRecordID string) error {
+	ids, err := q.OAuthGrantIDsByClient(ctx, clientRecordID)
+	if err != nil {
+		return mapError(err)
+	}
+	return s.revokeOAuthGrantIDs(ctx, q, at, ids)
+}
+
+func (s *Store) revokeOAuthGrantsByResource(ctx context.Context, q *db.Queries, at time.Time, resourceID string) error {
+	ids, err := q.OAuthGrantIDsByResource(ctx, resourceID)
+	if err != nil {
+		return mapError(err)
+	}
+	return s.revokeOAuthGrantIDs(ctx, q, at, ids)
+}
+
+// revokeOAuthGrantsByIssuer has no indexed column to filter on (issuer id lives
+// only in the JSON payload), so it scans. It runs only when an entire issuer is
+// deleted, a rare root-level administrative operation.
+func (s *Store) revokeOAuthGrantsByIssuer(ctx context.Context, q *db.Queries, at time.Time, issuerID string) error {
 	records, err := q.OAuthGrantRecords(ctx)
 	if err != nil {
 		return mapError(err)
@@ -400,16 +443,11 @@ func (s *Store) revokeOAuthGrants(ctx context.Context, q *db.Queries, at time.Ti
 		if err != nil {
 			return err
 		}
-		if include(grant) {
+		if grant.IssuerID == issuerID {
 			ids = append(ids, record.ID)
 		}
 	}
-	for _, id := range ids {
-		if err := s.revokeOAuthGrant(ctx, q, id, at); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.revokeOAuthGrantIDs(ctx, q, at, ids)
 }
 
 func (s *Store) revokeOAuthGrant(ctx context.Context, q *db.Queries, id string, at time.Time) error {

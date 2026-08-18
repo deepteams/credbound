@@ -458,6 +458,15 @@ SELECT data_json FROM credbound_oauth_grants WHERE id = ?1;
 -- name: OAuthGrantRecords :many
 SELECT id, data_json FROM credbound_oauth_grants;
 
+-- name: OAuthGrantIDsByUser :many
+SELECT id FROM credbound_oauth_grants WHERE user_id = ?1;
+
+-- name: OAuthGrantIDsByClient :many
+SELECT id FROM credbound_oauth_grants WHERE client_record_id = ?1;
+
+-- name: OAuthGrantIDsByResource :many
+SELECT id FROM credbound_oauth_grants WHERE resource_id = ?1;
+
 -- name: OAuthUpdateGrantJSON :execrows
 UPDATE credbound_oauth_grants SET data_json = ?2 WHERE id = ?1;
 

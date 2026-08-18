@@ -1802,6 +1802,87 @@ func (q *Queries) OAuthConsumeRefreshToken(ctx context.Context, arg OAuthConsume
 	return result.RowsAffected()
 }
 
+const oAuthGrantIDsByClient = `-- name: OAuthGrantIDsByClient :many
+SELECT id FROM credbound_oauth_grants WHERE client_record_id = ?1
+`
+
+func (q *Queries) OAuthGrantIDsByClient(ctx context.Context, clientRecordID string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, oAuthGrantIDsByClient, clientRecordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const oAuthGrantIDsByResource = `-- name: OAuthGrantIDsByResource :many
+SELECT id FROM credbound_oauth_grants WHERE resource_id = ?1
+`
+
+func (q *Queries) OAuthGrantIDsByResource(ctx context.Context, resourceID string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, oAuthGrantIDsByResource, resourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const oAuthGrantIDsByUser = `-- name: OAuthGrantIDsByUser :many
+SELECT id FROM credbound_oauth_grants WHERE user_id = ?1
+`
+
+func (q *Queries) OAuthGrantIDsByUser(ctx context.Context, userID string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, oAuthGrantIDsByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const oAuthGrantJSONByID = `-- name: OAuthGrantJSONByID :one
 SELECT data_json FROM credbound_oauth_grants WHERE id = ?1
 `

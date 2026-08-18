@@ -1876,6 +1876,87 @@ func (q *Queries) OAuthConsumeRefreshToken(ctx context.Context, arg OAuthConsume
 	return result.RowsAffected()
 }
 
+const oAuthGrantIDsByClient = `-- name: OAuthGrantIDsByClient :many
+SELECT id FROM credbound.oauth_grants WHERE client_record_id = $1
+`
+
+func (q *Queries) OAuthGrantIDsByClient(ctx context.Context, clientRecordID string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, oAuthGrantIDsByClient, clientRecordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const oAuthGrantIDsByResource = `-- name: OAuthGrantIDsByResource :many
+SELECT id FROM credbound.oauth_grants WHERE resource_id = $1
+`
+
+func (q *Queries) OAuthGrantIDsByResource(ctx context.Context, resourceID string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, oAuthGrantIDsByResource, resourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const oAuthGrantIDsByUser = `-- name: OAuthGrantIDsByUser :many
+SELECT id FROM credbound.oauth_grants WHERE user_id = $1
+`
+
+func (q *Queries) OAuthGrantIDsByUser(ctx context.Context, userID string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, oAuthGrantIDsByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const oAuthGrantJSONByID = `-- name: OAuthGrantJSONByID :one
 SELECT data_json FROM credbound.oauth_grants WHERE id = $1
 `
@@ -2183,6 +2264,17 @@ func (q *Queries) OAuthIssuerJSONByURL(ctx context.Context, issuer string) (json
 	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
+}
+
+const oAuthLockIssuer = `-- name: OAuthLockIssuer :one
+SELECT id FROM credbound.oauth_issuers WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) OAuthLockIssuer(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRowContext(ctx, oAuthLockIssuer, id)
+	var id_2 string
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const oAuthRefreshFamilyExists = `-- name: OAuthRefreshFamilyExists :one

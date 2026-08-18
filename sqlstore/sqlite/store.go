@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"iter"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -42,6 +43,16 @@ type Store struct {
 	db            *sql.DB
 	queries       *db.Queries
 	streamTimeout time.Duration
+	// writeMu serializes mutations. SQLite is a single-writer database with no
+	// row-level locking, so the read-then-write invariant checks inside a
+	// mutation (last root administrator, sole workspace admin, the singleton
+	// audit chain head) are only safe if mutations do not interleave. Holding
+	// this for the duration of each write transaction guarantees that within a
+	// process; reads never take it, so streaming list operations stay
+	// concurrent. Across processes sharing one database file, open the
+	// connection with "_txlock=immediate" so the file-level write lock provides
+	// the same guarantee.
+	writeMu sync.Mutex
 }
 
 // Tx is the SQLite transaction capability exposed only during a Credbound
@@ -119,16 +130,6 @@ func New(database *sql.DB, options ...Option) (*Store, error) {
 	if store.streamTimeout <= 0 {
 		return nil, fmt.Errorf("%w: stream timeout must be positive", credbound.ErrInvalidInput)
 	}
-	// SQLite is a single-writer database and offers no row-level locking, so
-	// the invariant checks that read-then-write inside a mutation (last root
-	// administrator, sole workspace admin, the singleton audit chain head)
-	// stay correct only if write transactions are serialized. Capping the
-	// pool at one connection guarantees that: a second mutation cannot begin
-	// until the first commits, so it always reads the committed state instead
-	// of a stale snapshot. Reads do not open transactions, so streaming list
-	// operations are unaffected. This also removes the SQLITE_BUSY the driver
-	// would otherwise return when two mutations contend for the write lock.
-	database.SetMaxOpenConns(1)
 	if err := verifyConnection(database); err != nil {
 		return nil, err
 	}
@@ -479,7 +480,7 @@ func (s *Store) CompletePasswordReset(ctx context.Context, resetID string, passw
 		if err := q.RevokeUserSessions(ctx, db.RevokeUserSessionsParams{UserID: password.UserID, RevokedAt: nullableTime(&at)}); err != nil {
 			return mapError(err)
 		}
-		if err := s.revokeOAuthGrants(ctx, q, at, func(grant credbound.OAuthGrant) bool { return grant.UserID == password.UserID }); err != nil {
+		if err := s.revokeOAuthGrantsByUser(ctx, q, at, password.UserID); err != nil {
 			return err
 		}
 		return mapError(q.ClearLoginThrottle(ctx, password.UserID))
@@ -947,7 +948,7 @@ func (s *Store) RevokeUserCredentials(ctx context.Context, userID string, at tim
 		if err := q.RevokeUserSessions(ctx, db.RevokeUserSessionsParams{UserID: userID, RevokedAt: nullableTime(&at)}); err != nil {
 			return mapError(err)
 		}
-		return s.revokeOAuthGrants(ctx, q, at, func(grant credbound.OAuthGrant) bool { return grant.UserID == userID })
+		return s.revokeOAuthGrantsByUser(ctx, q, at, userID)
 	})
 }
 
@@ -1012,7 +1013,7 @@ func (s *Store) AnonymizeUser(ctx context.Context, userID string, at time.Time, 
 		if err := q.DeleteUserPasskeys(ctx, userID); err != nil {
 			return mapError(err)
 		}
-		return s.revokeOAuthGrants(ctx, q, at, func(grant credbound.OAuthGrant) bool { return grant.UserID == userID })
+		return s.revokeOAuthGrantsByUser(ctx, q, at, userID)
 	})
 }
 
@@ -1652,11 +1653,19 @@ ORDER BY occurred_at DESC, id DESC LIMIT ?`
 	}
 }
 
+// lockWrites acquires the mutation mutex and returns its release function, so a
+// mutation can serialize itself with "defer s.lockWrites()()".
+func (s *Store) lockWrites() func() {
+	s.writeMu.Lock()
+	return s.writeMu.Unlock
+}
+
 func (s *Store) mutate(ctx context.Context, commit credbound.Commit, fn func(*db.Queries) error) error {
 	return s.mutateIf(ctx, commit, func(q *db.Queries) (bool, error) { return true, fn(q) })
 }
 
 func (s *Store) mutateIf(ctx context.Context, commit credbound.Commit, fn func(*db.Queries) (bool, error)) error {
+	defer s.lockWrites()()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return mapError(err)

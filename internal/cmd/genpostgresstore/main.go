@@ -202,6 +202,29 @@ func boolValue(value bool) bool { return value }`, 1)
 				return mapError(lockErr)
 			}
 			admin, adminErr := q.GetInstanceAdministrator(ctx, userID)`, 1)
+	// AnonymizeUser applies the same last-root / sole-admin guards as
+	// SetUserDisabled and therefore needs the same row locks on PostgreSQL. The
+	// SQLite source has no locks (it serializes writes on a single connection),
+	// so inject them into the generated PostgreSQL code before the count.
+	code = strings.Replace(code, `		if _, err := q.GetUserByID(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		admin, adminErr := q.GetInstanceAdministrator(ctx, userID)`, `		if _, err := q.GetUserByID(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		if _, lockErr := q.LockRootAdministrators(ctx); lockErr != nil {
+			return mapError(lockErr)
+		}
+		if _, lockErr := q.LockUserAdminWorkspaces(ctx, userID); lockErr != nil {
+			return mapError(lockErr)
+		}
+		admin, adminErr := q.GetInstanceAdministrator(ctx, userID)`, 1)
+	// The in-process write mutex serializes SQLite mutations to protect the
+	// read-then-write invariants; PostgreSQL protects them with row locks and
+	// must let mutations run concurrently, so drop the mutex acquisition from
+	// the generated mutateIf. The now-unused writeMu field and lockWrites
+	// method are harmless and left in place.
+	code = strings.Replace(code, "\tdefer s.lockWrites()()\n", "", 1)
 	code = strings.Replace(code, `func (s *Store) UpsertMembership(ctx context.Context, membership credbound.Membership, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		current, err := q.GetMembership`, `func (s *Store) UpsertMembership(ctx context.Context, membership credbound.Membership, commit credbound.Commit) error {
@@ -439,6 +462,16 @@ func generateOAuth() {
 	code = strings.Replace(code, `var _ = errors.Is
 var _ = strings.Builder{}
 `, "", 1)
+	// Open dynamic client registration counts existing clients then inserts,
+	// with no indexed guard. SQLite serializes writes on one connection;
+	// PostgreSQL must lock the issuer row so concurrent open registrations for
+	// the same issuer cannot each read a stale count and overrun the limit.
+	code = strings.Replace(code, `		if value.Source == credbound.OAuthClientDCR && issuer.DCRMode == credbound.OAuthDCROpen {
+			records, err := q.OAuthClientJSONsByIssuer(ctx, value.IssuerID)`, `		if value.Source == credbound.OAuthClientDCR && issuer.DCRMode == credbound.OAuthDCROpen {
+			if _, err := q.OAuthLockIssuer(ctx, value.IssuerID); err != nil {
+				return mapError(err)
+			}
+			records, err := q.OAuthClientJSONsByIssuer(ctx, value.IssuerID)`, 1)
 	code = strings.ReplaceAll(code, "(? = '' OR created_at", "(NOT ? OR created_at")
 	code = strings.ReplaceAll(code, "(? = '' OR user_id = ?)", "(NOT ? OR user_id = ?)")
 	code = strings.ReplaceAll(code, "(? = '' OR workspace_id = ?)", "(NOT ? OR workspace_id = ?)")

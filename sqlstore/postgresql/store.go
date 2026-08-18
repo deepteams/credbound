@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"iter"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -53,6 +54,16 @@ type Store struct {
 	rows          RowQuerier
 	queries       *db.Queries
 	streamTimeout time.Duration
+	// writeMu serializes mutations. SQLite is a single-writer database with no
+	// row-level locking, so the read-then-write invariant checks inside a
+	// mutation (last root administrator, sole workspace admin, the singleton
+	// audit chain head) are only safe if mutations do not interleave. Holding
+	// this for the duration of each write transaction guarantees that within a
+	// process; reads never take it, so streaming list operations stay
+	// concurrent. Across processes sharing one database file, open the
+	// connection with "_txlock=immediate" so the file-level write lock provides
+	// the same guarantee.
+	writeMu sync.Mutex
 }
 
 // Tx is the PostgreSQL transaction capability exposed only during a Credbound
@@ -456,7 +467,7 @@ func (s *Store) CompletePasswordReset(ctx context.Context, resetID string, passw
 		if err := q.RevokeUserSessions(ctx, db.RevokeUserSessionsParams{UserID: password.UserID, RevokedAt: nullableTime(&at)}); err != nil {
 			return mapError(err)
 		}
-		if err := s.revokeOAuthGrants(ctx, q, at, func(grant credbound.OAuthGrant) bool { return grant.UserID == password.UserID }); err != nil {
+		if err := s.revokeOAuthGrantsByUser(ctx, q, at, password.UserID); err != nil {
 			return err
 		}
 		return mapError(q.ClearLoginThrottle(ctx, password.UserID))
@@ -924,7 +935,7 @@ func (s *Store) RevokeUserCredentials(ctx context.Context, userID string, at tim
 		if err := q.RevokeUserSessions(ctx, db.RevokeUserSessionsParams{UserID: userID, RevokedAt: nullableTime(&at)}); err != nil {
 			return mapError(err)
 		}
-		return s.revokeOAuthGrants(ctx, q, at, func(grant credbound.OAuthGrant) bool { return grant.UserID == userID })
+		return s.revokeOAuthGrantsByUser(ctx, q, at, userID)
 	})
 }
 
@@ -938,11 +949,6 @@ func (s *Store) AnonymizeUser(ctx context.Context, userID string, at time.Time, 
 		if _, err := q.GetUserByID(ctx, userID); err != nil {
 			return mapError(err)
 		}
-		// Take the same row locks as SetUserDisabled before counting: the
-		// scrub disables the account, so two concurrent anonymizations must
-		// not each read a stale "more than one root remains" (or unorphaned
-		// workspace) and then disable distinct rows, which would irreversibly
-		// erase the last root administrator or orphan a workspace.
 		if _, lockErr := q.LockRootAdministrators(ctx); lockErr != nil {
 			return mapError(lockErr)
 		}
@@ -1000,7 +1006,7 @@ func (s *Store) AnonymizeUser(ctx context.Context, userID string, at time.Time, 
 		if err := q.DeleteUserPasskeys(ctx, userID); err != nil {
 			return mapError(err)
 		}
-		return s.revokeOAuthGrants(ctx, q, at, func(grant credbound.OAuthGrant) bool { return grant.UserID == userID })
+		return s.revokeOAuthGrantsByUser(ctx, q, at, userID)
 	})
 }
 

@@ -410,6 +410,9 @@ UPDATE credbound.oauth_issuers SET data_json = $2 WHERE id = $1;
 -- name: OAuthIssuerJSONByID :one
 SELECT data_json FROM credbound.oauth_issuers WHERE id = $1;
 
+-- name: OAuthLockIssuer :one
+SELECT id FROM credbound.oauth_issuers WHERE id = $1 FOR UPDATE;
+
 -- name: OAuthIssuerJSONByURL :one
 SELECT data_json FROM credbound.oauth_issuers WHERE issuer = $1;
 
@@ -474,6 +477,15 @@ SELECT data_json FROM credbound.oauth_grants WHERE id = $1;
 
 -- name: OAuthGrantRecords :many
 SELECT id, data_json FROM credbound.oauth_grants;
+
+-- name: OAuthGrantIDsByUser :many
+SELECT id FROM credbound.oauth_grants WHERE user_id = $1;
+
+-- name: OAuthGrantIDsByClient :many
+SELECT id FROM credbound.oauth_grants WHERE client_record_id = $1;
+
+-- name: OAuthGrantIDsByResource :many
+SELECT id FROM credbound.oauth_grants WHERE resource_id = $1;
 
 -- name: OAuthUpdateGrantJSON :execrows
 UPDATE credbound.oauth_grants SET data_json = $2 WHERE id = $1;
