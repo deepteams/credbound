@@ -130,6 +130,43 @@ func (m *Manager) UpdateSCIMConfiguration(ctx context.Context, actor Authenticat
 	return cloneSCIMConfiguration(configuration), nil
 }
 
+// SCIMConfigurations streams the workspace's provisioning domains, oldest
+// first, so an administration interface can inventory them. The actor needs
+// workspace RBAC write in that workspace — the permission governing every
+// SCIM administration operation — but no step-up, since nothing mutates.
+// ErrNotSupported without the SCIM capability.
+func (m *Manager) SCIMConfigurations(ctx context.Context, actor Authentication, workspaceID string) iter.Seq2[SCIMConfiguration, error] {
+	if m.scimStore == nil {
+		return errorSeq[SCIMConfiguration](ErrNotSupported)
+	}
+	if !validUUIDv7(workspaceID) {
+		return errorSeq[SCIMConfiguration](fmt.Errorf("%w: invalid workspace id", ErrInvalidInput))
+	}
+	if err := m.AuthorizePermission(ctx, actor, workspaceID, PermissionWorkspaceRBACWrite); err != nil {
+		return errorSeq[SCIMConfiguration](err)
+	}
+	return m.scimStore.SCIMConfigurations(ctx, workspaceID)
+}
+
+// SCIMCredentials streams the configuration's bearer credentials, oldest
+// first, with digests omitted, so an administration interface can inventory
+// and rotate them. The actor needs workspace RBAC write in the
+// configuration's workspace but no step-up, since nothing mutates.
+// ErrNotSupported without the SCIM capability.
+func (m *Manager) SCIMCredentials(ctx context.Context, actor Authentication, configurationID string) iter.Seq2[SCIMCredential, error] {
+	if m.scimStore == nil {
+		return errorSeq[SCIMCredential](ErrNotSupported)
+	}
+	configuration, err := m.scimStore.SCIMConfiguration(ctx, configurationID)
+	if err != nil {
+		return errorSeq[SCIMCredential](err)
+	}
+	if err := m.AuthorizePermission(ctx, actor, configuration.WorkspaceID, PermissionWorkspaceRBACWrite); err != nil {
+		return errorSeq[SCIMCredential](err)
+	}
+	return m.scimStore.SCIMCredentials(ctx, configurationID)
+}
+
 // RotateSCIMCredential issues an additional bearer credential for the
 // configuration and returns the raw token exactly once; existing credentials
 // stay valid until individually revoked. The actor needs a fresh AAL2

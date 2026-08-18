@@ -53,6 +53,62 @@ func (s *Store) SCIMConfiguration(ctx context.Context, id string) (credbound.SCI
 	return cloneSCIMConfiguration(configuration), nil
 }
 
+// SCIMConfigurations streams the workspace's provisioning domains, oldest
+// first.
+func (s *Store) SCIMConfigurations(ctx context.Context, workspaceID string) iter.Seq2[credbound.SCIMConfiguration, error] {
+	return func(yield func(credbound.SCIMConfiguration, error) bool) {
+		if err := ctx.Err(); err != nil {
+			yield(credbound.SCIMConfiguration{}, err)
+			return
+		}
+		s.mu.RLock()
+		values := make([]credbound.SCIMConfiguration, 0)
+		for _, configuration := range s.scimConfigurations {
+			if configuration.WorkspaceID == workspaceID {
+				values = append(values, cloneSCIMConfiguration(configuration))
+			}
+		}
+		s.mu.RUnlock()
+		sort.Slice(values, func(i, j int) bool {
+			return newer(values[j].CreatedAt, values[j].ID, values[i].CreatedAt, values[i].ID)
+		})
+		for _, value := range values {
+			if !yield(value, nil) {
+				return
+			}
+		}
+	}
+}
+
+// SCIMCredentials streams the configuration's bearer credentials, oldest
+// first, with digests omitted.
+func (s *Store) SCIMCredentials(ctx context.Context, configurationID string) iter.Seq2[credbound.SCIMCredential, error] {
+	return func(yield func(credbound.SCIMCredential, error) bool) {
+		if err := ctx.Err(); err != nil {
+			yield(credbound.SCIMCredential{}, err)
+			return
+		}
+		s.mu.RLock()
+		values := make([]credbound.SCIMCredential, 0)
+		for _, credential := range s.scimCredentials {
+			if credential.ConfigurationID == configurationID {
+				value := cloneSCIMCredential(credential)
+				value.Digest = nil
+				values = append(values, value)
+			}
+		}
+		s.mu.RUnlock()
+		sort.Slice(values, func(i, j int) bool {
+			return newer(values[j].CreatedAt, values[j].ID, values[i].CreatedAt, values[i].ID)
+		})
+		for _, value := range values {
+			if !yield(value, nil) {
+				return
+			}
+		}
+	}
+}
+
 // UpdateSCIMConfiguration persists the configuration's settings and applies
 // the recomputed memberships in the same commit.
 func (s *Store) UpdateSCIMConfiguration(ctx context.Context, configuration credbound.SCIMConfiguration, memberships []credbound.Membership, commit credbound.Commit) error {

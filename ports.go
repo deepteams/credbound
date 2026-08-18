@@ -164,6 +164,10 @@ type Store interface {
 	RemoveMembership(context.Context, string, string, time.Time, Commit) error
 	Memberships(context.Context, string, PageRequest) iter.Seq2[PageEvent[Membership], error]
 	InstanceAdministrator(context.Context, string) (InstanceAdministrator, error)
+	// InstanceAdministrators streams every instance role assignment, oldest
+	// first. The set is bounded by governance, not by end users, so it is
+	// not paginated.
+	InstanceAdministrators(context.Context) iter.Seq2[InstanceAdministrator, error]
 	SetInstanceRole(context.Context, InstanceAdministrator, Commit) error
 	RemoveInstanceRole(context.Context, string, Commit) error
 
@@ -322,8 +326,15 @@ type DomainVerifier interface {
 type SCIMStore interface {
 	CreateSCIMConfiguration(context.Context, SCIMConfiguration, SCIMCredential, Commit) error
 	SCIMConfiguration(context.Context, string) (SCIMConfiguration, error)
+	// SCIMConfigurations streams the workspace's provisioning domains,
+	// oldest first. A workspace holds few configurations, so the stream is
+	// not paginated.
+	SCIMConfigurations(context.Context, string) iter.Seq2[SCIMConfiguration, error]
 	UpdateSCIMConfiguration(context.Context, SCIMConfiguration, []Membership, Commit) error
 	SCIMConfigurationByCredentialPrefix(context.Context, string) (SCIMConfiguration, SCIMCredential, error)
+	// SCIMCredentials streams the configuration's bearer credentials, oldest
+	// first, with digests omitted.
+	SCIMCredentials(context.Context, string) iter.Seq2[SCIMCredential, error]
 	SaveSCIMCredential(context.Context, SCIMCredential, Commit) error
 	RevokeSCIMCredential(context.Context, string, string, time.Time, Commit) error
 	TouchSCIMCredential(context.Context, string, time.Time, Commit) error
@@ -387,6 +398,9 @@ type OAuthStore interface {
 	OAuthClients(context.Context, string, PageRequest) iter.Seq2[PageEvent[OAuthClient], error]
 	CreateOAuthInitialAccessToken(context.Context, OAuthInitialAccessToken, Commit) error
 	OAuthInitialAccessTokenByPrefix(context.Context, string) (OAuthInitialAccessToken, error)
+	// OAuthInitialAccessTokens streams the issuer's DCR bootstrap
+	// credentials, oldest first, revoked ones included and digests omitted.
+	OAuthInitialAccessTokens(context.Context, string) iter.Seq2[OAuthInitialAccessToken, error]
 	RevokeOAuthInitialAccessToken(context.Context, string, time.Time, Commit) error
 
 	CreateOAuthGrantAndCode(context.Context, OAuthGrant, OAuthAuthorizationCode, Commit) error

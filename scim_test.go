@@ -311,6 +311,39 @@ func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 	if _, err := manager.AuthenticateSCIM(context.Background(), rotated.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("revoked SCIM credential = %v", err)
 	}
+	// The administration reads inventory the workspace's configurations and
+	// the configuration's credentials — digests omitted, revocation visible.
+	configurations := 0
+	for configuration, err := range manager.SCIMConfigurations(context.Background(), admin, workspace.ID) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if configuration.ID != issued.Configuration.ID {
+			t.Fatalf("inventoried SCIM configuration = %#v", configuration)
+		}
+		configurations++
+	}
+	if configurations != 1 {
+		t.Fatalf("SCIM configurations = %d, want 1", configurations)
+	}
+	credentials := map[string]credbound.SCIMCredential{}
+	for credential, err := range manager.SCIMCredentials(context.Background(), admin, issued.Configuration.ID) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if credential.Digest != nil {
+			t.Fatalf("credential inventory leaked a digest: %#v", credential)
+		}
+		credentials[credential.ID] = credential
+	}
+	if len(credentials) != 2 || credentials[rotated.Credential.ID].RevokedAt == nil {
+		t.Fatalf("SCIM credential inventory = %#v", credentials)
+	}
+	for _, err := range manager.SCIMCredentials(context.Background(), credbound.Authentication{UserID: link.UserID}, issued.Configuration.ID) {
+		if !errors.Is(err, credbound.ErrForbidden) {
+			t.Fatalf("non-admin SCIM credential inventory = %v", err)
+		}
+	}
 	if err := manager.DisableSCIMConfiguration(context.Background(), admin, issued.Configuration.ID); err != nil {
 		t.Fatal(err)
 	}

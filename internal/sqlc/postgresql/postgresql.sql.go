@@ -1717,6 +1717,112 @@ func (q *Queries) ListAcceptedInvitationsForUser(ctx context.Context, acceptedUs
 	return items, nil
 }
 
+const listInstanceAdministrators = `-- name: ListInstanceAdministrators :many
+SELECT user_id, role, created_at, updated_at FROM credbound.instance_administrators ORDER BY created_at, user_id
+`
+
+func (q *Queries) ListInstanceAdministrators(ctx context.Context) ([]CredboundInstanceAdministrator, error) {
+	rows, err := q.db.QueryContext(ctx, listInstanceAdministrators)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CredboundInstanceAdministrator
+	for rows.Next() {
+		var i CredboundInstanceAdministrator
+		if err := rows.Scan(
+			&i.UserID,
+			&i.Role,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSCIMConfigurationsByWorkspace = `-- name: ListSCIMConfigurationsByWorkspace :many
+SELECT id, workspace_id, enabled, default_role, trust_directory_emails, group_role_mappings_json, created_at, updated_at
+FROM credbound.scim_configurations WHERE workspace_id = $1 ORDER BY created_at, id
+`
+
+func (q *Queries) ListSCIMConfigurationsByWorkspace(ctx context.Context, workspaceID string) ([]CredboundScimConfiguration, error) {
+	rows, err := q.db.QueryContext(ctx, listSCIMConfigurationsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CredboundScimConfiguration
+	for rows.Next() {
+		var i CredboundScimConfiguration
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Enabled,
+			&i.DefaultRole,
+			&i.TrustDirectoryEmails,
+			&i.GroupRoleMappingsJson,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSCIMCredentials = `-- name: ListSCIMCredentials :many
+SELECT id, configuration_id, prefix, digest, created_at, expires_at, last_used_at, revoked_at
+FROM credbound.scim_credentials WHERE configuration_id = $1 ORDER BY created_at, id
+`
+
+func (q *Queries) ListSCIMCredentials(ctx context.Context, configurationID string) ([]CredboundScimCredential, error) {
+	rows, err := q.db.QueryContext(ctx, listSCIMCredentials, configurationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CredboundScimCredential
+	for rows.Next() {
+		var i CredboundScimCredential
+		if err := rows.Scan(
+			&i.ID,
+			&i.ConfigurationID,
+			&i.Prefix,
+			&i.Digest,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.LastUsedAt,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSCIMUsersForUser = `-- name: ListSCIMUsersForUser :many
 SELECT id, configuration_id, user_id, external_id, normalized_user_name, display_name, emails_json, profile_json, active, created_at, updated_at, deprovisioned_at
 FROM credbound.scim_users WHERE user_id = $1 ORDER BY created_at, id
@@ -2222,6 +2328,33 @@ func (q *Queries) OAuthInitialAccessTokenJSONByPrefix(ctx context.Context, prefi
 	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
+}
+
+const oAuthInitialAccessTokenJSONsByIssuer = `-- name: OAuthInitialAccessTokenJSONsByIssuer :many
+SELECT data_json FROM credbound.oauth_initial_access_tokens WHERE issuer_id = $1 ORDER BY id
+`
+
+func (q *Queries) OAuthInitialAccessTokenJSONsByIssuer(ctx context.Context, issuerID string) ([]json.RawMessage, error) {
+	rows, err := q.db.QueryContext(ctx, oAuthInitialAccessTokenJSONsByIssuer, issuerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []json.RawMessage
+	for rows.Next() {
+		var data_json json.RawMessage
+		if err := rows.Scan(&data_json); err != nil {
+			return nil, err
+		}
+		items = append(items, data_json)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const oAuthInsertAccessToken = `-- name: OAuthInsertAccessToken :exec

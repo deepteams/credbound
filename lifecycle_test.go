@@ -233,6 +233,76 @@ func TestIdentityLifecycleRejectsInvalidAndUnauthorizedMutations(t *testing.T) {
 	assertLifecycleError(t, f.manager.Memberships(ctx, root, workspace.ID, credbound.PageRequest{Limit: 101}), credbound.ErrInvalidInput)
 }
 
+// TestWorkspaceMembersAndInstanceAdministratorReads pins the administration
+// reads an interface needs without over-granting: WorkspaceMembers joins
+// each membership with the member's name and primary email under workspace
+// users read alone (no instance-wide admin.users.read), and the instance
+// role roster is readable under admin.instance_roles.read.
+func TestWorkspaceMembersAndInstanceAdministratorReads(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	authn, workspace := f.bootstrap(t)
+	root := aal2(authn.UserID, f.now)
+
+	admin, err := f.manager.CreateUser(ctx, root, workspace.ID, credbound.CreateUserInput{
+		Email: "wsadmin@example.com", DisplayName: "Workspace Admin", Password: "correct horse battery", Role: credbound.RoleAdmin,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, err := f.manager.CreateUser(ctx, root, workspace.ID, credbound.CreateUserInput{
+		Email: "developer@example.com", DisplayName: "Developer", Password: "another secure password", Role: credbound.RoleMember,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The workspace admin holds no instance role, so the global user list is
+	// out of reach — but the member projection is not.
+	workspaceAdmin := aal2(admin.ID, f.now)
+	assertLifecycleError(t, f.manager.Users(ctx, workspaceAdmin, credbound.PageRequest{}), credbound.ErrForbidden)
+	members := collectLifecyclePage(t, f.manager.WorkspaceMembers(ctx, workspaceAdmin, workspace.ID, credbound.PageRequest{}))
+	if len(members) != 3 {
+		t.Fatalf("workspace members = %#v", members)
+	}
+	emails := map[string]string{}
+	for _, row := range members {
+		if row.User.ID != row.Membership.UserID || row.Membership.WorkspaceID != workspace.ID {
+			t.Fatalf("member row mismatch: %#v", row)
+		}
+		emails[row.User.ID] = row.User.Email
+	}
+	if emails[member.ID] != "developer@example.com" || emails[admin.ID] != "wsadmin@example.com" {
+		t.Fatalf("member emails = %#v", emails)
+	}
+	// A plain member cannot read the roster.
+	assertLifecycleError(t, f.manager.WorkspaceMembers(ctx, aal2(member.ID, f.now), workspace.ID, credbound.PageRequest{}), credbound.ErrForbidden)
+
+	// The instance role roster requires admin.instance_roles.read.
+	roster := []credbound.InstanceAdministrator{}
+	for value, err := range f.manager.InstanceAdministrators(ctx, root) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		roster = append(roster, value)
+	}
+	if len(roster) != 1 || roster[0].UserID != authn.UserID || roster[0].Role != credbound.InstanceRoleRoot {
+		t.Fatalf("instance role roster = %#v", roster)
+	}
+	direct, err := f.manager.InstanceAdministrator(ctx, root, authn.UserID)
+	if err != nil || direct.Role != credbound.InstanceRoleRoot {
+		t.Fatalf("instance administrator = %#v, %v", direct, err)
+	}
+	for _, err := range f.manager.InstanceAdministrators(ctx, workspaceAdmin) {
+		if !errors.Is(err, credbound.ErrForbidden) {
+			t.Fatalf("workspace admin roster read = %v", err)
+		}
+	}
+	if _, err := f.manager.InstanceAdministrator(ctx, workspaceAdmin, authn.UserID); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("workspace admin role read = %v", err)
+	}
+}
+
 func collectLifecyclePage[T any](t *testing.T, sequence func(func(credbound.PageEvent[T], error) bool)) []T {
 	t.Helper()
 	var values []T

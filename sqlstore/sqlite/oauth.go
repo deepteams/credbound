@@ -295,6 +295,29 @@ func (s *Store) OAuthInitialAccessTokenByPrefix(ctx context.Context, prefix stri
 	return oauthDecodeQuery[credbound.OAuthInitialAccessToken](s.queries.OAuthInitialAccessTokenJSONByPrefix(ctx, prefix))
 }
 
+// OAuthInitialAccessTokens streams the issuer's DCR bootstrap credentials,
+// oldest first, revoked ones included and digests omitted.
+func (s *Store) OAuthInitialAccessTokens(ctx context.Context, issuerID string) iter.Seq2[credbound.OAuthInitialAccessToken, error] {
+	return func(yield func(credbound.OAuthInitialAccessToken, error) bool) {
+		records, err := s.queries.OAuthInitialAccessTokenJSONsByIssuer(ctx, issuerID)
+		if err != nil {
+			yield(credbound.OAuthInitialAccessToken{}, mapError(err))
+			return
+		}
+		for _, raw := range records {
+			value, err := oauthDecode[credbound.OAuthInitialAccessToken](raw)
+			if err != nil {
+				yield(credbound.OAuthInitialAccessToken{}, err)
+				return
+			}
+			value.Digest = nil
+			if !yield(value, nil) {
+				return
+			}
+		}
+	}
+}
+
 // RevokeOAuthInitialAccessToken marks the token revoked.
 func (s *Store) RevokeOAuthInitialAccessToken(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
 	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {

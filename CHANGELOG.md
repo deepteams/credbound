@@ -7,6 +7,29 @@ breaking changes may land in any release and are called out explicitly.
 
 ## Unreleased
 
+### Added
+
+- The reads an administration interface needs no longer require
+  over-granting or going without: `Manager.WorkspaceMembers` streams a
+  workspace's memberships joined with each member's display name and
+  primary email under workspace users read alone; the unused
+  `admin.instance_roles.read` permission now has readers
+  (`Manager.InstanceAdministrator`, `Manager.InstanceAdministrators`);
+  `Manager.SCIMConfigurations` and `Manager.SCIMCredentials` inventory a
+  workspace's provisioning domains and their credentials (digests
+  omitted); and `Manager.OAuthInitialAccessTokens` inventories an issuer's
+  DCR bootstrap credentials (digests omitted). Breaking for custom stores:
+  the `Store`, `SCIMStore` and `OAuthStore` ports gain
+  `InstanceAdministrators`, `SCIMConfigurations`/`SCIMCredentials` and
+  `OAuthInitialAccessTokens` respectively; stores embedding the bundled
+  implementations inherit them.
+
+- `ExportUserData` now includes the tenant-scoped SCIM profiles, the
+  workspace invitations the user accepted, and the user's OAuth grants,
+  backed by the new optional `PrivacyStore` capability (implemented by
+  every first-party store); `AnonymizeUser` scrubs SCIM profiles and
+  accepted-invitation addresses in the same transaction.
+
 ### Fixed
 
 - SCIM list responses are now assembled in memory (the page is bounded at

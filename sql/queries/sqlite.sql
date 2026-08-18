@@ -44,6 +44,17 @@ UPDATE credbound_scim_users SET external_id = NULL, normalized_user_name = 'anon
 -- name: ScrubUserAcceptedInvitations :exec
 UPDATE credbound_workspace_invitations SET email = 'anonymized-' || id || '@invalid' WHERE accepted_user_id = ?1;
 
+-- name: ListInstanceAdministrators :many
+SELECT user_id, role, created_at, updated_at FROM credbound_instance_administrators ORDER BY created_at, user_id;
+
+-- name: ListSCIMConfigurationsByWorkspace :many
+SELECT id, workspace_id, enabled, default_role, trust_directory_emails, group_role_mappings_json, created_at, updated_at
+FROM credbound_scim_configurations WHERE workspace_id = ?1 ORDER BY created_at, id;
+
+-- name: ListSCIMCredentials :many
+SELECT id, configuration_id, prefix, digest, created_at, expires_at, last_used_at, revoked_at
+FROM credbound_scim_credentials WHERE configuration_id = ?1 ORDER BY created_at, id;
+
 -- name: ListSCIMUsersForUser :many
 SELECT id, configuration_id, user_id, external_id, normalized_user_name, display_name, emails_json, profile_json, active, created_at, updated_at, deprovisioned_at
 FROM credbound_scim_users WHERE user_id = ?1 ORDER BY created_at, id;
@@ -476,6 +487,9 @@ VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);
 
 -- name: OAuthInitialAccessTokenJSONByPrefix :one
 SELECT data_json FROM credbound_oauth_initial_access_tokens WHERE prefix = ?1;
+
+-- name: OAuthInitialAccessTokenJSONsByIssuer :many
+SELECT data_json FROM credbound_oauth_initial_access_tokens WHERE issuer_id = ?1 ORDER BY id;
 
 -- name: OAuthInitialAccessTokenJSONByID :one
 SELECT data_json FROM credbound_oauth_initial_access_tokens WHERE id = ?1;

@@ -493,6 +493,35 @@ func (s *Store) OAuthInitialAccessTokenByPrefix(ctx context.Context, prefix stri
 	return cloneOAuthInitialToken(s.oauthInitialTokens[id]), nil
 }
 
+// OAuthInitialAccessTokens streams the issuer's DCR bootstrap credentials,
+// oldest first, revoked ones included and digests omitted.
+func (s *Store) OAuthInitialAccessTokens(ctx context.Context, issuerID string) iter.Seq2[credbound.OAuthInitialAccessToken, error] {
+	return func(yield func(credbound.OAuthInitialAccessToken, error) bool) {
+		if err := ctx.Err(); err != nil {
+			yield(credbound.OAuthInitialAccessToken{}, err)
+			return
+		}
+		s.mu.RLock()
+		values := make([]credbound.OAuthInitialAccessToken, 0)
+		for _, token := range s.oauthInitialTokens {
+			if token.IssuerID == issuerID {
+				value := cloneOAuthInitialToken(token)
+				value.Digest = nil
+				values = append(values, value)
+			}
+		}
+		s.mu.RUnlock()
+		sort.Slice(values, func(i, j int) bool {
+			return newer(values[j].CreatedAt, values[j].ID, values[i].CreatedAt, values[i].ID)
+		})
+		for _, value := range values {
+			if !yield(value, nil) {
+				return
+			}
+		}
+	}
+}
+
 // RevokeOAuthInitialAccessToken marks the token revoked.
 func (s *Store) RevokeOAuthInitialAccessToken(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {

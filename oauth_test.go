@@ -294,6 +294,26 @@ func TestOAuthAuthorizationRefreshAndDCR(t *testing.T) {
 	if err := f.manager.RevokeOAuthInitialAccessToken(ctx, actor, credbound.TrustedRequest{Local: true}, initial.Credential.ID); err != nil {
 		t.Fatal(err)
 	}
+	// The inventory lists the token — revoked, with its registration count
+	// and without a digest — and is denied to non-administrators.
+	inventoried := 0
+	for token, err := range f.manager.OAuthInitialAccessTokens(ctx, actor, issuer.ID) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if token.ID != initial.Credential.ID || token.Digest != nil || token.RevokedAt == nil || token.RegistrationCount != 1 {
+			t.Fatalf("inventoried initial access token = %#v", token)
+		}
+		inventoried++
+	}
+	if inventoried != 1 {
+		t.Fatalf("initial access tokens = %d, want 1", inventoried)
+	}
+	for _, err := range f.manager.OAuthInitialAccessTokens(ctx, credbound.Authentication{}, issuer.ID) {
+		if !errors.Is(err, credbound.ErrUnauthorized) {
+			t.Fatalf("anonymous initial access token inventory = %v", err)
+		}
+	}
 	metadata, err := f.manager.OAuthAuthorizationServerMetadata(ctx, issuer.Issuer)
 	if err != nil || metadata.RegistrationEndpoint == "" || metadata.ClientIDMetadataDocumentSupported {
 		t.Fatalf("metadata = %#v, %v", metadata, err)

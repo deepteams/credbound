@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 )
 
 var defaultAdminPermissions = map[InstanceRole][]Permission{
@@ -137,6 +138,29 @@ func (m *Manager) requireAdminMutation(ctx context.Context, actor Authentication
 		return nil
 	}
 	return m.requireStepUp(ctx, actor, operation)
+}
+
+// InstanceAdministrator returns one user's instance-administration role. It
+// requires admin instance-roles read; an unknown or role-less user reports
+// ErrNotFound.
+func (m *Manager) InstanceAdministrator(ctx context.Context, actor Authentication, userID string) (InstanceAdministrator, error) {
+	if err := m.AuthorizeAdmin(ctx, actor, PermissionInstanceRolesRead); err != nil {
+		return InstanceAdministrator{}, err
+	}
+	if !validUUIDv7(userID) {
+		return InstanceAdministrator{}, fmt.Errorf("%w: invalid user id", ErrInvalidInput)
+	}
+	return m.store.InstanceAdministrator(ctx, userID)
+}
+
+// InstanceAdministrators streams every instance role assignment, oldest
+// first, so an administration interface can render the governance roster.
+// It requires admin instance-roles read.
+func (m *Manager) InstanceAdministrators(ctx context.Context, actor Authentication) iter.Seq2[InstanceAdministrator, error] {
+	if err := m.AuthorizeAdmin(ctx, actor, PermissionInstanceRolesRead); err != nil {
+		return errorSeq[InstanceAdministrator](err)
+	}
+	return m.store.InstanceAdministrators(ctx)
 }
 
 // SetInstanceRole grants or changes a user's instance-administration role,

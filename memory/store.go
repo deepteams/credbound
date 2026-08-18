@@ -2388,6 +2388,31 @@ func (s *Store) InstanceAdministrator(ctx context.Context, userID string) (credb
 	return admin, nil
 }
 
+// InstanceAdministrators streams every instance role assignment, oldest
+// first.
+func (s *Store) InstanceAdministrators(ctx context.Context) iter.Seq2[credbound.InstanceAdministrator, error] {
+	return func(yield func(credbound.InstanceAdministrator, error) bool) {
+		if err := ctx.Err(); err != nil {
+			yield(credbound.InstanceAdministrator{}, err)
+			return
+		}
+		s.mu.RLock()
+		values := make([]credbound.InstanceAdministrator, 0, len(s.admins))
+		for _, admin := range s.admins {
+			values = append(values, admin)
+		}
+		s.mu.RUnlock()
+		sort.Slice(values, func(i, j int) bool {
+			return newer(values[j].CreatedAt, values[j].UserID, values[i].CreatedAt, values[i].UserID)
+		})
+		for _, value := range values {
+			if !yield(value, nil) {
+				return
+			}
+		}
+	}
+}
+
 // SetInstanceRole grants or changes a user's instance role, refusing to
 // demote the last root administrator (credbound.ErrConflict).
 func (s *Store) SetInstanceRole(ctx context.Context, admin credbound.InstanceAdministrator, commit credbound.Commit) error {

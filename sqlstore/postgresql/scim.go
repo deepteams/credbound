@@ -537,6 +537,49 @@ FROM credbound.scim_groups WHERE configuration_id = $1 AND deleted_at IS NULL`
 
 func sqlBool(value bool) bool { return value }
 
+// SCIMConfigurations streams the workspace's provisioning domains, oldest
+// first.
+func (s *Store) SCIMConfigurations(ctx context.Context, workspaceID string) iter.Seq2[credbound.SCIMConfiguration, error] {
+	return func(yield func(credbound.SCIMConfiguration, error) bool) {
+		rows, err := s.queries.ListSCIMConfigurationsByWorkspace(ctx, workspaceID)
+		if err != nil {
+			yield(credbound.SCIMConfiguration{}, mapError(err))
+			return
+		}
+		for _, row := range rows {
+			value, err := scimConfigurationFromRow(row)
+			if err != nil {
+				yield(credbound.SCIMConfiguration{}, err)
+				return
+			}
+			if !yield(value, nil) {
+				return
+			}
+		}
+	}
+}
+
+// SCIMCredentials streams the configuration's bearer credentials, oldest
+// first, with digests omitted.
+func (s *Store) SCIMCredentials(ctx context.Context, configurationID string) iter.Seq2[credbound.SCIMCredential, error] {
+	return func(yield func(credbound.SCIMCredential, error) bool) {
+		rows, err := s.queries.ListSCIMCredentials(ctx, configurationID)
+		if err != nil {
+			yield(credbound.SCIMCredential{}, mapError(err))
+			return
+		}
+		for _, row := range rows {
+			value := credbound.SCIMCredential{
+				ID: row.ID, ConfigurationID: row.ConfigurationID, Prefix: row.Prefix,
+				CreatedAt: row.CreatedAt, ExpiresAt: timePointer(row.ExpiresAt), LastUsedAt: timePointer(row.LastUsedAt), RevokedAt: timePointer(row.RevokedAt),
+			}
+			if !yield(value, nil) {
+				return
+			}
+		}
+	}
+}
+
 // SCIMUsersByUser streams every tenant-scoped SCIM profile linked to the
 // user across configurations, oldest first, for the PrivacyStore capability.
 func (s *Store) SCIMUsersByUser(ctx context.Context, userID string) iter.Seq2[credbound.SCIMUser, error] {

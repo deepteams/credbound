@@ -576,6 +576,54 @@ func (m *Manager) Memberships(ctx context.Context, actor Authentication, workspa
 	return m.store.Memberships(ctx, workspaceID, page)
 }
 
+// WorkspaceMember pairs a workspace membership with the member's account
+// profile. It is the row a workspace administrator's member list renders.
+type WorkspaceMember struct {
+	User       User
+	Membership Membership
+}
+
+// WorkspaceMembers streams the memberships of a workspace joined with each
+// member's account profile (display name, primary email), so a workspace
+// administrator can render a member list without the instance-wide admin
+// users read permission. Like Memberships, it requires workspace users read
+// in that workspace; a membership whose account vanished mid-stream is
+// skipped rather than failing the page.
+func (m *Manager) WorkspaceMembers(ctx context.Context, actor Authentication, workspaceID string, page PageRequest) iter.Seq2[PageEvent[WorkspaceMember], error] {
+	if err := m.AuthorizePermission(ctx, actor, workspaceID, PermissionWorkspaceUsersRead); err != nil {
+		return errorSeq[PageEvent[WorkspaceMember]](err)
+	}
+	page, err := normalizePage(page)
+	if err != nil {
+		return errorSeq[PageEvent[WorkspaceMember]](err)
+	}
+	return func(yield func(PageEvent[WorkspaceMember], error) bool) {
+		for event, err := range m.store.Memberships(ctx, workspaceID, page) {
+			if err != nil {
+				yield(PageEvent[WorkspaceMember]{}, err)
+				return
+			}
+			if event.Data == nil {
+				if event.End != nil && !yield(PageEvent[WorkspaceMember]{Type: event.Type, End: event.End}, nil) {
+					return
+				}
+				continue
+			}
+			user, userErr := m.store.UserByID(ctx, event.Data.UserID)
+			if userErr != nil {
+				if errors.Is(userErr, ErrNotFound) {
+					continue
+				}
+				yield(PageEvent[WorkspaceMember]{}, userErr)
+				return
+			}
+			if !yield(ItemEvent(WorkspaceMember{User: user, Membership: *event.Data}), nil) {
+				return
+			}
+		}
+	}
+}
+
 func (m *Manager) authorizeWorkspaceMutation(ctx context.Context, actor Authentication, workspaceID string, permission WorkspacePermission, operation string) error {
 	if err := m.requireStepUp(ctx, actor, operation); err != nil {
 		return err

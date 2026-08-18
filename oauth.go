@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"net"
 	"net/url"
 	"path"
@@ -330,6 +331,24 @@ func (m *Manager) CreateOAuthInitialAccessToken(ctx context.Context, actor Authe
 	public := cloneOAuthInitialAccessToken(credential)
 	public.Digest = nil
 	return IssuedOAuthInitialAccessToken{Credential: public, Token: raw}, nil
+}
+
+// OAuthInitialAccessTokens streams the issuer's DCR bootstrap credentials,
+// oldest first, revoked ones included and digests omitted, so an
+// administration interface can inventory and revoke them. The actor needs
+// admin settings read; ErrNotSupported without the OAuth capability.
+func (m *Manager) OAuthInitialAccessTokens(ctx context.Context, actor Authentication, issuerID string) iter.Seq2[OAuthInitialAccessToken, error] {
+	store, _, err := m.requireOAuth()
+	if err != nil {
+		return errorSeq[OAuthInitialAccessToken](err)
+	}
+	if err := m.AuthorizeAdmin(ctx, actor, PermissionSettingsRead); err != nil {
+		return errorSeq[OAuthInitialAccessToken](err)
+	}
+	if !validUUIDv7(issuerID) {
+		return errorSeq[OAuthInitialAccessToken](fmt.Errorf("%w: invalid issuer id", ErrInvalidInput))
+	}
+	return store.OAuthInitialAccessTokens(ctx, issuerID)
 }
 
 // RevokeOAuthInitialAccessToken withdraws a DCR bootstrap credential,
