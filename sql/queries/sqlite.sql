@@ -375,7 +375,8 @@ UPDATE credbound_personal_access_tokens SET revoked_at = ?3 WHERE user_id = ?1 A
 -- name: UpsertSCIMGroup :exec
 INSERT INTO credbound_scim_groups (id, configuration_id, external_id, display_name, member_ids_json, created_at, updated_at, deleted_at)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-ON CONFLICT (id) DO UPDATE SET external_id = excluded.external_id, display_name = excluded.display_name, member_ids_json = excluded.member_ids_json, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at;
+ON CONFLICT (id) DO UPDATE SET external_id = excluded.external_id, display_name = excluded.display_name, member_ids_json = excluded.member_ids_json, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at
+WHERE credbound_scim_groups.configuration_id = excluded.configuration_id;
 
 -- name: GetSCIMGroup :one
 SELECT id, configuration_id, external_id, display_name, member_ids_json, created_at, updated_at, deleted_at
