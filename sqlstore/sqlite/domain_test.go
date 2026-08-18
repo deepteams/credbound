@@ -17,7 +17,7 @@ func (f *fixture) newWorkspaceDomain(t *testing.T, workspaceID, name string) cre
 		CreatedAt: f.now, UpdatedAt: f.now,
 	}
 	f.now = f.now.Add(time.Millisecond)
-	if err := f.store.CreateWorkspaceDomain(context.Background(), domain, f.event(domain.WorkspaceID, "domain.create", domain.ID, workspaceID)); err != nil {
+	if err := f.store.CreateWorkspaceDomain(context.Background(), domain, time.Time{}, f.event(domain.WorkspaceID, "domain.create", domain.ID, workspaceID)); err != nil {
 		t.Fatal(err)
 	}
 	return domain
@@ -29,19 +29,30 @@ func TestWorkspaceDomainStoreLifecycle(t *testing.T) {
 	users := f.bootstrapSessionUsers(t)
 	domain := f.newWorkspaceDomain(t, users.workspace.ID, "corp.example.com")
 
-	if err := f.store.CreateWorkspaceDomain(ctx, domain, f.event(users.root.ID, "domain.duplicate", domain.ID, users.workspace.ID)); !errors.Is(err, credbound.ErrConflict) {
+	if err := f.store.CreateWorkspaceDomain(ctx, domain, time.Time{}, f.event(users.root.ID, "domain.duplicate", domain.ID, users.workspace.ID)); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("duplicate domain error = %v", err)
 	}
 	sameName := domain
 	sameName.ID = f.id()
-	if err := f.store.CreateWorkspaceDomain(ctx, sameName, f.event(users.root.ID, "domain.duplicate_name", sameName.ID, users.workspace.ID)); !errors.Is(err, credbound.ErrConflict) {
+	if err := f.store.CreateWorkspaceDomain(ctx, sameName, time.Time{}, f.event(users.root.ID, "domain.duplicate_name", sameName.ID, users.workspace.ID)); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("duplicate name error = %v", err)
 	}
 	orphan := domain
 	orphan.ID, orphan.WorkspaceID, orphan.Domain = f.id(), f.id(), "orphan.example.com"
-	if err := f.store.CreateWorkspaceDomain(ctx, orphan, f.event(users.root.ID, "domain.orphan", orphan.ID, "")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.CreateWorkspaceDomain(ctx, orphan, time.Time{}, f.event(users.root.ID, "domain.orphan", orphan.ID, "")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("orphan workspace error = %v", err)
 	}
+	// A stale pending claim — still unconfirmed and created before
+	// staleBefore — is replaced in the same transaction.
+	displacer := domain
+	displacer.ID = f.id()
+	if err := f.store.CreateWorkspaceDomain(ctx, displacer, f.now.Add(time.Hour), f.event(users.root.ID, "domain.displace", displacer.ID, users.workspace.ID)); err != nil {
+		t.Fatalf("stale claim displacement = %v", err)
+	}
+	if _, err := f.store.WorkspaceDomainByID(ctx, domain.ID); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("displaced claim survived: %v", err)
+	}
+	domain = displacer
 
 	stored, err := f.store.WorkspaceDomainByID(ctx, domain.ID)
 	if err != nil || stored.Domain != "corp.example.com" || stored.Challenge != domain.Challenge ||
@@ -76,6 +87,12 @@ func TestWorkspaceDomainStoreLifecycle(t *testing.T) {
 	confirmed, err := f.store.ConfirmedWorkspaceDomainByName(ctx, "corp.example.com")
 	if err != nil || confirmed.ConfirmedAt == nil || !confirmed.ConfirmedAt.Equal(confirmedAt) || !confirmed.UpdatedAt.Equal(confirmedAt) {
 		t.Fatalf("confirmed domain = %#v, %v", confirmed, err)
+	}
+	// A confirmed domain is never displaced, however old.
+	late := domain
+	late.ID = f.id()
+	if err := f.store.CreateWorkspaceDomain(ctx, late, confirmedAt.Add(time.Hour), f.event(users.root.ID, "domain.displace_confirmed", late.ID, users.workspace.ID)); !errors.Is(err, credbound.ErrConflict) {
+		t.Fatalf("confirmed domain displaced = %v", err)
 	}
 
 	updatedAt := confirmedAt.Add(time.Minute)

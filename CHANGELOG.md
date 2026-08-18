@@ -29,6 +29,13 @@ breaking changes may land in any release and are called out explicitly.
   revocation) now also revokes the access tokens of the grants the family
   descends from, so a thief's already-minted access token dies with the
   family instead of surviving until expiry.
+- **Breaking:** unconfirmed workspace-domain claims expire. A pending claim
+  left unconfirmed past the new `Config.DomainClaimTTL` (default 7 days)
+  loses its globally unique name reservation to a new `CreateWorkspaceDomain`
+  from any workspace, closing the squat where an unverified claim
+  permanently denied the domain's real owner; confirmed domains never
+  expire. `DomainStore.CreateWorkspaceDomain` gains a `staleBefore`
+  parameter carrying the cutoff.
 - `CompletePasswordReset` now behaves identically on every bundled store:
   it installs the account's first password for a passwordless member
   provisioned by SSO JIT or SCIM (the memory store's behavior; the SQL

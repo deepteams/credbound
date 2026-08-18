@@ -35,10 +35,12 @@ const domainChallengePrefix = "credbound-domain-verification="
 // TXT record. Credbound performs no network I/O: the host proves control of
 // the domain out of band and then calls ConfirmWorkspaceDomain. The domain
 // name is normalized to lowercase and must be a registrable DNS name, unique
-// across all workspaces (ErrConflict). It requires a DomainStore-capable
-// store (ErrNotSupported otherwise), a fresh AAL2 step-up and workspace
-// settings write, exactly like UpdateWorkspace. An unconfirmed domain has no
-// effect on any flow.
+// across all workspaces (ErrConflict) — except that a stale pending claim,
+// one left unconfirmed past Config.DomainClaimTTL, is replaced rather than
+// defended, so an unverified claim can never permanently deny the domain's
+// real owner. It requires a DomainStore-capable store (ErrNotSupported
+// otherwise), a fresh AAL2 step-up and workspace settings write, exactly
+// like UpdateWorkspace. An unconfirmed domain has no effect on any flow.
 func (m *Manager) CreateWorkspaceDomain(ctx context.Context, actor Authentication, workspaceID, domain string) (_ IssuedWorkspaceDomain, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "workspace.domain.create", started, err) }()
@@ -78,7 +80,7 @@ func (m *Manager) CreateWorkspaceDomain(ctx context.Context, actor Authenticatio
 	commit := m.transactionalCommit(event, "workspace.domain.create", func(ctx context.Context, tx Tx, hook TransactionHook) error {
 		return hook.ApplyWorkspaceDomainChange(ctx, tx, change)
 	})
-	if err := m.domainStore.CreateWorkspaceDomain(ctx, record, commit); err != nil {
+	if err := m.domainStore.CreateWorkspaceDomain(ctx, record, now.Add(-m.domainClaimTTL), commit); err != nil {
 		return IssuedWorkspaceDomain{}, m.mapStoreError(ctx, "workspace.domain.create", err)
 	}
 	created := WorkspaceDomainEvent{EventMeta: meta, Domain: record}

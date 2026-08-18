@@ -95,6 +95,50 @@ func jitProvider(subject, email string, verified bool) *fakeSSOProvider {
 	}
 }
 
+// TestWorkspaceDomainStaleClaimDisplaced guards the anti-squat rule: a
+// pending claim left unconfirmed past Config.DomainClaimTTL loses its
+// reservation to a new claim from any workspace, while a confirmed domain
+// keeps its name forever.
+func TestWorkspaceDomainStaleClaimDisplaced(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	authn, workspace := f.bootstrap(t)
+	stepUp := aal2(authn.UserID, f.now)
+
+	squatted, err := f.manager.CreateWorkspaceDomain(ctx, stepUp, workspace.ID, "victim.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := f.manager.CreateWorkspaceDomain(ctx, stepUp, workspace.ID, "kept.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.ConfirmWorkspaceDomain(ctx, stepUp, kept.Domain.ID); err != nil {
+		t.Fatal(err)
+	}
+	other, err := f.manager.CreateWorkspace(ctx, stepUp, credbound.CreateWorkspaceInput{Name: "Rightful Owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Within the claim window the pending name is defended.
+	if _, err := f.manager.CreateWorkspaceDomain(ctx, stepUp, other.ID, "victim.example.com"); !errors.Is(err, credbound.ErrConflict) {
+		t.Fatalf("fresh pending claim displaced = %v", err)
+	}
+	f.now = f.now.Add(7*24*time.Hour + time.Minute)
+	lateStepUp := aal2(authn.UserID, f.now)
+	reclaimed, err := f.manager.CreateWorkspaceDomain(ctx, lateStepUp, other.ID, "victim.example.com")
+	if err != nil || reclaimed.Domain.WorkspaceID != other.ID {
+		t.Fatalf("stale claim displacement = %#v, %v", reclaimed, err)
+	}
+	if _, err := f.store.WorkspaceDomainByID(ctx, squatted.Domain.ID); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("displaced claim survived: %v", err)
+	}
+	// A confirmed domain never expires, however old.
+	if _, err := f.manager.CreateWorkspaceDomain(ctx, lateStepUp, other.ID, "kept.example.com"); !errors.Is(err, credbound.ErrConflict) {
+		t.Fatalf("confirmed domain displaced = %v", err)
+	}
+}
+
 func TestWorkspaceDomainLifecycle(t *testing.T) {
 	provider := jitProvider("subject-1", "alice@corp.example.com", true)
 	f := newFixture(t, provider)

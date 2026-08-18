@@ -23,19 +23,19 @@ func TestWorkspaceDomainStoreLifecycle(t *testing.T) {
 	f := newStoreFixture(t)
 	ctx := context.Background()
 	domain := f.domain("corp.example.com")
-	if err := f.store.CreateWorkspaceDomain(ctx, domain, f.event("domain.create")); err != nil {
+	if err := f.store.CreateWorkspaceDomain(ctx, domain, time.Time{}, f.event("domain.create")); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.CreateWorkspaceDomain(ctx, domain, f.event("domain.create.duplicate")); !errors.Is(err, credbound.ErrConflict) {
+	if err := f.store.CreateWorkspaceDomain(ctx, domain, time.Time{}, f.event("domain.create.duplicate")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("duplicate id error = %v", err)
 	}
 	sameName := f.domain("corp.example.com")
-	if err := f.store.CreateWorkspaceDomain(ctx, sameName, f.event("domain.create.name")); !errors.Is(err, credbound.ErrConflict) {
+	if err := f.store.CreateWorkspaceDomain(ctx, sameName, time.Time{}, f.event("domain.create.name")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("duplicate name error = %v", err)
 	}
 	orphan := f.domain("orphan.example.com")
 	orphan.WorkspaceID = f.id()
-	if err := f.store.CreateWorkspaceDomain(ctx, orphan, f.event("domain.create.orphan")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.CreateWorkspaceDomain(ctx, orphan, time.Time{}, f.event("domain.create.orphan")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("orphan workspace error = %v", err)
 	}
 
@@ -103,7 +103,7 @@ func TestWorkspaceDomainStoreLifecycle(t *testing.T) {
 		t.Fatalf("deleted hot lookup error = %v", err)
 	}
 	// The name becomes free again.
-	if err := f.store.CreateWorkspaceDomain(ctx, f.domain("corp.example.com"), f.event("domain.recreate")); err != nil {
+	if err := f.store.CreateWorkspaceDomain(ctx, f.domain("corp.example.com"), time.Time{}, f.event("domain.recreate")); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -114,7 +114,7 @@ func TestWorkspaceDomainStorePagination(t *testing.T) {
 	var ids []string
 	for _, name := range []string{"a.example.com", "b.example.com", "c.example.com"} {
 		domain := f.domain(name)
-		if err := f.store.CreateWorkspaceDomain(ctx, domain, f.event("domain.create."+name)); err != nil {
+		if err := f.store.CreateWorkspaceDomain(ctx, domain, time.Time{}, f.event("domain.create."+name)); err != nil {
 			t.Fatal(err)
 		}
 		ids = append(ids, domain.ID)
@@ -222,7 +222,7 @@ func TestWorkspaceDomainStoreJITProvision(t *testing.T) {
 
 	// Domain mutations fail closed while the audit stage is unavailable.
 	f.store.SetAuditFailure(errors.New("disk full"))
-	if err := f.store.CreateWorkspaceDomain(ctx, f.domain("blocked.example.com"), f.event("domain.audit")); !errors.Is(err, credbound.ErrAuditUnavailable) {
+	if err := f.store.CreateWorkspaceDomain(ctx, f.domain("blocked.example.com"), time.Time{}, f.event("domain.audit")); !errors.Is(err, credbound.ErrAuditUnavailable) {
 		t.Fatalf("audit-unavailable create error = %v", err)
 	}
 	retryUser, email6, membership6, identity6 := newAccount("erin@corp.example.com", "subject-5")

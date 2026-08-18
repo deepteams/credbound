@@ -11,10 +11,15 @@ import (
 )
 
 // CreateWorkspaceDomain stores an unconfirmed domain claim; a domain already
-// claimed by any workspace reports credbound.ErrConflict.
-func (s *Store) CreateWorkspaceDomain(ctx context.Context, domain credbound.WorkspaceDomain, commit credbound.Commit) error {
+// claimed by any workspace reports credbound.ErrConflict, except that a stale
+// pending claim — still unconfirmed and created before staleBefore — lost its
+// reservation and is replaced in the same transaction.
+func (s *Store) CreateWorkspaceDomain(ctx context.Context, domain credbound.WorkspaceDomain, staleBefore time.Time, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		if _, err := q.GetWorkspace(ctx, domain.WorkspaceID); err != nil {
+			return mapError(err)
+		}
+		if _, err := q.DeleteStaleWorkspaceDomainClaim(ctx, db.DeleteStaleWorkspaceDomainClaimParams{Domain: domain.Domain, StaleBefore: staleBefore}); err != nil {
 			return mapError(err)
 		}
 		return mapError(q.InsertWorkspaceDomain(ctx, db.InsertWorkspaceDomainParams{

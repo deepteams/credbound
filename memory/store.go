@@ -1619,7 +1619,7 @@ func (s *Store) Sessions(ctx context.Context, userID string, page credbound.Page
 
 // CreateWorkspaceDomain stores an unconfirmed domain claim; a domain already
 // claimed by any workspace reports credbound.ErrConflict.
-func (s *Store) CreateWorkspaceDomain(ctx context.Context, domain credbound.WorkspaceDomain, commit credbound.Commit) error {
+func (s *Store) CreateWorkspaceDomain(ctx context.Context, domain credbound.WorkspaceDomain, staleBefore time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1631,8 +1631,15 @@ func (s *Store) CreateWorkspaceDomain(ctx context.Context, domain credbound.Work
 	if _, exists := s.domains[domain.ID]; exists {
 		return credbound.ErrConflict
 	}
-	if _, exists := s.domainNames[domain.Domain]; exists {
-		return credbound.ErrConflict
+	// A stale pending claim — still unconfirmed and created before
+	// staleBefore — lost its reservation and is replaced; a confirmed or
+	// fresh claim defends the name.
+	if holderID, exists := s.domainNames[domain.Domain]; exists {
+		holder := s.domains[holderID]
+		if holder.ConfirmedAt != nil || !holder.CreatedAt.Before(staleBefore) {
+			return credbound.ErrConflict
+		}
+		delete(s.domains, holderID)
 	}
 	previous, err := s.prepareCommitLocked(commit)
 	if err != nil {

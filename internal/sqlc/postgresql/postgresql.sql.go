@@ -379,6 +379,23 @@ func (q *Queries) DeleteSSOIdentity(ctx context.Context, arg DeleteSSOIdentityPa
 	return result.RowsAffected()
 }
 
+const deleteStaleWorkspaceDomainClaim = `-- name: DeleteStaleWorkspaceDomainClaim :execrows
+DELETE FROM credbound.workspace_domains WHERE domain = $1 AND confirmed_at IS NULL AND created_at < $2
+`
+
+type DeleteStaleWorkspaceDomainClaimParams struct {
+	Domain      string    `json:"domain"`
+	StaleBefore time.Time `json:"stale_before"`
+}
+
+func (q *Queries) DeleteStaleWorkspaceDomainClaim(ctx context.Context, arg DeleteStaleWorkspaceDomainClaimParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteStaleWorkspaceDomainClaim, arg.Domain, arg.StaleBefore)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteTOTP = `-- name: DeleteTOTP :execrows
 DELETE FROM credbound.totp_factors WHERE user_id = $1
 `

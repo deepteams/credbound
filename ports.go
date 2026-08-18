@@ -233,12 +233,16 @@ type EmailThrottleStore interface {
 // no domain existed.
 //
 // A domain name is globally unique across workspaces: CreateWorkspaceDomain
-// fails with ErrConflict for a taken name. ConfirmWorkspaceDomain fails with
-// ErrConflict when the domain was already confirmed, and
-// UpdateWorkspaceDomainPolicy fails with ErrConflict on an unconfirmed
-// domain, so the pending state never carries policy.
+// fails with ErrConflict for a taken name, except that it replaces — in the
+// same transaction — a stale pending claim, one still unconfirmed and created
+// before staleBefore, so an unverified claim can never permanently deny the
+// domain's real owner (Config.DomainClaimTTL sets the window). Confirmed
+// domains never expire. ConfirmWorkspaceDomain fails with ErrConflict when
+// the domain was already confirmed, and UpdateWorkspaceDomainPolicy fails
+// with ErrConflict on an unconfirmed domain, so the pending state never
+// carries policy.
 type DomainStore interface {
-	CreateWorkspaceDomain(ctx context.Context, domain WorkspaceDomain, commit Commit) error
+	CreateWorkspaceDomain(ctx context.Context, domain WorkspaceDomain, staleBefore time.Time, commit Commit) error
 	WorkspaceDomainByID(ctx context.Context, id string) (WorkspaceDomain, error)
 	// ConfirmedWorkspaceDomainByName is the hot lookup behind SSO enforcement
 	// and JIT provisioning: it resolves a normalized domain name to its

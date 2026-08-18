@@ -584,6 +584,9 @@ WHERE id = ?1 AND confirmed_at IS NOT NULL;
 -- name: DeleteWorkspaceDomain :execrows
 DELETE FROM credbound_workspace_domains WHERE id = ?1;
 
+-- name: DeleteStaleWorkspaceDomainClaim :execrows
+DELETE FROM credbound_workspace_domains WHERE domain = ?1 AND confirmed_at IS NULL AND created_at < @stale_before;
+
 -- name: InsertConsumedCeremony :exec
 INSERT INTO credbound_consumed_ceremonies (id, expires_at) VALUES (?1, ?2);
 

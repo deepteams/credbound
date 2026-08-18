@@ -121,6 +121,13 @@ type Config struct {
 	// InvitationTTL bounds the validity of a workspace invitation token.
 	// Zero keeps the default of 7 days.
 	InvitationTTL time.Duration
+	// DomainClaimTTL bounds how long an unconfirmed workspace-domain claim
+	// reserves its globally unique name. Once the window passes without
+	// ConfirmWorkspaceDomain, a new CreateWorkspaceDomain for the same name —
+	// from any workspace — replaces the stale pending claim, so an
+	// unverified claim can never permanently deny the domain's real owner.
+	// Confirmed domains never expire. Zero keeps the default of 7 days.
+	DomainClaimTTL time.Duration
 	// SessionTTL bounds the absolute lifetime of a server-side session issued
 	// by CreateSession (ExpiresAt = CreatedAt + SessionTTL); activity never
 	// extends it. Zero keeps the default of 30 days. Sessions additionally
@@ -229,6 +236,7 @@ type Manager struct {
 	passwordResetTTL      time.Duration
 	emailAuthTTL          time.Duration
 	invitationTTL         time.Duration
+	domainClaimTTL        time.Duration
 	sessionTTL            time.Duration
 	sessionIdleTimeout    time.Duration
 	emailIssuanceCooldown time.Duration
@@ -292,6 +300,9 @@ func New(cfg Config) (*Manager, error) {
 	}
 	if cfg.InvitationTTL <= 0 {
 		cfg.InvitationTTL = 7 * 24 * time.Hour
+	}
+	if cfg.DomainClaimTTL <= 0 {
+		cfg.DomainClaimTTL = 7 * 24 * time.Hour
 	}
 	if cfg.SessionTTL <= 0 {
 		cfg.SessionTTL = 30 * 24 * time.Hour
@@ -470,6 +481,7 @@ func New(cfg Config) (*Manager, error) {
 		passwordResetTTL:      cfg.PasswordResetTTL,
 		emailAuthTTL:          cfg.EmailAuthenticationTTL,
 		invitationTTL:         cfg.InvitationTTL,
+		domainClaimTTL:        cfg.DomainClaimTTL,
 		sessionTTL:            cfg.SessionTTL,
 		sessionIdleTimeout:    cfg.SessionIdleTimeout,
 		emailIssuanceCooldown: cfg.EmailIssuanceCooldown,
