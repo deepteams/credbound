@@ -31,6 +31,11 @@ type Config struct {
 	// Passkeys is the optional WebAuthn provider; without it the passkey
 	// ceremonies return ErrNotSupported.
 	Passkeys PasskeyProvider
+	// DomainVerifier optionally proves control of a workspace domain inside
+	// ConfirmWorkspaceDomain; see DomainVerifier. Nil trusts the actor's
+	// out-of-band verification, so a self-serve deployment exposing
+	// ConfirmWorkspaceDomain directly should register one.
+	DomainVerifier DomainVerifier
 	// SecretKey is the 32-byte root key. Distinct AEAD and HMAC keys are
 	// derived from it with HKDF to seal ceremony continuations and TOTP
 	// secrets and to digest single-use tokens.
@@ -212,6 +217,7 @@ type Manager struct {
 	signup               *SignUpConfig
 	sessionStore         SessionStore
 	domainStore          DomainStore
+	domainVerifier       DomainVerifier
 	dummyHash            string
 	idMu                 sync.Mutex
 	idUnixMilli          int64
@@ -411,6 +417,7 @@ func New(cfg Config) (*Manager, error) {
 		signup:               signupConfig,
 		sessionStore:         sessionStore,
 		domainStore:          domainStore,
+		domainVerifier:       cfg.DomainVerifier,
 		dummyHash:            dummyHash,
 	}, nil
 }

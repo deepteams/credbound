@@ -206,6 +206,20 @@ type DomainStore interface {
 	JITProvisionSSOUser(ctx context.Context, user User, email EmailAddress, membership Membership, identity SSOIdentity, at time.Time, commit Commit) error
 }
 
+// DomainVerifier optionally proves control of a workspace domain before
+// ConfirmWorkspaceDomain marks it verified. Registered in Config.DomainVerifier,
+// its VerifyDomain runs inside ConfirmWorkspaceDomain with the domain name and
+// the challenge token minted at creation; any non-nil error refuses the
+// confirmation with ErrDomainVerification. A typical implementation resolves
+// the domain's TXT records and checks the challenge is published. Without a
+// verifier, confirmation trusts the actor's out-of-band check — a self-serve
+// deployment that exposes ConfirmWorkspaceDomain directly should register one,
+// because a confirmed domain governs SSO enforcement and JIT provisioning for
+// every address on it, instance-wide.
+type DomainVerifier interface {
+	VerifyDomain(ctx context.Context, domain, challenge string) error
+}
+
 // SCIMStore is an optional persistence capability. Custom stores that do not
 // implement it can continue to use every non-SCIM feature of Credbound.
 type SCIMStore interface {

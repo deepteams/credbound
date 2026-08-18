@@ -838,3 +838,66 @@ func TestDomainEnforcedSSOBlocksSignup(t *testing.T) {
 		t.Fatalf("signup outside enforced domain = %v", err)
 	}
 }
+
+// fakeDomainVerifier proves domain control against a fixed expected challenge,
+// standing in for a real DNS TXT lookup.
+type fakeDomainVerifier struct {
+	fail          bool
+	seenDomain    string
+	seenChallenge string
+}
+
+func (v *fakeDomainVerifier) VerifyDomain(_ context.Context, domain, challenge string) error {
+	v.seenDomain, v.seenChallenge = domain, challenge
+	if v.fail {
+		return errors.New("challenge not published in DNS")
+	}
+	return nil
+}
+
+func TestConfirmWorkspaceDomainVerifier(t *testing.T) {
+	verifier := &fakeDomainVerifier{fail: true}
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	manager, err := credbound.New(credbound.Config{
+		Store: memory.New(), Passwords: &fakePasswords{}, TOTP: fakeTOTP{}, Passkeys: &fakePasskeys{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		Clock: func() time.Time { return now }, Random: &counterReader{next: 0x71},
+		StepUpMaxAge: 10 * time.Minute, CeremonyTTL: 5 * time.Minute,
+		DomainVerifier: verifier,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	root, workspace, err := manager.Bootstrap(ctx, credbound.BootstrapInput{
+		Email: "root@example.com", DisplayName: "Root", Password: "correct horse battery", WorkspaceName: "Main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := aal2(root.UserID, now)
+	issued, err := manager.CreateWorkspaceDomain(ctx, actor, workspace.ID, "corp.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A failing verifier refuses confirmation and the domain stays pending.
+	if err := manager.ConfirmWorkspaceDomain(ctx, actor, issued.Domain.ID); !errors.Is(err, credbound.ErrDomainVerification) {
+		t.Fatalf("unverified confirm error = %v", err)
+	}
+	if verifier.seenDomain != "corp.example.com" || verifier.seenChallenge != issued.Challenge {
+		t.Fatalf("verifier saw %q/%q, want %q/%q", verifier.seenDomain, verifier.seenChallenge, "corp.example.com", issued.Challenge)
+	}
+	if listed, _ := collectDomains(t, manager.WorkspaceDomains(ctx, actor, workspace.ID, credbound.PageRequest{})); len(listed) != 1 || listed[0].ConfirmedAt != nil {
+		t.Fatalf("domain confirmed despite failed verification: %#v", listed)
+	}
+
+	// Once ownership is proven, confirmation succeeds.
+	verifier.fail = false
+	if err := manager.ConfirmWorkspaceDomain(ctx, actor, issued.Domain.ID); err != nil {
+		t.Fatalf("verified confirm = %v", err)
+	}
+	if listed, _ := collectDomains(t, manager.WorkspaceDomains(ctx, actor, workspace.ID, credbound.PageRequest{})); len(listed) != 1 || listed[0].ConfirmedAt == nil {
+		t.Fatalf("domain not confirmed after verification: %#v", listed)
+	}
+}

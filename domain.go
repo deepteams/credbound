@@ -70,12 +70,14 @@ func (m *Manager) CreateWorkspaceDomain(ctx context.Context, actor Authenticatio
 	return IssuedWorkspaceDomain{Domain: record, Challenge: challenge}, nil
 }
 
-// ConfirmWorkspaceDomain marks the pending domain verified. Calling it is
-// the actor's assertion that DNS verification completed — that the challenge
-// value is published in a TXT record of the domain; Credbound never queries
-// DNS itself. It requires a fresh AAL2 step-up and workspace settings write
-// in the owning workspace, and fails with ErrConflict when the domain was
-// already confirmed. Only from this point on does the domain's policy apply.
+// ConfirmWorkspaceDomain marks the pending domain verified. When a
+// Config.DomainVerifier is registered it proves control here — resolving the
+// challenge against the domain's DNS — and fails with ErrDomainVerification
+// when the challenge is not published; without one, calling it is the actor's
+// assertion that DNS verification completed and Credbound never queries DNS
+// itself. It requires a fresh AAL2 step-up and workspace settings write in the
+// owning workspace, and fails with ErrConflict when the domain was already
+// confirmed. Only from this point on does the domain's policy apply.
 func (m *Manager) ConfirmWorkspaceDomain(ctx context.Context, actor Authentication, domainID string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "workspace.domain.confirm", started, err) }()
@@ -88,6 +90,15 @@ func (m *Manager) ConfirmWorkspaceDomain(ctx context.Context, actor Authenticati
 	}
 	if domain.ConfirmedAt != nil {
 		return fmt.Errorf("%w: the domain is already confirmed", ErrConflict)
+	}
+	// When a verifier is registered, ownership is proven here against the
+	// challenge minted at creation rather than trusted on the actor's word: a
+	// confirmed domain governs SSO enforcement and JIT provisioning for every
+	// address on it, instance-wide.
+	if m.domainVerifier != nil {
+		if verifyErr := m.domainVerifier.VerifyDomain(ctx, domain.Domain, domain.Challenge); verifyErr != nil {
+			return fmt.Errorf("%w: %v", ErrDomainVerification, verifyErr)
+		}
 	}
 	now := m.now()
 	domain.ConfirmedAt, domain.UpdatedAt = cloneTime(&now), now
