@@ -1500,3 +1500,94 @@ func TestVerifyAuditChainFromCheckpoint(t *testing.T) {
 		t.Fatalf("hashless checkpoint error = %v", err)
 	}
 }
+
+func TestSecretRotationWithRetiredKeys(t *testing.T) {
+	store := memory.New()
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	oldSecret, oldPAT, oldRecovery := bytesOf(1, 32), bytesOf(2, 32), bytesOf(3, 32)
+	seed := byte(0x61)
+	build := func(secret, pat, recovery []byte, retiredSecret, retiredPAT, retiredRecovery [][]byte) *credbound.Manager {
+		seed += 0x20
+		manager, err := credbound.New(credbound.Config{
+			Store: store, Passwords: &fakePasswords{}, TOTP: fakeTOTP{},
+			SecretKey: secret, PATPepper: pat, RecoveryPepper: recovery,
+			RetiredSecretKeys: retiredSecret, RetiredPATPeppers: retiredPAT, RetiredRecoveryPeppers: retiredRecovery,
+			Clock: func() time.Time { return now }, Random: &counterReader{next: seed},
+			StepUpMaxAge: 10 * time.Minute,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return manager
+	}
+	before := build(oldSecret, oldPAT, oldRecovery, nil, nil, nil)
+	ctx := context.Background()
+	authn, workspace, err := before.Bootstrap(ctx, credbound.BootstrapInput{
+		Email: "root@example.com", DisplayName: "Root", Password: "correct horse battery", WorkspaceName: "Main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stepUp := aal2(authn.UserID, now)
+	pat, err := before.CreatePAT(ctx, stepUp, credbound.CreatePATInput{Name: "ci", WorkspaceID: workspace.ID, Scopes: []string{"*"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := before.CreateSession(ctx, authn, credbound.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := before.BeginTOTPEnrollment(ctx, stepUp); err != nil {
+		t.Fatal(err)
+	}
+	codes, err := before.ConfirmTOTPEnrollment(ctx, stepUp, "123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// After rotation, everything issued under the old keys keeps working.
+	after := build(bytesOf(11, 32), bytesOf(12, 32), bytesOf(13, 32),
+		[][]byte{oldSecret}, [][]byte{oldPAT}, [][]byte{oldRecovery})
+	if _, err := after.AuthenticatePAT(ctx, pat.Token); err != nil {
+		t.Fatalf("retired-pepper PAT = %v", err)
+	}
+	if _, _, err := after.AuthenticateSession(ctx, session.Token); err != nil {
+		t.Fatalf("retired-digest session = %v", err)
+	}
+	now = now.Add(time.Minute)
+	if _, err := after.VerifyTOTP(ctx, authn, "123456"); err != nil {
+		t.Fatalf("retired-seal TOTP secret = %v", err)
+	}
+	if _, err := after.VerifyTOTP(ctx, authn, codes[0]); err != nil {
+		t.Fatalf("retired-pepper recovery code = %v", err)
+	}
+	// New credentials issued after the rotation use the active keys and a
+	// manager without the retired keys rejects the old ones.
+	fresh, err := after.CreatePAT(ctx, aal2(authn.UserID, now), credbound.CreatePATInput{Name: "fresh", WorkspaceID: workspace.ID, Scopes: []string{"*"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := build(bytesOf(11, 32), bytesOf(12, 32), bytesOf(13, 32), nil, nil, nil)
+	if _, err := bare.AuthenticatePAT(ctx, fresh.Token); err != nil {
+		t.Fatalf("active-pepper PAT = %v", err)
+	}
+	if _, err := bare.AuthenticatePAT(ctx, pat.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("dropped retired pepper still accepted: %v", err)
+	}
+
+	// Config validation of the retired material.
+	if _, err := credbound.New(credbound.Config{
+		Store: store, Passwords: &fakePasswords{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		RetiredSecretKeys: [][]byte{bytesOf(9, 16)},
+	}); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("short retired secret key error = %v", err)
+	}
+	if _, err := credbound.New(credbound.Config{
+		Store: store, Passwords: &fakePasswords{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		RetiredPATPeppers: [][]byte{bytesOf(9, 8)},
+	}); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("short retired pepper error = %v", err)
+	}
+}

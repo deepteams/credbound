@@ -28,18 +28,22 @@ through a raw-key fallback; no migration is required, and rotation guidance for
 
 ## Rotation
 
-`SecretKey`, PAT, recovery, and OAuth peppers are single active values in v0;
-there is no transparent symmetric key ring. Plan their rotation as a credential
-invalidation or explicit data-migration event:
+`SecretKey`, `PATPepper`, and `RecoveryPepper` rotate through the read ring:
+deploy the new active value with the previous one listed in
+`RetiredSecretKeys`, `RetiredPATPeppers`, or `RetiredRecoveryPeppers`. Reads
+(sealed TOTP secrets and passkey credentials, session and email-proof
+digests, PATs, SCIM credentials, recovery codes) accept the retired keys;
+every write uses the new active key. Remove a retired key once nothing
+issued under it remains — re-enroll or reissue long-lived material (TOTP,
+passkeys, PATs, recovery codes) to drain it, or keep the retired key for
+their lifetime. Monitor authentication and audit failures after each
+deployment, and destroy retired material only after rollback is no longer
+needed.
 
-1. announce the affected sign-in or API interruption;
-2. revoke affected PATs, OAuth grants/tokens, and recovery codes as applicable;
-3. migrate encrypted TOTP material with a separately reviewed tool or require
-   TOTP re-enrollment before replacing `SecretKey`;
-4. wait at least the configured ceremony lifetime before removing the old key
-   if only sealed continuations are affected;
-5. deploy the new secret and monitor authentication and audit failures;
-6. destroy retired symmetric material only after rollback is no longer needed.
+`OAuthConfig.Pepper` remains a single active value: pairwise OIDC subjects
+derive from it, so rotating it changes every subject identifier clients see.
+Its rotation stays an explicit revocation event (revoke grants and tokens,
+accept re-consent) until a dedicated subject key ships.
 
 OIDC signing rotation is different. Construct `oidcadapter.NewES256KeyRing`
 with the new active private key and the old public key as a retiring

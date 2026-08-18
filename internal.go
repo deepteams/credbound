@@ -95,12 +95,25 @@ func (m *Manager) tokenDigest(value string) []byte {
 	return digest(m.digestKey, value)
 }
 
-// matchTokenDigest verifies a stored token digest under the HKDF-derived
-// HMAC key in constant time. Digests written under the raw SecretKey before
-// the key separation are no longer accepted: every token digest guards a
-// single-use credential whose TTL expired long before this window closed.
+// matchTokenDigest verifies a stored token digest against the digest-key
+// ring (active first, then retired SecretKeys), each in constant time, so a
+// rotation keeps outstanding sessions and email proofs valid. Digests
+// written under the raw SecretKey before the key separation are no longer
+// accepted: every token digest guards a single-use credential whose TTL
+// expired long before this window closed.
 func (m *Manager) matchTokenDigest(stored []byte, value string) bool {
-	return hmac.Equal(stored, digest(m.digestKey, value))
+	return matchDigestRing(stored, m.readDigestKeys, value)
+}
+
+// matchDigestRing reports whether the stored digest matches the value under
+// any key of the ring, comparing in constant time per key.
+func matchDigestRing(stored []byte, keys [][]byte, value string) bool {
+	for _, key := range keys {
+		if hmac.Equal(stored, digest(key, value)) {
+			return true
+		}
+	}
+	return false
 }
 
 func newGCM(key []byte) (cipher.AEAD, error) {
@@ -128,12 +141,13 @@ func (m *Manager) seal(plaintext []byte) ([]byte, error) {
 }
 
 func (m *Manager) open(ciphertext []byte) ([]byte, error) {
-	// Data sealed before the key separation used the raw SecretKey; try the
-	// derived key first and fall back so existing TOTP secrets and passkey
-	// credentials keep decrypting. Unlike token digests, sealed credentials
-	// live for years, so this acceptance window stays open until v1 ships a
-	// re-seal migration; new data always seals under the derived key.
-	for _, key := range [][]byte{m.sealKey, m.secretKey} {
+	// The ring holds the active seal key first, then keys derived from the
+	// retired SecretKeys, then the raw active and retired keys for data
+	// sealed before the key separation. Unlike token digests, sealed
+	// credentials live for years, so the raw legacy window stays open until
+	// v1 ships a re-seal migration; new data always seals under the active
+	// derived key.
+	for _, key := range m.readSealKeys {
 		gcm, err := newGCM(key)
 		if err != nil {
 			return nil, err

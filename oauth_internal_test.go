@@ -153,7 +153,8 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 	manager := &Manager{
 		oauth: &OAuthConfig{Pepper: bytes.Repeat([]byte{4}, 32)}, workspaceRoles: roles,
 		clock: func() time.Time { return now }, random: bytes.NewReader(bytes.Repeat([]byte{7}, 8192)),
-		secretKey: bytes.Repeat([]byte{1}, 32), sealKey: bytes.Repeat([]byte{1}, 32), ceremonyTTL: 5 * time.Minute, observer: nopObserver{},
+		secretKey: bytes.Repeat([]byte{1}, 32), sealKey: bytes.Repeat([]byte{1}, 32),
+		readSealKeys: [][]byte{bytes.Repeat([]byte{1}, 32)}, ceremonyTTL: 5 * time.Minute, observer: nopObserver{},
 	}
 	invalidPolicies := []UpdateOAuthIssuerInput{
 		{CIMDMode: "unknown"}, {DCRMode: "unknown"},

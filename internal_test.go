@@ -108,8 +108,9 @@ func TestContinuationAndEncryptionBoundaries(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	m := &Manager{
 		secretKey: bytes.Repeat([]byte{1}, 32), sealKey: bytes.Repeat([]byte{1}, 32),
-		clock:  func() time.Time { return now },
-		random: bytes.NewReader(bytes.Repeat([]byte{2}, 256)),
+		readSealKeys: [][]byte{bytes.Repeat([]byte{1}, 32)},
+		clock:        func() time.Time { return now },
+		random:       bytes.NewReader(bytes.Repeat([]byte{2}, 256)),
 	}
 	continuation, err := m.encodeContinuation(ceremonyContinuation{
 		UserID: "user", Operation: "register", ExpiresAt: now.Add(time.Minute), Session: []byte("session"),
@@ -153,7 +154,8 @@ func TestSSOContinuationBoundaries(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	m := &Manager{
 		secretKey: bytes.Repeat([]byte{1}, 32), sealKey: bytes.Repeat([]byte{1}, 32), clock: func() time.Time { return now },
-		random: bytes.NewReader(bytes.Repeat([]byte{2}, 512)),
+		readSealKeys: [][]byte{bytes.Repeat([]byte{1}, 32)},
+		random:       bytes.NewReader(bytes.Repeat([]byte{2}, 512)),
 	}
 	valid := ssoContinuation{
 		ProviderConfigurationID: "0198b463-0000-7000-8000-000000000001",
@@ -309,10 +311,12 @@ func TestKeySeparationLegacyFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	current := &Manager{
-		secretKey: raw,
-		sealKey:   bytes.Repeat([]byte{8}, 32),
-		digestKey: bytes.Repeat([]byte{9}, 32),
-		random:    bytes.NewReader(bytes.Repeat([]byte{2}, 64)),
+		secretKey:      raw,
+		sealKey:        bytes.Repeat([]byte{8}, 32),
+		digestKey:      bytes.Repeat([]byte{9}, 32),
+		readSealKeys:   [][]byte{bytes.Repeat([]byte{8}, 32), raw},
+		readDigestKeys: [][]byte{bytes.Repeat([]byte{9}, 32)},
+		random:         bytes.NewReader(bytes.Repeat([]byte{2}, 64)),
 	}
 	plaintext, err := current.open(sealed)
 	if err != nil || string(plaintext) != "pre-separation data" {

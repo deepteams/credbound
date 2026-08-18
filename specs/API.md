@@ -40,7 +40,9 @@ auth, err := credbound.New(credbound.Config{
 ```
 
 `New` validates every configuration invariant. Cryptographic values have no
-weak fallback.
+weak fallback. `RetiredSecretKeys`, `RetiredPATPeppers`, and
+`RetiredRecoveryPeppers` form the read ring that keeps data issued before a
+rotation readable while every write uses the active key.
 
 ## Main types
 

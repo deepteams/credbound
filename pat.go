@@ -2,7 +2,6 @@ package credbound
 
 import (
 	"context"
-	"crypto/hmac"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -103,7 +102,7 @@ func (m *Manager) AuthenticatePAT(ctx context.Context, raw string) (_ Authentica
 	if validShape {
 		pat, err = m.store.PATByPrefix(ctx, prefix)
 	}
-	valid := validShape && err == nil && hmac.Equal(pat.Digest, digest(m.patPepper, raw))
+	valid := validShape && err == nil && matchDigestRing(pat.Digest, m.readPATPeppers, raw)
 	now := m.now()
 	if valid && (pat.RevokedAt != nil || (pat.ExpiresAt != nil && !now.Before(*pat.ExpiresAt))) {
 		valid = false

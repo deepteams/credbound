@@ -2,7 +2,6 @@ package credbound
 
 import (
 	"context"
-	"crypto/hmac"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -224,7 +223,7 @@ func (m *Manager) AuthenticateSCIM(ctx context.Context, raw string) (_ SCIMAuthe
 	now := m.now()
 	valid := validShape && err == nil && configuration.Enabled && credential.RevokedAt == nil &&
 		(credential.ExpiresAt == nil || now.Before(*credential.ExpiresAt)) &&
-		hmac.Equal(credential.Digest, digest(m.patPepper, "scim\x00"+raw))
+		matchDigestRing(credential.Digest, m.readPATPeppers, "scim\x00"+raw)
 	if !valid {
 		return SCIMAuthentication{}, ErrInvalidCredentials
 	}

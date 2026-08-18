@@ -173,14 +173,24 @@ func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code str
 		return promoted, nil
 	}
 
-	recoveryDigest := digest(m.recoveryPepper, normalizeRecoveryCode(normalized))
 	event, eventErr := m.newAudit(ctx, actor.UserID, "auth.recovery_code", "user", actor.UserID, "", AuditSucceeded, "")
 	if eventErr != nil {
 		return Authentication{}, eventErr
 	}
-	used, consumeErr := m.store.ConsumeRecoveryCode(ctx, actor.UserID, recoveryDigest, m.now(), Commit{Audit: event})
-	if consumeErr != nil {
-		return Authentication{}, m.mapStoreError(ctx, "auth.totp.verify", consumeErr)
+	// The pepper ring (active first, then retired) keeps recovery codes
+	// issued before a rotation consumable; a miss never writes the audit,
+	// so at most one attempt commits.
+	used := false
+	for _, pepper := range m.readRecoveryPeppers {
+		recoveryDigest := digest(pepper, normalizeRecoveryCode(normalized))
+		var consumeErr error
+		used, consumeErr = m.store.ConsumeRecoveryCode(ctx, actor.UserID, recoveryDigest, m.now(), Commit{Audit: event})
+		if consumeErr != nil {
+			return Authentication{}, m.mapStoreError(ctx, "auth.totp.verify", consumeErr)
+		}
+		if used {
+			break
+		}
 	}
 	if used {
 		promoted := m.promoteTOTP(actor)

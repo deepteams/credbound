@@ -41,6 +41,21 @@ type Config struct {
 	// RecoveryPepper keys the HMAC digests of TOTP recovery codes. At least
 	// 32 bytes.
 	RecoveryPepper []byte
+	// RetiredSecretKeys lists previously active SecretKeys that reads still
+	// accept: sealed TOTP secrets and passkey credentials keep decrypting
+	// and outstanding token digests (sessions included) keep matching after
+	// a rotation, while everything new uses SecretKey. Each retired key is
+	// exactly 32 bytes. Remove a retired key once nothing sealed or
+	// digested under it remains.
+	RetiredSecretKeys [][]byte
+	// RetiredPATPeppers lists previously active PATPeppers that reads
+	// still accept, so outstanding PATs and SCIM credentials survive a
+	// pepper rotation; new tokens always digest under PATPepper.
+	RetiredPATPeppers [][]byte
+	// RetiredRecoveryPeppers lists previously active RecoveryPeppers that
+	// reads still accept, so outstanding recovery codes survive a pepper
+	// rotation; new codes always digest under RecoveryPepper.
+	RetiredRecoveryPeppers [][]byte
 	// StepUpMaxAge bounds how old an interactive AAL2 authentication may be
 	// to satisfy RequireStepUp. Zero keeps the default of 10 minutes.
 	StepUpMaxAge time.Duration
@@ -151,15 +166,22 @@ type OAuthConfig struct {
 // Manager is the façade over every Credbound capability. It is safe for
 // concurrent use and is built once per process with New.
 type Manager struct {
-	store                Store
-	passwords            PasswordHasher
-	totp                 TOTPProvider
-	passkeys             PasskeyProvider
-	secretKey            []byte
-	sealKey              []byte
-	digestKey            []byte
-	patPepper            []byte
-	recoveryPepper       []byte
+	store          Store
+	passwords      PasswordHasher
+	totp           TOTPProvider
+	passkeys       PasskeyProvider
+	secretKey      []byte
+	sealKey        []byte
+	digestKey      []byte
+	patPepper      []byte
+	recoveryPepper []byte
+	// read* rings list every key accepted when reading, active first, so a
+	// rotation with Retired* configured never invalidates existing data;
+	// writes always use the single active key above.
+	readSealKeys         [][]byte
+	readDigestKeys       [][]byte
+	readPATPeppers       [][]byte
+	readRecoveryPeppers  [][]byte
 	stepUpMaxAge         time.Duration
 	ceremonyTTL          time.Duration
 	minPasswordLen       int
@@ -205,6 +227,16 @@ func New(cfg Config) (*Manager, error) {
 	}
 	if len(cfg.PATPepper) < 32 || len(cfg.RecoveryPepper) < 32 {
 		return nil, fmt.Errorf("%w: peppers must contain at least 32 bytes", ErrInvalidInput)
+	}
+	for _, retired := range cfg.RetiredSecretKeys {
+		if len(retired) != 32 {
+			return nil, fmt.Errorf("%w: every retired secret key must contain exactly 32 bytes", ErrInvalidInput)
+		}
+	}
+	for _, retired := range append(append([][]byte{}, cfg.RetiredPATPeppers...), cfg.RetiredRecoveryPeppers...) {
+		if len(retired) < 32 {
+			return nil, fmt.Errorf("%w: every retired pepper must contain at least 32 bytes", ErrInvalidInput)
+		}
 	}
 	if cfg.StepUpMaxAge <= 0 {
 		cfg.StepUpMaxAge = 10 * time.Minute
@@ -292,6 +324,25 @@ func New(cfg Config) (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("derive digest key: %w", err)
 	}
+	readSealKeys, readDigestKeys := [][]byte{sealKey}, [][]byte{digestKey}
+	for _, retired := range cfg.RetiredSecretKeys {
+		retiredSeal, err := hkdf.Key(sha256.New, retired, nil, "credbound/seal/v1", 32)
+		if err != nil {
+			return nil, fmt.Errorf("derive retired seal key: %w", err)
+		}
+		retiredDigest, err := hkdf.Key(sha256.New, retired, nil, "credbound/digest/v1", 32)
+		if err != nil {
+			return nil, fmt.Errorf("derive retired digest key: %w", err)
+		}
+		readSealKeys, readDigestKeys = append(readSealKeys, retiredSeal), append(readDigestKeys, retiredDigest)
+	}
+	// Data sealed before the HKDF key separation used raw SecretKeys; the
+	// raw active and retired keys close the ring until the v1 re-seal
+	// migration removes the legacy fallback.
+	readSealKeys = append(readSealKeys, append([]byte(nil), cfg.SecretKey...))
+	readSealKeys = append(readSealKeys, clonePeppers(cfg.RetiredSecretKeys)...)
+	readPATPeppers := append([][]byte{append([]byte(nil), cfg.PATPepper...)}, clonePeppers(cfg.RetiredPATPeppers)...)
+	readRecoveryPeppers := append([][]byte{append([]byte(nil), cfg.RecoveryPepper...)}, clonePeppers(cfg.RetiredRecoveryPeppers)...)
 	events, err := newEventRegistry(cfg.Observer, func() time.Time { return cfg.Clock().UTC() }, cfg.TransactionHooks, cfg.EventListeners)
 	if err != nil {
 		return nil, err
@@ -326,6 +377,10 @@ func New(cfg Config) (*Manager, error) {
 		digestKey:            digestKey,
 		patPepper:            append([]byte(nil), cfg.PATPepper...),
 		recoveryPepper:       append([]byte(nil), cfg.RecoveryPepper...),
+		readSealKeys:         readSealKeys,
+		readDigestKeys:       readDigestKeys,
+		readPATPeppers:       readPATPeppers,
+		readRecoveryPeppers:  readRecoveryPeppers,
 		stepUpMaxAge:         cfg.StepUpMaxAge,
 		ceremonyTTL:          cfg.CeremonyTTL,
 		minPasswordLen:       cfg.MinPasswordLen,
@@ -377,4 +432,14 @@ func (m *Manager) observe(ctx context.Context, name string, started time.Time, e
 		outcome = "error"
 	}
 	m.observer.Observe(ctx, Operation{Name: name, Outcome: outcome, Duration: m.now().Sub(started)})
+}
+
+// clonePeppers deep-copies a retired-pepper list so later caller mutations
+// cannot reach the Manager's key material.
+func clonePeppers(peppers [][]byte) [][]byte {
+	cloned := make([][]byte, 0, len(peppers))
+	for _, pepper := range peppers {
+		cloned = append(cloned, append([]byte(nil), pepper...))
+	}
+	return cloned
 }
