@@ -270,7 +270,13 @@ change is not a compromise response — hosts that want the cascade pair it with
 `WithRequestMetadata(ctx, RequestMetadata)` attaches the client network context
 that every audit event recorded while serving the request will carry. The host
 resolves the real client address from its trusted proxy configuration;
-Credbound never reads transport headers.
+Credbound library calls never read transport headers.
+
+`HTTPRequestMetadata(next, trustedProxies...)` is the net/http middleware that
+performs that resolution explicitly: without trusted proxies it records the
+transport peer and reads no header; when the peer belongs to a trusted prefix
+it takes the rightmost `X-Forwarded-For` address outside every trusted prefix,
+failing toward the peer address on malformed input.
 
 `ComputeAuditHash(previous, event)` is the canonical chain hash used by the
 bundled stores; auditors can recompute it over exported logs.

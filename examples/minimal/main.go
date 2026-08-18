@@ -162,8 +162,16 @@ func main() {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
+	// HTTPRequestMetadata attaches the client IP and User-Agent to every
+	// request context, so each audit event recorded by the library carries
+	// them. Behind a reverse proxy, pass the proxy prefixes to resolve the
+	// real client from X-Forwarded-For instead of recording the proxy:
+	//
+	//	credbound.HTTPRequestMetadata(mux, netip.MustParsePrefix("10.0.0.0/8"))
+	handler := credbound.HTTPRequestMetadata(mux)
+
 	log.Println("listening on http://127.0.0.1:8080")
-	log.Fatal(http.ListenAndServe("127.0.0.1:8080", mux))
+	log.Fatal(http.ListenAndServe("127.0.0.1:8080", handler))
 }
 
 // secretFromEnv reads a hex-encoded secret of exactly size bytes. When the
