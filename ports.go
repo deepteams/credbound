@@ -46,10 +46,12 @@ type Store interface {
 	CreatePasswordReset(context.Context, PasswordResetCredential, Commit) error
 	PasswordResetByID(context.Context, string) (PasswordResetCredential, error)
 	// CompletePasswordReset atomically consumes the single-use reset,
-	// replaces the password, deletes the user's other pending resets,
-	// revokes the user's PATs and OAuth grants (and, for SessionStore-capable
-	// stores, their sessions), and clears the login throttle. It returns
-	// ErrConflict when the reset was already consumed.
+	// installs the password — replacing the previous one, or creating the
+	// account's first for a passwordless member provisioned by SSO JIT or
+	// SCIM — deletes the user's other pending resets, revokes the user's
+	// PATs and OAuth grants (and, for SessionStore-capable stores, their
+	// sessions), and clears the login throttle. It returns ErrConflict when
+	// the reset was already consumed.
 	CompletePasswordReset(ctx context.Context, resetID string, password PasswordCredential, at time.Time, commit Commit) error
 
 	CreateEmailAuthentication(context.Context, EmailAuthenticationCredential, Commit) error

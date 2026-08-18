@@ -191,6 +191,19 @@ func TestWorkspaceDomainStoreJITProvision(t *testing.T) {
 	if err != nil || linked.UserID != user.ID {
 		t.Fatalf("JIT identity = %#v, %v", linked, err)
 	}
+	// Completing a password reset installs the passwordless JIT member's
+	// first password, matching the memory store's contract.
+	reset := credbound.PasswordResetCredential{ID: f.id(), UserID: user.ID, Digest: []byte("digest"), CreatedAt: f.now, ExpiresAt: f.now.Add(time.Hour)}
+	if err := f.store.CreatePasswordReset(ctx, reset, f.event(user.ID, "reset.create", user.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	first := credbound.PasswordCredential{UserID: user.ID, Hash: "first-hash", UpdatedAt: f.now}
+	if err := f.store.CompletePasswordReset(ctx, reset.ID, first, f.now, f.event(user.ID, "reset.complete", user.ID, "")); err != nil {
+		t.Fatalf("first-password reset = %v", err)
+	}
+	if got, err := f.store.PasswordByUserID(ctx, user.ID); err != nil || got.Hash != "first-hash" {
+		t.Fatalf("first password = %#v, %v", got, err)
+	}
 
 	duplicateEmail, email2, membership2, identity2 := newAccount("alice@corp.example.com", "subject-2")
 	if err := f.store.JITProvisionSSOUser(ctx, duplicateEmail, email2, membership2, identity2, f.now, f.event(duplicateEmail.ID, "jit.duplicate_email", duplicateEmail.ID, users.workspace.ID)); !errors.Is(err, credbound.ErrConflict) {

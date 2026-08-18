@@ -476,7 +476,8 @@ func (s *Store) PasswordResetByID(ctx context.Context, resetID string) (credboun
 	}, nil
 }
 
-// CompletePasswordReset consumes the reset and installs the new password,
+// CompletePasswordReset consumes the reset and installs the password — the
+// account's first, for a passwordless member provisioned by SSO JIT or SCIM —
 // revoking the user's other pending resets, tokens, sessions and throttle in
 // the same commit; a reused reset reports credbound.ErrConflict.
 func (s *Store) CompletePasswordReset(ctx context.Context, resetID string, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {
@@ -491,9 +492,8 @@ func (s *Store) CompletePasswordReset(ctx context.Context, resetID string, passw
 		if err := q.DeleteOtherPasswordResets(ctx, db.DeleteOtherPasswordResetsParams{UserID: password.UserID, ID: resetID}); err != nil {
 			return mapError(err)
 		}
-		replaced, err := q.ReplacePassword(ctx, db.ReplacePasswordParams{UserID: password.UserID, Hash: password.Hash, UpdatedAt: password.UpdatedAt})
-		if err := affected(replaced, err); err != nil {
-			return err
+		if err := q.UpsertPassword(ctx, db.UpsertPasswordParams{UserID: password.UserID, Hash: password.Hash, UpdatedAt: password.UpdatedAt}); err != nil {
+			return mapError(err)
 		}
 		if err := q.RevokeUserPATs(ctx, db.RevokeUserPATsParams{UserID: password.UserID, RevokedAt: nullableTime(&at)}); err != nil {
 			return mapError(err)

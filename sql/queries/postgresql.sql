@@ -158,6 +158,10 @@ SELECT user_id, hash, updated_at FROM credbound.password_credentials WHERE user_
 -- name: ReplacePassword :execrows
 UPDATE credbound.password_credentials SET hash = $2, updated_at = $3 WHERE user_id = $1;
 
+-- name: UpsertPassword :exec
+INSERT INTO credbound.password_credentials (user_id, hash, updated_at) VALUES ($1, $2, $3)
+ON CONFLICT (user_id) DO UPDATE SET hash = excluded.hash, updated_at = excluded.updated_at;
+
 -- name: RehashPassword :execrows
 UPDATE credbound.password_credentials SET hash = $2, updated_at = $3 WHERE user_id = $1 AND hash = @previous_hash;
 

@@ -3394,6 +3394,22 @@ func (q *Queries) UpsertMembership(ctx context.Context, arg UpsertMembershipPara
 	return err
 }
 
+const upsertPassword = `-- name: UpsertPassword :exec
+INSERT INTO credbound.password_credentials (user_id, hash, updated_at) VALUES ($1, $2, $3)
+ON CONFLICT (user_id) DO UPDATE SET hash = excluded.hash, updated_at = excluded.updated_at
+`
+
+type UpsertPasswordParams struct {
+	UserID    string    `json:"user_id"`
+	Hash      string    `json:"hash"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (q *Queries) UpsertPassword(ctx context.Context, arg UpsertPasswordParams) error {
+	_, err := q.db.ExecContext(ctx, upsertPassword, arg.UserID, arg.Hash, arg.UpdatedAt)
+	return err
+}
+
 const upsertSCIMGroup = `-- name: UpsertSCIMGroup :exec
 INSERT INTO credbound.scim_groups (id, configuration_id, external_id, display_name, member_ids_json, created_at, updated_at, deleted_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

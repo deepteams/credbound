@@ -590,7 +590,8 @@ func (s *Store) PasswordResetByID(ctx context.Context, resetID string) (credboun
 	return clonePasswordReset(credential), nil
 }
 
-// CompletePasswordReset consumes the reset and installs the new password,
+// CompletePasswordReset consumes the reset and installs the password — the
+// account's first, for a passwordless member provisioned by SSO JIT or SCIM —
 // revoking the user's other pending resets, tokens, sessions and throttle in
 // the same commit; a reused reset reports credbound.ErrConflict.
 func (s *Store) CompletePasswordReset(ctx context.Context, resetID string, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {

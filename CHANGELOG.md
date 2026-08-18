@@ -29,6 +29,12 @@ breaking changes may land in any release and are called out explicitly.
   revocation) now also revokes the access tokens of the grants the family
   descends from, so a thief's already-minted access token dies with the
   family instead of surviving until expiry.
+- `CompletePasswordReset` now behaves identically on every bundled store:
+  it installs the account's first password for a passwordless member
+  provisioned by SSO JIT or SCIM (the memory store's behavior; the SQL
+  stores previously failed). The verified email proof is the same authority
+  every reset rests on, and addresses under a confirmed EnforceSSO domain
+  never reach this path.
 - **Breaking:** the transparent password rehash is a compare-and-swap:
   `Store.ReplacePassword` is replaced by `Store.RehashPassword`, which
   installs the stronger hash only while the hash the verification ran

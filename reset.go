@@ -85,6 +85,10 @@ func (m *Manager) BeginPasswordReset(ctx context.Context, email string) (_ Issue
 }
 
 // CompletePasswordReset consumes a reset token and installs the new password.
+// For a passwordless member provisioned by SSO JIT or SCIM this installs
+// their first password: the verified email proof is the same authority every
+// reset rests on, and an address under a confirmed EnforceSSO domain can
+// never reach this path because BeginPasswordReset refuses it up front.
 // As required by the recovery policy, it atomically revokes every PAT and
 // OAuth grant of the account and clears its login throttle. When the store
 // supports sessions (SessionStore) the user's server-side sessions are
