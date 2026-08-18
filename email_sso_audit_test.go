@@ -503,6 +503,24 @@ func TestSSOAssurancePolicy(t *testing.T) {
 	}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("empty policy error = %v", err)
 	}
+	// A blank ACR (or AMR) entry would accept an IdP asserting no assurance and
+	// is rejected at construction.
+	if _, err := credbound.New(credbound.Config{
+		Store: store, Passwords: &fakePasswords{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		SSOProviders: []credbound.SSOProvider{provider},
+		SSOAssurance: map[string]credbound.SSOAssurancePolicy{provider.configurationID: {AcceptedACR: []string{""}}},
+	}); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("blank ACR policy error = %v", err)
+	}
+	if _, err := credbound.New(credbound.Config{
+		Store: store, Passwords: &fakePasswords{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		SSOProviders: []credbound.SSOProvider{provider},
+		SSOAssurance: map[string]credbound.SSOAssurancePolicy{provider.configurationID: {RequiredAMR: []string{"  "}}},
+	}); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("blank AMR policy error = %v", err)
+	}
 }
 
 // TestSSOAAL1WithoutAssurance locks the fail-safe default: a provider with no

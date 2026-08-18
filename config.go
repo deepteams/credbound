@@ -7,8 +7,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"maps"
 	"reflect"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -328,12 +329,32 @@ func New(cfg Config) (*Manager, error) {
 		}
 		ssoProviders[provider.ConfigurationID()] = provider
 	}
+	ssoAssurance := make(map[string]SSOAssurancePolicy, len(cfg.SSOAssurance))
 	for configurationID, policy := range cfg.SSOAssurance {
 		if _, registered := ssoProviders[configurationID]; !registered {
 			return nil, fmt.Errorf("%w: SSO assurance policy for unregistered provider configuration", ErrInvalidInput)
 		}
 		if policy.empty() {
 			return nil, fmt.Errorf("%w: an SSO assurance policy must require an ACR or AMR, or set TrustUnverified", ErrInvalidInput)
+		}
+		// A blank ACR or AMR would accept an IdP that asserts an empty value —
+		// effectively no assurance — so reject it rather than silently granting
+		// AAL2 on nothing.
+		for _, acr := range policy.AcceptedACR {
+			if strings.TrimSpace(acr) == "" {
+				return nil, fmt.Errorf("%w: an SSO assurance policy must not accept a blank ACR", ErrInvalidInput)
+			}
+		}
+		for _, amr := range policy.RequiredAMR {
+			if strings.TrimSpace(amr) == "" {
+				return nil, fmt.Errorf("%w: an SSO assurance policy must not require a blank AMR", ErrInvalidInput)
+			}
+		}
+		// Deep-copy the slices so a caller mutating its input after New cannot
+		// change the enforced policy.
+		ssoAssurance[configurationID] = SSOAssurancePolicy{
+			AcceptedACR: slices.Clone(policy.AcceptedACR), RequiredAMR: slices.Clone(policy.RequiredAMR),
+			TrustUnverified: policy.TrustUnverified,
 		}
 	}
 	dummyHash, err := cfg.Passwords.Hash("credbound-dummy-password")
@@ -439,7 +460,7 @@ func New(cfg Config) (*Manager, error) {
 		sessionIdleTimeout:    cfg.SessionIdleTimeout,
 		emailIssuanceCooldown: cfg.EmailIssuanceCooldown,
 		ssoProviders:          ssoProviders,
-		ssoAssurance:          maps.Clone(cfg.SSOAssurance),
+		ssoAssurance:          ssoAssurance,
 		events:                events,
 		scimStore:             scimStore,
 		oauthStore:            oauthStore,
