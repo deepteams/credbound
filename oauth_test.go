@@ -330,6 +330,85 @@ func TestOAuthAuthorizationRefreshAndDCR(t *testing.T) {
 	}
 }
 
+// TestOAuthUserInfoRejectsDisabledUser guards USER-002 on the UserInfo path:
+// disabling a user does not revoke their OAuth grants, so UserInfo must re-check
+// account status exactly like the resource-server path, or a disabled user's
+// subject and email keep leaking until the token expires.
+func TestOAuthUserInfoRejectsDisabledUser(t *testing.T) {
+	f := newOAuthFixture(t)
+	ctx := context.Background()
+	root, workspace := f.bootstrap(t)
+	rootAAL2 := aal2(root.UserID, f.now)
+
+	issuer, err := f.manager.CreateOAuthIssuer(ctx, rootAAL2, credbound.TrustedRequest{Local: true}, credbound.CreateOAuthIssuerInput{
+		Issuer: "https://auth.example.com", OIDCEnabled: true, CIMDMode: credbound.OAuthCIMDDisabled, DCRMode: credbound.OAuthDCRDisabled,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource, err := f.manager.CreateOAuthProtectedResource(ctx, rootAAL2, workspace.ID, credbound.CreateOAuthProtectedResourceInput{
+		IssuerID: issuer.ID, Resource: "https://mcp.example.com/workspaces/acme",
+		Scopes: []credbound.OAuthScopeDefinition{{Name: "documents.read", Description: "Read", Permissions: []credbound.WorkspacePermission{credbound.PermissionWorkspaceAccess}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := f.manager.PreRegisterOAuthClient(ctx, rootAAL2, credbound.TrustedRequest{Local: true}, issuer.ID, credbound.OAuthClientRegistrationInput{
+		Name: "MCP", ApplicationType: credbound.OAuthApplicationWeb,
+		RedirectURIs: []string{"https://client.example.com/callback"}, GrantTypes: []string{"authorization_code"},
+		ResponseTypes: []string{"code"}, Scopes: []string{"documents.read", "openid", "email"}, TokenEndpointAuthMethod: credbound.OAuthAuthNone,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, err := f.manager.CreateUser(ctx, rootAAL2, workspace.ID, credbound.CreateUserInput{
+		Email: "member@example.com", DisplayName: "Member", Password: "another strong password", Role: credbound.RoleMember,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberAAL2 := aal2(member.ID, f.now)
+
+	verifier := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
+	digest := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(digest[:])
+	consent, err := f.manager.BeginOAuthAuthorization(ctx, memberAAL2, credbound.BeginOAuthAuthorizationInput{
+		Issuer: issuer.Issuer, ClientID: client.Client.ClientID, RedirectURI: "https://client.example.com/callback",
+		Resource: resource.Resource, Scopes: []string{"documents.read", "openid", "email"}, State: "state",
+		CodeChallenge: challenge, CodeChallengeMethod: "S256", Nonce: "nonce",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorized, err := f.manager.CompleteOAuthAuthorization(ctx, memberAAL2, consent.Continuation, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens, err := f.manager.ExchangeOAuthAuthorizationCode(ctx, credbound.ExchangeOAuthAuthorizationCodeInput{
+		Issuer: issuer.Issuer, ClientID: client.Client.ClientID, Code: authorized.Code,
+		RedirectURI: "https://client.example.com/callback", CodeVerifier: verifier, Resource: resource.Resource,
+	})
+	if err != nil || tokens.AccessToken == "" {
+		t.Fatalf("exchange = %#v, %v", tokens, err)
+	}
+
+	// While enabled, UserInfo answers.
+	if info, err := f.manager.OAuthUserInfo(ctx, issuer.Issuer, tokens.AccessToken); err != nil || info.Subject == "" {
+		t.Fatalf("userinfo before disable = %#v, %v", info, err)
+	}
+	// After disabling the member, the still-unexpired token must be refused by
+	// both the resource-server path and UserInfo.
+	if err := f.manager.DisableUser(ctx, rootAAL2, credbound.TrustedRequest{Local: true}, member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.AuthenticateOAuthAccessToken(ctx, resource.Resource, tokens.AccessToken); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("resource-server path after disable = %v", err)
+	}
+	if _, err := f.manager.OAuthUserInfo(ctx, issuer.Issuer, tokens.AccessToken); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("userinfo after disable = %v", err)
+	}
+}
+
 func TestOAuthAdministrationListsQuotaAndRevocation(t *testing.T) {
 	f := newOAuthFixture(t)
 	ctx := context.Background()

@@ -276,6 +276,18 @@ func (m *Manager) OAuthUserInfo(ctx context.Context, issuerURL, rawAccessToken s
 	if err != nil {
 		return OIDCUserInfo{}, ErrInvalidCredentials
 	}
+	// UserInfo must honor the same account/workspace status as the resource
+	// server path (activeOAuthGrant): disabling a user does not revoke their
+	// OAuth grants, so without this check a disabled user's subject and email
+	// would keep leaking through UserInfo until the token expired (USER-002).
+	user, err := m.store.UserByID(ctx, token.UserID)
+	if err != nil || user.Disabled {
+		return OIDCUserInfo{}, ErrInvalidCredentials
+	}
+	workspace, err := m.store.WorkspaceByID(ctx, grant.WorkspaceID)
+	if err != nil || workspace.DisabledAt != nil {
+		return OIDCUserInfo{}, ErrInvalidCredentials
+	}
 	info := OIDCUserInfo{Subject: m.oauthPairwiseSubject(issuer.ID, client.SectorIdentifier, token.UserID)}
 	if slices.Contains(token.Scopes, "email") {
 		info.Email, info.EmailVerified = m.oauthPrimaryEmail(ctx, token.UserID)
