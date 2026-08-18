@@ -1,3 +1,8 @@
+-- Schema model for sqlc query analysis ONLY. It is a simplified projection and
+-- is NOT the provisioning source of truth: apply migrations/sqlite/ at runtime,
+-- which additionally carries partial unique indexes, immutability triggers and
+-- enum CHECK constraints this file omits. Keep it in sync when migrations change.
+
 CREATE TABLE credbound_instance (singleton INTEGER PRIMARY KEY, initialized_at DATETIME NOT NULL);
 CREATE TABLE credbound_users (id TEXT PRIMARY KEY CHECK (length(id) = 36 AND id = lower(id) AND substr(id, 15, 1) = '7' AND substr(id, 20, 1) GLOB '[89ab]' AND replace(id, '-', '') NOT GLOB '*[^0-9a-f]*'), display_name TEXT NOT NULL, disabled INTEGER NOT NULL, last_seen_at DATETIME, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL);
 CREATE TABLE credbound_user_emails (id TEXT PRIMARY KEY CHECK (length(id) = 36 AND id = lower(id) AND substr(id, 15, 1) = '7' AND substr(id, 20, 1) GLOB '[89ab]' AND replace(id, '-', '') NOT GLOB '*[^0-9a-f]*'), user_id TEXT NOT NULL REFERENCES credbound_users(id), address TEXT NOT NULL UNIQUE, is_primary INTEGER NOT NULL, verified_at DATETIME, verification_digest BLOB, verification_expires_at DATETIME, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL);

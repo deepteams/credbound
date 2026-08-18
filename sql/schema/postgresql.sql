@@ -1,3 +1,8 @@
+-- Schema model for sqlc query analysis ONLY. It is a simplified projection and
+-- is NOT the provisioning source of truth: apply migrations/postgresql/ at runtime,
+-- which additionally carries partial unique indexes, immutability triggers and
+-- enum CHECK constraints this file omits. Keep it in sync when migrations change.
+
 CREATE SCHEMA credbound;
 CREATE TABLE credbound.instance (singleton boolean PRIMARY KEY, initialized_at timestamptz NOT NULL);
 CREATE TABLE credbound.users (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), display_name text NOT NULL, disabled boolean NOT NULL, last_seen_at timestamptz, created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL);

@@ -31,8 +31,11 @@ be reimplemented in every project:
   workspace, and their admin membership, with enumeration-resistant handling
   of already-registered addresses;
 - optional server-side sessions behind single-display `cbs_` tokens, with
-  device listings and a session-revocation cascade on reset, disable, and
+  device listings, an absolute TTL and an optional idle timeout, and a
+  session-revocation cascade on reset, password change, disable, and
   credential revocation;
+- an optional per-address cooldown on the unauthenticated email-issuing flows
+  (reset, magic-link, email OTP, verification resend) to blunt mail bombing;
 - optional verified workspace email domains (DNS-challenge capture) with
   per-domain SSO enforcement and just-in-time provisioning of passwordless
   members from a trusted SSO provider;
@@ -118,8 +121,9 @@ optional server-side session module (`CreateSession`, `AuthenticateSession`,
 implements `SessionStore` — the bundled in-memory, SQLite, and PostgreSQL
 stores all do. It persists the `Authentication` snapshot behind a
 single-display `cbs_` token (digest-only at rest, absolute
-`Config.SessionTTL` expiry), lists a user's devices, and extends the
-revocation cascade of `CompletePasswordReset`, `DisableUser`, and
+`Config.SessionTTL` expiry plus an optional `Config.SessionIdleTimeout`),
+lists a user's devices, and extends the revocation cascade of
+`CompletePasswordReset`, `ChangePassword`, `DisableUser`, and
 `RevokeUserCredentials` to those sessions within the same transaction. The
 token's transport — cookies, CSRF, TLS — remains host-owned.
 
