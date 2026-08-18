@@ -38,6 +38,11 @@ type testIssuer struct {
 	lastTokenRequest url.Values
 	// tokenStatus, when non-zero, forces an error response from /token.
 	tokenStatus int
+	// discoveryHits counts requests to the discovery document.
+	discoveryHits int
+	// discoveryStatus, when non-zero, forces an error response from
+	// discovery.
+	discoveryStatus int
 }
 
 func newTestIssuer(t *testing.T) *testIssuer {
@@ -76,6 +81,18 @@ func (i *testIssuer) setTokenTTL(ttl time.Duration) {
 	i.tokenTTL = ttl
 }
 
+func (i *testIssuer) setDiscoveryStatus(status int) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.discoveryStatus = status
+}
+
+func (i *testIssuer) discoveryCount() int {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.discoveryHits
+}
+
 func (i *testIssuer) tokenRequest() url.Values {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -83,6 +100,14 @@ func (i *testIssuer) tokenRequest() url.Values {
 }
 
 func (i *testIssuer) discovery(w http.ResponseWriter, _ *http.Request) {
+	i.mu.Lock()
+	i.discoveryHits++
+	status := i.discoveryStatus
+	i.mu.Unlock()
+	if status != 0 {
+		w.WriteHeader(status)
+		return
+	}
 	writeJSON(i.t, w, map[string]any{
 		"issuer":                                i.server.URL,
 		"authorization_endpoint":                i.server.URL + "/authorize",

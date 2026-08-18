@@ -58,6 +58,43 @@ func callbackURL(state string) []byte {
 	return []byte("https://app.example.com/sso/callback?code=test-code&state=" + state)
 }
 
+// TestDiscoveryRefreshesOnTTL locks the metadata posture shared with the
+// SAML adapter: a discovered issuer document is cached for
+// MetadataRefreshInterval, re-discovered once stale so a rotated endpoint or
+// jwks_uri is picked up without a redeploy, and a failed refresh keeps
+// serving the last good document.
+func TestDiscoveryRefreshesOnTTL(t *testing.T) {
+	issuer := newTestIssuer(t)
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	provider := newTestProvider(t, issuer, func(c *Config) {
+		c.Clock = func() time.Time { return now }
+		c.MetadataRefreshInterval = time.Hour
+	})
+	begin(t, issuer, provider, false)
+	begin(t, issuer, provider, false)
+	if hits := issuer.discoveryCount(); hits != 1 {
+		t.Fatalf("discovery hits within TTL = %d, want 1", hits)
+	}
+	// Past the TTL a failed refresh still serves the cached document.
+	now = now.Add(2 * time.Hour)
+	issuer.setDiscoveryStatus(500)
+	begin(t, issuer, provider, false)
+	if hits := issuer.discoveryCount(); hits != 2 {
+		t.Fatalf("discovery hits after failed refresh = %d, want 2", hits)
+	}
+	// Once the issuer recovers, the stale document is replaced.
+	issuer.setDiscoveryStatus(0)
+	begin(t, issuer, provider, false)
+	if hits := issuer.discoveryCount(); hits != 3 {
+		t.Fatalf("discovery hits after recovery = %d, want 3", hits)
+	}
+	// The fresh document is cached again.
+	begin(t, issuer, provider, false)
+	if hits := issuer.discoveryCount(); hits != 3 {
+		t.Fatalf("discovery hits after re-cache = %d, want 3", hits)
+	}
+}
+
 func TestBeginBuildsHardenedAuthorizationURL(t *testing.T) {
 	issuer := newTestIssuer(t)
 	provider := newTestProvider(t, issuer, nil)

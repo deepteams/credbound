@@ -85,6 +85,11 @@ type Config struct {
 	// exchange. Defaults to a client with a 10 second timeout; a supplied
 	// client without a timeout is shallow-copied and given the default.
 	HTTPClient *http.Client
+	// MetadataRefreshInterval bounds how long a discovered issuer document is
+	// cached before it is re-discovered, so a rotated endpoint or jwks_uri is
+	// picked up without a redeploy — the same posture as the SAML adapter's
+	// metadata TTL. Zero uses a default of 12 hours.
+	MetadataRefreshInterval time.Duration
 	// Clock supplies the current time for token validation and step-up
 	// freshness checks. Defaults to time.Now.
 	Clock func() time.Time
@@ -104,8 +109,10 @@ type Provider struct {
 	client          *http.Client
 	now             func() time.Time
 
-	mu     sync.Mutex
-	remote *oidc.Provider
+	mu            sync.Mutex
+	remote        *oidc.Provider
+	remoteFetched time.Time
+	metadataTTL   time.Duration
 }
 
 // session is the opaque payload carried through credbound's sealed
@@ -161,6 +168,10 @@ func New(config Config) (*Provider, error) {
 	if clock == nil {
 		clock = time.Now
 	}
+	metadataTTL := config.MetadataRefreshInterval
+	if metadataTTL <= 0 {
+		metadataTTL = 12 * time.Hour
+	}
 	return &Provider{
 		configurationID: config.ConfigurationID,
 		kind:            kind,
@@ -171,6 +182,7 @@ func New(config Config) (*Provider, error) {
 		scopes:          scopes,
 		client:          httpClient(config.HTTPClient),
 		now:             clock,
+		metadataTTL:     metadataTTL,
 	}, nil
 }
 
@@ -319,20 +331,26 @@ func (p *Provider) Finish(ctx context.Context, sessionBytes, response []byte) (c
 	return claims, nil
 }
 
-// discover resolves and caches the issuer metadata. The first successful
-// discovery is reused for the provider's lifetime; failures are retried on
+// discover resolves and caches the issuer metadata. A successful discovery
+// is reused until metadataTTL elapses, then re-discovered so a rotated
+// endpoint or jwks_uri is picked up without a redeploy; a failed refresh
+// keeps serving the last good document rather than breaking authentication.
+// Initial failures are retried on
 // the next call.
 func (p *Provider) discover(ctx context.Context) (*oidc.Provider, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.remote != nil {
+	if p.remote != nil && p.now().Before(p.remoteFetched.Add(p.metadataTTL)) {
 		return p.remote, nil
 	}
 	remote, err := oidc.NewProvider(oidc.ClientContext(ctx, p.client), p.issuerURL)
 	if err != nil {
+		if p.remote != nil {
+			return p.remote, nil
+		}
 		return nil, fmt.Errorf("ssoadapter: discover issuer: %w", err)
 	}
-	p.remote = remote
+	p.remote, p.remoteFetched = remote, p.now()
 	return remote, nil
 }
 
