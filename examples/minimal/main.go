@@ -23,6 +23,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/deepteams/credbound"
 	"github.com/deepteams/credbound/migrations"
@@ -33,10 +34,11 @@ import (
 
 func main() {
 	// Secrets come from the environment as hex. When a variable is unset the
-	// example generates a random development value and warns: everything
-	// sealed with it (PAT digests, continuations) becomes unreadable on the
-	// next start. A real deployment must provide stable secrets from its
-	// secret manager and treat a missing value as fatal.
+	// example generates a random development value and persists it in a
+	// 0600 file next to the database, so restarts keep reading everything
+	// sealed with it (PAT digests, continuations) without the secret ever
+	// reaching the logs. A real deployment must provide stable secrets from
+	// its secret manager and treat a missing value as fatal.
 	secretKey := secretFromEnv("CREDBOUND_SECRET_KEY", 32)
 	patPepper := secretFromEnv("CREDBOUND_PAT_PEPPER", 32)
 	recoveryPepper := secretFromEnv("CREDBOUND_RECOVERY_PEPPER", 32)
@@ -164,8 +166,11 @@ func main() {
 	log.Fatal(http.ListenAndServe("127.0.0.1:8080", mux))
 }
 
-// secretFromEnv reads a hex-encoded secret of exactly size bytes, generating
-// a random development value with a warning when the variable is unset.
+// secretFromEnv reads a hex-encoded secret of exactly size bytes. When the
+// variable is unset it falls back to a development value persisted in a
+// 0600 file next to the database, generated on first use. The secret value
+// itself is never logged: log output routinely outlives the process in
+// aggregators, and a leaked SecretKey unseals every continuation.
 func secretFromEnv(name string, size int) []byte {
 	if encoded := os.Getenv(name); encoded != "" {
 		value, err := hex.DecodeString(encoded)
@@ -174,11 +179,22 @@ func secretFromEnv(name string, size int) []byte {
 		}
 		return value
 	}
+	path := "credbound-minimal." + strings.ToLower(name) + ".secret"
+	if encoded, err := os.ReadFile(path); err == nil {
+		value, err := hex.DecodeString(strings.TrimSpace(string(encoded)))
+		if err != nil || len(value) != size {
+			log.Fatalf("%s holds an invalid development secret; delete the file or set %s", path, name)
+		}
+		return value
+	}
 	value := make([]byte, size)
 	if _, err := rand.Read(value); err != nil {
 		log.Fatalf("generate %s: %v", name, err)
 	}
-	log.Printf("warning: %s is unset; using a random development value, e.g. %s=%s", name, name, hex.EncodeToString(value))
+	if err := os.WriteFile(path, []byte(hex.EncodeToString(value)+"\n"), 0o600); err != nil {
+		log.Fatalf("persist development %s: %v", name, err)
+	}
+	log.Printf("warning: %s is unset; generated a development value in %s", name, path)
 	return value
 }
 
