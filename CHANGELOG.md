@@ -9,6 +9,18 @@ breaking changes may land in any release and are called out explicitly.
 
 ### Security
 
+- WebAuthn ceremonies are single use: passkey continuations now seal a
+  ceremony id that the success commit consumes, so a captured
+  `(continuation, response)` pair can never be replayed — signature
+  counters alone cannot guarantee this, since many authenticators
+  legitimately report a constant zero.
+- **Breaking:** the transparent password rehash is a compare-and-swap:
+  `Store.ReplacePassword` is replaced by `Store.RehashPassword`, which
+  installs the stronger hash only while the hash the verification ran
+  against is still in place and reports `ErrConflict` otherwise, so an
+  in-flight sign-in racing a password change or reset can no longer
+  resurrect the old password.
+
 - **Breaking:** the OAuth `client_credentials` grant is now restricted to
   administratively pre-registered confidential clients (DCR and CIMD
   registrations are refused, including `private_key_jwt`) and requires both
@@ -22,8 +34,7 @@ breaking changes may land in any release and are called out explicitly.
   `RevokeOAuthClientAccessToken`.
 - `ChangePassword` now revokes the user's sessions in the same transaction
   that installs the new password, through the new `Store.ChangePassword`
-  contract (distinct from `ReplacePassword`, which remains the
-  transparent-rehash path).
+  contract (distinct from `RehashPassword`, the transparent-rehash path).
 - **Breaking:** `New` fails construction when `EmailIssuanceCooldown` is set
   on a store without `EmailThrottleStore`, instead of silently disabling the
   anti-mail-bombing cooldown.

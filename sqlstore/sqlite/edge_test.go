@@ -155,7 +155,7 @@ func TestNotFoundConflictAndCursorPaths(t *testing.T) {
 	if _, err := f.store.PasswordByUserID(ctx, "missing"); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
-	if err := f.store.ReplacePassword(ctx, credbound.PasswordCredential{UserID: "missing"}, f.event("password.missing")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.RehashPassword(ctx, credbound.PasswordCredential{UserID: "missing"}, "old", f.event("password.missing")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatal(err)
 	}
 	if _, err := f.store.TOTPByUserID(ctx, "missing"); !errors.Is(err, credbound.ErrNotFound) {
@@ -316,7 +316,7 @@ func TestClosedDatabaseErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if err := f.store.ReplacePassword(ctx, credbound.PasswordCredential{UserID: f.user.ID}, f.event("closed.mutation")); err == nil {
+	if err := f.store.RehashPassword(ctx, credbound.PasswordCredential{UserID: f.user.ID}, "old", f.event("closed.mutation")); err == nil {
 		t.Fatal("mutation on closed database succeeded")
 	}
 	configuration := credbound.SCIMConfiguration{ID: f.id(), WorkspaceID: f.workspace.ID}

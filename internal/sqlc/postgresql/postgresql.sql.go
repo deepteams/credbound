@@ -2682,6 +2682,30 @@ func (q *Queries) PruneConsumedCeremonies(ctx context.Context, expiresAt time.Ti
 	return err
 }
 
+const rehashPassword = `-- name: RehashPassword :execrows
+UPDATE credbound.password_credentials SET hash = $2, updated_at = $3 WHERE user_id = $1 AND hash = $4
+`
+
+type RehashPasswordParams struct {
+	UserID       string    `json:"user_id"`
+	Hash         string    `json:"hash"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	PreviousHash string    `json:"previous_hash"`
+}
+
+func (q *Queries) RehashPassword(ctx context.Context, arg RehashPasswordParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, rehashPassword,
+		arg.UserID,
+		arg.Hash,
+		arg.UpdatedAt,
+		arg.PreviousHash,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const reissueEmailVerification = `-- name: ReissueEmailVerification :execrows
 UPDATE credbound.user_emails
 SET verification_digest = $2, verification_expires_at = $3, updated_at = $4

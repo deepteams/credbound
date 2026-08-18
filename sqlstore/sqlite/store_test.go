@@ -99,11 +99,16 @@ func TestStoreContractAndImmutableAudit(t *testing.T) {
 		t.Fatalf("password = %#v, %v", got, err)
 	}
 	password.Hash = "new-hash"
-	if err := f.store.ReplacePassword(ctx, password, f.event(user.ID, "password", user.ID, "")); err != nil {
+	if err := f.store.RehashPassword(ctx, password, "hash", f.event(user.ID, "password", user.ID, "")); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := f.store.PasswordByUserID(ctx, user.ID); got.Hash != "new-hash" {
 		t.Fatalf("password was not replaced: %#v", got)
+	}
+	// The rehash is a compare-and-swap: once the expected hash is gone, a
+	// concurrent writer must lose with ErrConflict, not overwrite.
+	if err := f.store.RehashPassword(ctx, password, "hash", f.event(user.ID, "password", user.ID, "")); !errors.Is(err, credbound.ErrConflict) {
+		t.Fatalf("stale rehash = %v", err)
 	}
 	if got, err := f.store.Membership(ctx, workspace.ID, user.ID); err != nil || got.Role != credbound.RoleAdmin {
 		t.Fatalf("membership = %#v, %v", got, err)

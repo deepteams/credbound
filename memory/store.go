@@ -448,15 +448,19 @@ func (s *Store) ChangePassword(ctx context.Context, password credbound.PasswordC
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
-// ReplacePassword swaps the user's password credential.
-func (s *Store) ReplacePassword(ctx context.Context, password credbound.PasswordCredential, commit credbound.Commit) error {
+// RehashPassword swaps the user's password credential only while the hash
+// the verification ran against is still in place; a concurrent replacement
+// (or a vanished credential) reports credbound.ErrConflict and leaves the
+// store untouched.
+func (s *Store) RehashPassword(ctx context.Context, password credbound.PasswordCredential, previousHash string, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.passwords[password.UserID]; !ok {
-		return credbound.ErrNotFound
+	current, ok := s.passwords[password.UserID]
+	if !ok || current.Hash != previousHash {
+		return credbound.ErrConflict
 	}
 	previous, err := s.prepareCommitLocked(commit)
 	if err != nil {

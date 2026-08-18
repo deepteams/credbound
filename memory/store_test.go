@@ -128,7 +128,7 @@ func TestCanceledOperations(t *testing.T) {
 		f.store.Bootstrap(ctx, f.user, f.email(f.user), password, f.workspace, membership, admin, event),
 		f.store.CreateUser(ctx, f.user, f.email(f.user), password, membership, event),
 		f.store.SetUserDisabled(ctx, f.user.ID, true, f.now, event),
-		f.store.ReplacePassword(ctx, password, event),
+		f.store.RehashPassword(ctx, password, "old", event),
 		f.store.RecordAuthentication(ctx, f.user.ID, f.now, event),
 		f.store.SaveEmail(ctx, email, verification, event),
 		f.store.VerifyEmail(ctx, email.ID, f.now, event),
@@ -273,7 +273,7 @@ func TestConflictsNotFoundAndAuditFailures(t *testing.T) {
 	if _, err := f.store.PasswordByUserID(ctx, "missing"); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
-	if err := f.store.ReplacePassword(ctx, credbound.PasswordCredential{UserID: "missing"}, f.event("password.missing")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.RehashPassword(ctx, credbound.PasswordCredential{UserID: "missing"}, "old", f.event("password.missing")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatal(err)
 	}
 

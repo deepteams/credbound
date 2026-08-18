@@ -339,11 +339,20 @@ func (s *Store) PasswordByUserID(ctx context.Context, userID string) (credbound.
 	return credbound.PasswordCredential{UserID: row.UserID, Hash: row.Hash, UpdatedAt: row.UpdatedAt}, nil
 }
 
-// ReplacePassword swaps the user's password credential.
-func (s *Store) ReplacePassword(ctx context.Context, password credbound.PasswordCredential, commit credbound.Commit) error {
+// RehashPassword swaps the user's password credential only while the hash
+// the verification ran against is still in place; a concurrent replacement
+// (or a vanished credential) reports credbound.ErrConflict and leaves the
+// store untouched.
+func (s *Store) RehashPassword(ctx context.Context, password credbound.PasswordCredential, previousHash string, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
-		count, err := q.ReplacePassword(ctx, db.ReplacePasswordParams{UserID: password.UserID, Hash: password.Hash, UpdatedAt: password.UpdatedAt})
-		return affected(count, err)
+		count, err := q.RehashPassword(ctx, db.RehashPasswordParams{UserID: password.UserID, Hash: password.Hash, UpdatedAt: password.UpdatedAt, PreviousHash: previousHash})
+		if err != nil {
+			return mapError(err)
+		}
+		if count == 0 {
+			return credbound.ErrConflict
+		}
+		return nil
 	})
 }
 

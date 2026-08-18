@@ -20,12 +20,19 @@ type Store interface {
 	UserByID(context.Context, string) (User, error)
 	Users(context.Context, PageRequest) iter.Seq2[PageEvent[User], error]
 	PasswordByUserID(context.Context, string) (PasswordCredential, error)
-	ReplacePassword(context.Context, PasswordCredential, Commit) error
+	// RehashPassword installs a stronger hash of the password that just
+	// verified — the transparent-rehash path — but only while previousHash,
+	// the stored hash the verification ran against, is still in place. When
+	// a concurrent change or reset already replaced the credential it
+	// returns ErrConflict and leaves the store untouched: an unconditional
+	// swap here would let an in-flight sign-in resurrect the very password
+	// the user just rotated away from.
+	RehashPassword(ctx context.Context, password PasswordCredential, previousHash string, commit Commit) error
 	// ChangePassword installs the user's new password for an authenticated
-	// password change. Unlike ReplacePassword (also the transparent-rehash
-	// path), a SessionStore-capable store must stamp RevokedAt on the user's
-	// active sessions in the same transaction, so a failure leaves both the
-	// password and the sessions untouched.
+	// password change. Unlike RehashPassword, a SessionStore-capable store
+	// must stamp RevokedAt on the user's active sessions in the same
+	// transaction, so a failure leaves both the password and the sessions
+	// untouched.
 	ChangePassword(ctx context.Context, password PasswordCredential, at time.Time, commit Commit) error
 	// RecordAuthentication updates last_seen_at and clears the user's login
 	// throttle in the same transaction as its audit event.

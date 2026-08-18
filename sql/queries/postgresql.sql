@@ -158,6 +158,9 @@ SELECT user_id, hash, updated_at FROM credbound.password_credentials WHERE user_
 -- name: ReplacePassword :execrows
 UPDATE credbound.password_credentials SET hash = $2, updated_at = $3 WHERE user_id = $1;
 
+-- name: RehashPassword :execrows
+UPDATE credbound.password_credentials SET hash = $2, updated_at = $3 WHERE user_id = $1 AND hash = @previous_hash;
+
 -- name: CountUserAuthenticationMethods :one
 SELECT (SELECT COUNT(*) FROM credbound.password_credentials p WHERE p.user_id = $1)
      + (SELECT COUNT(*) FROM credbound.passkeys k WHERE k.user_id = $1)

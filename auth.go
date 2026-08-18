@@ -247,11 +247,19 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 		if metaErr != nil {
 			return Authentication{}, metaErr
 		}
-		if replaceErr := m.store.ReplacePassword(ctx, PasswordCredential{UserID: user.ID, Hash: newHash, UpdatedAt: m.now()}, Commit{Audit: event}); replaceErr != nil {
+		replaceErr := m.store.RehashPassword(ctx, PasswordCredential{UserID: user.ID, Hash: newHash, UpdatedAt: m.now()}, hash, Commit{Audit: event})
+		switch {
+		case errors.Is(replaceErr, ErrConflict):
+			// A concurrent change or reset replaced the credential between
+			// the verification and the rehash: their newer password wins and
+			// the rehash is simply skipped, so this in-flight sign-in can
+			// never resurrect the hash it verified against.
+		case replaceErr != nil:
 			return Authentication{}, m.mapStoreError(ctx, "auth.password.rehash", replaceErr)
+		default:
+			rehashed := PasswordRehashedEvent{EventMeta: meta, UserID: user.ID}
+			m.events.emit(ctx, EventPasswordRehashed, func(listener EventListener) error { return listener.OnPasswordRehashed(ctx, rehashed) })
 		}
-		rehashed := PasswordRehashedEvent{EventMeta: meta, UserID: user.ID}
-		m.events.emit(ctx, EventPasswordRehashed, func(listener EventListener) error { return listener.OnPasswordRehashed(ctx, rehashed) })
 	}
 	factor, factorErr := m.store.TOTPByUserID(ctx, user.ID)
 	requiresSecondFactor := factorErr == nil && factor.Active

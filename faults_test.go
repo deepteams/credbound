@@ -28,6 +28,14 @@ func TestAuthenticationInfrastructureAndRehashPaths(t *testing.T) {
 	if _, err := manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); err != nil {
 		t.Fatalf("rehash login = %v", err)
 	}
+	// A rehash that loses its compare-and-swap to a concurrent password
+	// change is skipped: the sign-in still succeeds and never overwrites
+	// the newer credential.
+	conflicted := &faultStore{Store: base, replacePasswordErr: credbound.ErrConflict}
+	conflictedManager := managerWith(t, conflicted, passwords, fakeTOTP{}, &fakePasskeys{}, nil)
+	if _, err := conflictedManager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); err != nil {
+		t.Fatalf("conflicted rehash login = %v", err)
+	}
 	passwords.rehash = false
 	passwords.verifyErr = errors.New("hasher failed")
 	if _, err := manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); err == nil || !stringsContains(err.Error(), "verify password") {
@@ -479,11 +487,11 @@ func (s *faultStore) CreateUser(ctx context.Context, user credbound.User, email 
 	return s.Store.CreateUser(ctx, user, email, password, membership, commit)
 }
 
-func (s *faultStore) ReplacePassword(ctx context.Context, password credbound.PasswordCredential, commit credbound.Commit) error {
+func (s *faultStore) RehashPassword(ctx context.Context, password credbound.PasswordCredential, previousHash string, commit credbound.Commit) error {
 	if s.replacePasswordErr != nil {
 		return s.replacePasswordErr
 	}
-	return s.Store.ReplacePassword(ctx, password, commit)
+	return s.Store.RehashPassword(ctx, password, previousHash, commit)
 }
 
 func (s *faultStore) ChangePassword(ctx context.Context, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {
