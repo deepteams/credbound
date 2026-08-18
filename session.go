@@ -136,6 +136,15 @@ func (m *Manager) AuthenticateSession(ctx context.Context, raw string) (_ Authen
 		}
 		return Authentication{}, Session{}, ErrExpired
 	}
+	// Idle timeout: a session untouched for longer than the configured window
+	// is expired even though its absolute lifetime remains. Last-seen is
+	// refreshed below on every success, so the window slides with activity.
+	if m.sessionIdleTimeout > 0 && !m.now().Before(session.LastSeenAt.Add(m.sessionIdleTimeout)) {
+		if auditErr := m.appendAuthenticationAudit(ctx, session.UserID, "session.authenticate", AuditFailed, "idle"); auditErr != nil {
+			return Authentication{}, Session{}, auditErr
+		}
+		return Authentication{}, Session{}, ErrExpired
+	}
 	user, userErr := m.store.UserByID(ctx, session.UserID)
 	if userErr != nil || user.Disabled {
 		if userErr != nil && !errors.Is(userErr, ErrNotFound) {

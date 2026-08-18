@@ -213,6 +213,39 @@ func TestSessionExpiryIsAbsolute(t *testing.T) {
 	}
 }
 
+func TestSessionIdleTimeout(t *testing.T) {
+	f := newFixture(t)
+	authn, _ := f.bootstrap(t)
+	ctx := context.Background()
+	manager, err := credbound.New(credbound.Config{
+		Store: f.store, Passwords: f.passwords, TOTP: fakeTOTP{}, Passkeys: &fakePasskeys{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		Clock: func() time.Time { return f.now }, Random: &counterReader{next: 0x51},
+		SessionTTL: 30 * 24 * time.Hour, SessionIdleTimeout: 15 * time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued, err := manager.CreateSession(ctx, credbound.Authentication{UserID: authn.UserID, Method: credbound.MethodPassword, Level: credbound.AAL1, AuthenticatedAt: f.now}, credbound.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Activity within the window refreshes last-seen and slides the window.
+	f.now = f.now.Add(10 * time.Minute)
+	if _, _, err := manager.AuthenticateSession(ctx, issued.Token); err != nil {
+		t.Fatalf("active session rejected = %v", err)
+	}
+	f.now = f.now.Add(10 * time.Minute)
+	if _, _, err := manager.AuthenticateSession(ctx, issued.Token); err != nil {
+		t.Fatalf("session within slid window rejected = %v", err)
+	}
+	// Idle beyond the timeout expires it, well before the absolute TTL.
+	f.now = f.now.Add(16 * time.Minute)
+	if _, _, err := manager.AuthenticateSession(ctx, issued.Token); !errors.Is(err, credbound.ErrExpired) {
+		t.Fatalf("idle session error = %v", err)
+	}
+}
+
 func TestCreateSessionAuthorization(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)

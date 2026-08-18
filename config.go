@@ -118,6 +118,13 @@ type Config struct {
 	// extends it. Zero keeps the default of 30 days. Sessions additionally
 	// require a SessionStore-capable store.
 	SessionTTL time.Duration
+	// SessionIdleTimeout expires a server-side session after this much
+	// inactivity: AuthenticateSession refuses a session whose last-seen
+	// timestamp is older than the timeout, in addition to the absolute
+	// SessionTTL. Zero disables the idle check (absolute expiry only). Every
+	// successful AuthenticateSession refreshes last-seen, so the window slides
+	// with activity.
+	SessionIdleTimeout time.Duration
 	// SSOProviders registers the identity providers the host enables. Each
 	// must expose a unique UUIDv7 configuration ID and a known kind.
 	SSOProviders []SSOProvider
@@ -207,6 +214,7 @@ type Manager struct {
 	emailAuthTTL         time.Duration
 	invitationTTL        time.Duration
 	sessionTTL           time.Duration
+	sessionIdleTimeout   time.Duration
 	ssoProviders         map[string]SSOProvider
 	ssoAssurance         map[string]SSOAssurancePolicy
 	events               *eventRegistry
@@ -407,6 +415,7 @@ func New(cfg Config) (*Manager, error) {
 		emailAuthTTL:         cfg.EmailAuthenticationTTL,
 		invitationTTL:        cfg.InvitationTTL,
 		sessionTTL:           cfg.SessionTTL,
+		sessionIdleTimeout:   cfg.SessionIdleTimeout,
 		ssoProviders:         ssoProviders,
 		ssoAssurance:         maps.Clone(cfg.SSOAssurance),
 		events:               events,
