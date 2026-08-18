@@ -153,6 +153,9 @@ func TestSignUpVerificationFlow(t *testing.T) {
 	if verification.Token == "" || verification.Email.Address != "visitor@example.com" || verification.Email.VerifiedAt != nil || !verification.Email.Primary {
 		t.Fatalf("issued verification = %#v", verification)
 	}
+	if !verification.Deliverable {
+		t.Fatal("real signup issuance must be Deliverable so the host sends the verification email")
+	}
 	membership, err := f.store.Membership(ctx, result.Workspace.ID, result.User.ID)
 	if err != nil || membership.Role != credbound.RoleAdmin || membership.Status != credbound.MembershipActive || membership.ProvisioningSource != credbound.ProvisioningSourceLocal {
 		t.Fatalf("membership = %#v, %v", membership, err)

@@ -144,7 +144,7 @@ func (m *Manager) SignUp(ctx context.Context, input SignUpInput) (_ SignUpResult
 	if m.signup.AutoVerifyEmail {
 		result.Authentication = Authentication{UserID: userID, Method: MethodPassword, Level: AAL1, AuthenticatedAt: now}
 	} else {
-		result.EmailVerification = IssuedEmailVerification{Email: primaryEmail, Token: rawToken}
+		result.EmailVerification = IssuedEmailVerification{Email: primaryEmail, Token: rawToken, Deliverable: true}
 	}
 	return result, nil
 }
