@@ -41,6 +41,8 @@ func newOAuthFixture(t *testing.T) *fixture {
 	return f
 }
 
+// TestOAuthAPIsRequireConfiguration pins the optional-activation contract:
+// without Config.OAuth every OAuth API answers ErrNotSupported (OAUTH-001).
 func TestOAuthAPIsRequireConfiguration(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -118,7 +120,7 @@ func TestOAuthAPIsRequireConfiguration(t *testing.T) {
 
 // TestOAuthConfigRequiresCapableStore checks that enabling Config.OAuth with a
 // Store that cannot back it fails construction instead of surfacing
-// ErrNotSupported from every OAuth call at runtime.
+// ErrNotSupported from every OAuth call at runtime (OAUTH-001).
 func TestOAuthConfigRequiresCapableStore(t *testing.T) {
 	_, err := credbound.New(credbound.Config{
 		Store: coreStore{Store: memory.New()}, Passwords: &fakePasswords{}, TOTP: fakeTOTP{}, Passkeys: &fakePasskeys{},
@@ -130,6 +132,12 @@ func TestOAuthConfigRequiresCapableStore(t *testing.T) {
 	}
 }
 
+// TestOAuthAuthorizationRefreshAndDCR walks the primary user flow end to end:
+// authorization_code with PKCE S256, state, an exact redirect URI, and a
+// mandatory resource (OAUTH-005); refresh-token rotation where reuse revokes
+// the whole family (OAUTH-006); and the independent pre-registration, CIMD,
+// and DCR registration modes of the issuer, including CIMD staying active
+// while DCR is disabled (OAUTH-003).
 func TestOAuthAuthorizationRefreshAndDCR(t *testing.T) {
 	f := newOAuthFixture(t)
 	ctx := context.Background()
@@ -200,6 +208,8 @@ func TestOAuthAuthorizationRefreshAndDCR(t *testing.T) {
 	if err != nil || principal.UserID != actor.UserID || !principal.HasScope("documents.read") {
 		t.Fatalf("principal = %#v, %v", principal, err)
 	}
+	// OAUTH-008: the OIDC subject is pairwise — never the raw user ID — and
+	// the email claim is present only because the email scope was granted.
 	info, err := f.manager.OAuthUserInfo(ctx, issuer.Issuer, tokens.AccessToken)
 	if err != nil || info.Subject == "" || info.Subject == actor.UserID || info.Email != "root@example.com" || info.EmailVerified == nil || !*info.EmailVerified {
 		t.Fatalf("userinfo = %#v, %v", info, err)
@@ -648,6 +658,8 @@ func TestOAuthAdministrationListsQuotaAndRevocation(t *testing.T) {
 	if err != nil || result.Code == "" {
 		t.Fatalf("authorization = %#v, %v", result, err)
 	}
+	// DATA-004: OAuth grants, issuers, protected resources, and clients are
+	// exposed through streamed lists.
 	grants := collectLifecyclePage(t, f.manager.OAuthGrants(ctx, actor, "", credbound.PageRequest{}))
 	if len(grants) != 1 {
 		t.Fatalf("grants = %#v", grants)
@@ -664,6 +676,8 @@ func TestOAuthAdministrationListsQuotaAndRevocation(t *testing.T) {
 	if clients := collectLifecyclePage(t, f.manager.OAuthClients(ctx, actor, issuer.ID, credbound.PageRequest{})); len(clients) != 2 {
 		t.Fatalf("clients = %#v", clients)
 	}
+	// OAUTH-012: discovery advertises pairwise subject support and the
+	// signer's actual algorithm list.
 	metadata, err := f.manager.OAuthAuthorizationServerMetadata(ctx, issuer.Issuer)
 	if err != nil || len(metadata.SubjectTypesSupported) != 1 || len(metadata.IDTokenSigningAlgValuesSupported) != 1 {
 		t.Fatalf("metadata = %#v, %v", metadata, err)
@@ -871,6 +885,10 @@ func TestOAuthRejectsInvalidRequests(t *testing.T) {
 		Issuer: issuer.Issuer, ClientID: issued.Client.ClientID, RedirectURI: "https://client.example.com/callback",
 		Resource: resource.Resource, Scopes: []string{"documents.read"}, State: "state", CodeChallenge: challenge, CodeChallengeMethod: "S256",
 	}
+	// OAUTH-005: the authorization_code contract admits no relaxation — a
+	// non-HTTPS issuer or resource, an unregistered client or redirect URI, a
+	// PKCE method other than S256, an out-of-catalog scope, and a missing
+	// state are each refused.
 	invalidBegins := []credbound.BeginOAuthAuthorizationInput{
 		func() credbound.BeginOAuthAuthorizationInput {
 			v := base
@@ -984,6 +1002,8 @@ func TestOAuthRejectsInvalidRequests(t *testing.T) {
 	if _, err := f.manager.OAuthUserInfo(ctx, issuer.Issuer, confidentialTokens.AccessToken); !errors.Is(err, credbound.ErrNotSupported) {
 		t.Fatalf("userinfo without openid = %v", err)
 	}
+	// OAUTH-002: an access token is bound to exactly one resource URI and is
+	// refused by every other audience.
 	if _, err := f.manager.AuthenticateOAuthAccessToken(ctx, "https://mcp.example.com/other", confidentialTokens.AccessToken); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("wrong token audience = %v", err)
 	}
@@ -992,6 +1012,9 @@ func TestOAuthRejectsInvalidRequests(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// OAUTH-007: scopes map to workspace permissions and are re-evaluated on
+	// every request — suspending the membership refuses the still-unexpired
+	// token, and restoring it brings the token back.
 	membership, err := f.store.Membership(ctx, workspace.ID, actor.UserID)
 	if err != nil {
 		t.Fatal(err)
@@ -1191,7 +1214,8 @@ func TestOAuthClientCredentials(t *testing.T) {
 		t.Fatalf("unregistered scope = %v", err)
 	}
 	// A resource outside the client's allowlist is refused even when it lives
-	// under the same issuer: another tenant's resource is never reachable.
+	// under the same issuer: another tenant's resource is never reachable
+	// (OAUTH-002).
 	otherWorkspace, err := f.manager.CreateWorkspace(ctx, root, credbound.CreateWorkspaceInput{Name: "Globex"})
 	if err != nil {
 		t.Fatal(err)

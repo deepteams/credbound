@@ -389,6 +389,10 @@ func TestConflictsNotFoundAndAuditFailures(t *testing.T) {
 	assertSequenceError(t, f.store.AuditEvents(ctx, f.workspace.ID, credbound.PageRequest{Cursor: "e30", Limit: 50}), credbound.ErrInvalidInput)
 }
 
+// TestCursorOrderingAndCloneHelpers pins the pagination primitives (DATA-003):
+// the opaque cursor round-trips, an incomplete cursor is rejected, ordering
+// stays stable through the id tie-breaker, and the clone helpers copy every
+// mutable value.
 func TestCursorOrderingAndCloneHelpers(t *testing.T) {
 	now := time.Now().UTC()
 	cursor, err := decodeCursor(encodeCursor(now, "b"))

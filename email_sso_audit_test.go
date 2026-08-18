@@ -11,6 +11,15 @@ import (
 	"github.com/deepteams/credbound/memory"
 )
 
+// TestMultipleEmailLifecycleAndLastSeen pins the multi-address lifecycle: a
+// user owns several unique addresses with exactly one primary, and a
+// secondary address signs the user in only after verification (EMAIL-001).
+// The verification token is issued once and a tampered or reused token is
+// refused (EMAIL-002); selecting the primary address requires an AAL2
+// step-up and the primary address cannot be removed (EMAIL-003). Along the
+// way it pins that last_seen_at reflects the latest successful
+// authentication — set by the bootstrap and advanced by a later password
+// login (USER-001).
 func TestMultipleEmailLifecycleAndLastSeen(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -79,6 +88,11 @@ func TestMultipleEmailLifecycleAndLastSeen(t *testing.T) {
 	}
 }
 
+// TestClientAuditAPIControlsEnvelope pins AUDIT-003: the consuming service
+// records events through RecordAudit supplying action, target, workspace,
+// outcome, and reason, while the Manager enforces the authenticated actor, the
+// UUIDv7 identifier, and the timestamp; a global event requires an
+// administration permission.
 func TestClientAuditAPIControlsEnvelope(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -143,6 +157,13 @@ func TestClientAuditAPIControlsEnvelope(t *testing.T) {
 	}
 }
 
+// TestSSOLinkLoginStepUpAndUnlink pins explicit linking: an unknown SSO
+// identity whose email matches an existing account is never auto-associated
+// and the link must be created from an existing interactive session
+// (SSO-002). The linked identity — keyed by the configuration, issuer, and
+// subject triplet and visible through the identities list — then signs the
+// user in at AAL2, and a step-up forces IdP reauthentication (SSO-003,
+// SSO-004).
 func TestSSOLinkLoginStepUpAndUnlink(t *testing.T) {
 	provider := &fakeSSOProvider{
 		configurationID: "0198b463-0000-7000-8000-0000000000aa", kind: credbound.SSOProviderOIDC,
@@ -189,11 +210,13 @@ func TestSSOLinkLoginStepUpAndUnlink(t *testing.T) {
 	if err != nil || ssoAuth.Level != credbound.AAL2 || ssoAuth.UserID != authn.UserID {
 		t.Fatalf("SSO login = %#v, %v", ssoAuth, err)
 	}
-	// The ceremony is single use: replaying the same continuation and
-	// captured response can never authenticate again within the TTL.
+	// SSO-007: the ceremony is single use — replaying the same continuation
+	// and captured response can never authenticate again within the TTL.
 	if _, err := f.manager.FinishSSO(ctx, login.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("replayed SSO ceremony = %v", err)
 	}
+	// USER-001: a successful SSO authentication advances last_seen_at just
+	// like the password factor does.
 	user, err := f.store.UserByID(ctx, authn.UserID)
 	if err != nil || user.LastSeenAt == nil || !user.LastSeenAt.Equal(f.now) {
 		t.Fatalf("SSO last seen = %#v, %v", user.LastSeenAt, err)
@@ -230,6 +253,7 @@ func TestEmailAndSSOFailureBoundaries(t *testing.T) {
 	if err := emailFixture.manager.SetPrimaryEmail(ctx, aal2(authn.UserID, emailFixture.now), "invalid"); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid primary email id = %v", err)
 	}
+	// EMAIL-003: removing an address requires an AAL2 step-up.
 	if err := emailFixture.manager.RemoveEmail(ctx, authn, "invalid"); !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("email removal without step-up = %v", err)
 	}
@@ -251,6 +275,7 @@ func TestEmailAndSSOFailureBoundaries(t *testing.T) {
 	if _, err := emailFixture.manager.ConfirmEmail(ctx, mutated); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("wrong email proof = %v", err)
 	}
+	// EMAIL-002: the verification token expires.
 	emailFixture.now = emailFixture.now.Add(24 * time.Hour)
 	if _, err := emailFixture.manager.ConfirmEmail(ctx, issued.Token); !errors.Is(err, credbound.ErrExpired) {
 		t.Fatalf("expired email proof = %v", err)
@@ -424,6 +449,9 @@ func (f *fakeSSOProvider) Finish(_ context.Context, session, response []byte) (c
 	return f.claims, nil
 }
 
+// TestSSOAssurancePolicy pins the per-provider assurance policy (SSO-003): a
+// ceremony below the required ACR/AMR context fails with the step-up
+// sentinel, and only the asserted authentication context grants AAL2.
 func TestSSOAssurancePolicy(t *testing.T) {
 	provider := &fakeSSOProvider{
 		configurationID: "0198b463-0000-7000-8000-0000000000bb", kind: credbound.SSOProviderOIDC,

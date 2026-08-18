@@ -13,6 +13,11 @@ import (
 	"github.com/deepteams/credbound/memory"
 )
 
+// TestAuthenticationInfrastructureAndRehashPaths pins the manager half of
+// AUTH-002 — a hash flagged by the hasher is renewed after a successful
+// authentication, without breaking the sign-in when the rehash loses a
+// concurrent race — plus the infrastructure-failure branches of the password
+// flow.
 func TestAuthenticationInfrastructureAndRehashPaths(t *testing.T) {
 	ctx := context.Background()
 	base := memory.New()

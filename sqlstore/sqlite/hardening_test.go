@@ -320,6 +320,9 @@ func TestInvitationStoreContract(t *testing.T) {
 	}
 }
 
+// TestHardeningStreamEarlyBreak pins the streamed-list contract (DATA-002):
+// lists are traversed lazily through iter.Seq2, so a consumer can stop
+// mid-stream after one element instead of receiving a materialized slice.
 func TestHardeningStreamEarlyBreak(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

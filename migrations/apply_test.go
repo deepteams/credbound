@@ -9,6 +9,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// TestApplySQLiteIsIdempotent pins the shipped SQLite migrations (DATA-001):
+// applying them yields a usable schema with bookkeeping, and a second run
+// applies nothing and succeeds.
 func TestApplySQLiteIsIdempotent(t *testing.T) {
 	db, err := sql.Open("sqlite", "file:apply_test?mode=memory&cache=shared&_pragma=foreign_keys(1)")
 	if err != nil {

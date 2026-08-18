@@ -139,6 +139,11 @@ func TestWorkspaceDomainStaleClaimDisplaced(t *testing.T) {
 	}
 }
 
+// TestWorkspaceDomainLifecycle pins TENANT-007: registering a domain returns
+// a DNS challenge value, confirmation is an explicit step, the name is
+// unique across workspaces, and domains are listable and removable — while a
+// pending domain refuses any policy (TENANT-008 applies only once
+// confirmed).
 func TestWorkspaceDomainLifecycle(t *testing.T) {
 	provider := jitProvider("subject-1", "alice@corp.example.com", true)
 	f := newFixture(t, provider)
@@ -337,6 +342,15 @@ func TestWorkspaceDomainValidationAndAuthorization(t *testing.T) {
 	}
 }
 
+// TestDomainEnforcedSSO pins the enforcement flag of TENANT-008: an
+// unconfirmed or non-enforced domain changes nothing (TENANT-007), while a
+// confirmed EnforceSSO domain answers every non-SSO entry point with the
+// enforcement sentinel.
+// TestDomainEnforcedSSO pins domain-enforced SSO (SSO-006): once a confirmed
+// workspace domain enforces SSO, password, password-reset, magic-link,
+// email-OTP, and passkey authentication for addresses at exactly that domain
+// answer the dedicated sentinel — identically for existing and nonexistent
+// accounts — while foreign addresses keep their previous behavior.
 func TestDomainEnforcedSSO(t *testing.T) {
 	provider := jitProvider("subject-1", "root@example.com", true)
 	f := newFixture(t, provider)
@@ -424,10 +438,10 @@ func TestDomainEnforcedSSO(t *testing.T) {
 	}
 }
 
-// TestDomainEnforcedSSOInFlightCeremonies proves enforcement at redemption:
-// a ceremony issued before EnforceSSO is confirmed must be refused when it is
-// consumed after, otherwise the policy only binds sign-ins started after the
-// switch and every in-flight token remains a working non-SSO login.
+// TestDomainEnforcedSSOInFlightCeremonies proves enforcement at redemption
+// (SSO-006): a ceremony issued before EnforceSSO is confirmed must be refused
+// when it is consumed after, otherwise the policy only binds sign-ins started
+// after the switch and every in-flight token remains a working non-SSO login.
 func TestDomainEnforcedSSOInFlightCeremonies(t *testing.T) {
 	provider := jitProvider("subject-1", "root@example.com", true)
 	f := newFixture(t, provider)
@@ -505,6 +519,14 @@ func setupJITDomain(t *testing.T, f *fixture, workspaceID string, actor credboun
 	return issued.Domain
 }
 
+// TestSSOJITProvisioningHappyPath pins the auto-join half of TENANT-008: a
+// confirmed domain's policy provisions the SSO user into the workspace with
+// the configured target role and provider.
+// TestSSOJITProvisioningHappyPath pins JIT provisioning (SSO-005): a
+// validated but unknown SSO identity whose verified email domain matches a
+// confirmed auto-join domain atomically creates a passwordless user, its
+// verified primary email, and the configured membership, then links the
+// identity — and the next ceremony signs in without provisioning again.
 func TestSSOJITProvisioningHappyPath(t *testing.T) {
 	provider := jitProvider("subject-jit", "Alice@Corp.Example.com", true)
 	f := newFixture(t, provider)
@@ -575,6 +597,10 @@ func TestSSOJITProvisioningHappyPath(t *testing.T) {
 	}
 }
 
+// TestSSOJITRefusals pins every gate on JIT provisioning (SSO-005): an
+// existing account with the address is never auto-linked (SSO-002 holds), and
+// a wrong provider, disabled auto-join, unverified or missing email, foreign
+// domain, or a step-up/link ceremony never provisions a user.
 func TestSSOJITRefusals(t *testing.T) {
 	finishLogin := func(t *testing.T, f *fixture) error {
 		t.Helper()

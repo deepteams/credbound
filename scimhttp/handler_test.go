@@ -106,6 +106,10 @@ func (f *httpFixture) request(t *testing.T, method, target, body string) *httpte
 	return response
 }
 
+// TestSCIMHTTPDiscoveryUsersGroupsAndPatch exercises the SCIM 2.0 HTTP
+// surface — discovery, Users, Groups, and .search with the supported
+// filters — and verifies that Bulk is advertised as unsupported and that
+// password writes are rejected (SCIM-007).
 func TestSCIMHTTPDiscoveryUsersGroupsAndPatch(t *testing.T) {
 	f := newHTTPFixture(t)
 	unauthorized := httptest.NewRecorder()
@@ -229,6 +233,9 @@ func TestSCIMHTTPDiscoveryUsersGroupsAndPatch(t *testing.T) {
 	}
 }
 
+// TestSCIMHTTPValidationAndMethods pins the application/scim+json error
+// surface: malformed bodies, unsupported filters, disallowed methods, and
+// password writes all answer proper SCIM errors (SCIM-007).
 func TestSCIMHTTPValidationAndMethods(t *testing.T) {
 	f := newHTTPFixture(t)
 	principal, err := f.manager.AuthenticateSCIM(context.Background(), f.token)

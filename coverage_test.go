@@ -9,7 +9,8 @@ import (
 )
 
 // TestInstanceRoleErrorBranches exercises the validation and failure paths of
-// SetInstanceRole and RemoveInstanceRole.
+// SetInstanceRole and RemoveInstanceRole: instance-role changes are protected
+// by step-up and fail closed when their audit cannot be persisted (ADMIN-004).
 func TestInstanceRoleErrorBranches(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -62,7 +63,9 @@ func TestInstanceRoleErrorBranches(t *testing.T) {
 }
 
 // TestMutationAuditFailures drives many committing operations while the store's
-// audit write fails, covering each operation's store-error branch at once.
+// audit write fails, covering each operation's store-error branch at once:
+// every sensitive mutation fails when its audit event cannot be persisted
+// atomically (AUDIT-002).
 func TestMutationAuditFailures(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -176,7 +179,9 @@ func TestValidationErrorAndTokenParsing(t *testing.T) {
 }
 
 // TestReadAndDecoyPaths covers data-export, PAT authentication edge cases, and
-// the enumeration-safe decoy paths of the unauthenticated email/passkey flows.
+// the enumeration-safe decoy paths of the unauthenticated email/passkey flows:
+// reset and magic-link initiation succeed without a token for unknown and
+// disabled addresses instead of erroring (AUTH-006).
 func TestReadAndDecoyPaths(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)

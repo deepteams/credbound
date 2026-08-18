@@ -81,6 +81,9 @@ func TestEventRegistryErrorBoundaries(t *testing.T) {
 	subscription.Remove()
 }
 
+// TestUUIDv7SequenceOverflowAndClockRollback pins ID-001's monotonicity
+// guarantee: identifiers keep increasing across a sequence overflow within
+// the same millisecond and across a wall-clock rollback.
 func TestUUIDv7SequenceOverflowAndClockRollback(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	m := &Manager{clock: func() time.Time { return now }, random: bytes.NewReader(make([]byte, 16*4100))}
@@ -207,6 +210,8 @@ func TestAdminPermissionAndValueHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// ADMIN-003: each instance role maps to explicit permissions, overrides
+	// can only restrict them, and an unknown role carries none.
 	m := &Manager{adminPermissions: permissions}
 	if !m.hasAdminPermission(InstanceRoleDeveloper, PermissionAdminAccess) || m.hasAdminPermission(InstanceRoleDeveloper, PermissionSettingsWrite) {
 		t.Fatal("permission override was not restrictive")
@@ -231,6 +236,8 @@ func TestAdminPermissionAndValueHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// RBAC-003: an unknown workspace role fails closed in both the role and
+	// the permission checks.
 	if roles.includes(Role("unknown"), RoleMember) || roles.allows(Role("unknown"), PermissionWorkspaceAccess) {
 		t.Fatal("unknown workspace role was authorized")
 	}

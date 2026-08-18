@@ -147,6 +147,13 @@ func (s *issuanceSpy) ClaimEmailIssuance(ctx context.Context, address, purpose s
 	return s.Store.ClaimEmailIssuance(ctx, address, purpose, at, notBefore)
 }
 
+// TestStepUpAuthorizationAndRBACFailures pins the step-up gate (AUTH-005):
+// RequireStepUp refuses anonymous, non-interactive (PAT), and stale AAL2
+// contexts, so sensitive operations demand an interactive AAL2 authentication
+// newer than the configured freshness window. It also pins TENANT-001: every
+// authorization is evaluated for an explicit workspace id — a blank one is
+// invalid input, and a credential bound to another workspace or lacking a
+// membership in the target workspace is refused.
 func TestStepUpAuthorizationAndRBACFailures(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -368,6 +375,8 @@ func TestEarlyAuthorizationAndIdentityBoundaries(t *testing.T) {
 	if err := f.manager.DeletePasskey(ctx, credbound.Authentication{}, "passkey"); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("unauthorized passkey deletion = %v", err)
 	}
+	// RBAC-002: granting or modifying a workspace role demands a valid
+	// step-up.
 	if err := f.manager.GrantRole(ctx, authn, workspace.ID, authn.UserID, credbound.RoleMember); !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("role grant without step-up = %v", err)
 	}

@@ -47,6 +47,8 @@ func TestBeginDecoyAuthentication(t *testing.T) {
 	}
 }
 
+// TestRegistrationOptionsRequireUserVerification proves the user-verification
+// clause of AUTH-003: registration options always demand user verification.
 func TestRegistrationOptionsRequireUserVerification(t *testing.T) {
 	provider := newProvider(t, 2)
 	input := emptyUser()

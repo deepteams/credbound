@@ -15,6 +15,10 @@ import (
 
 var otpCode = regexp.MustCompile(`^[0-9]{8}$`)
 
+// TestEmailOTPAuthentication pins AUTH-013: a single-use, short-lived numeric
+// code bound to a sealed continuation authenticates the owner of a verified
+// address at AAL1, and ineligible addresses receive an indistinguishable
+// decoy.
 func TestEmailOTPAuthentication(t *testing.T) {
 	f := newFixture(t)
 	authn, _ := f.bootstrap(t)
@@ -65,6 +69,8 @@ func TestEmailOTPAuthentication(t *testing.T) {
 	}
 }
 
+// TestEmailOTPWrongCodesLockAccount proves the lockout clause of AUTH-013:
+// wrong codes count toward the account lockout.
 func TestEmailOTPWrongCodesLockAccount(t *testing.T) {
 	f := newFixture(t)
 	authn, _ := f.bootstrap(t)
@@ -101,6 +107,9 @@ func (p rejectingPolicy) ValidatePassword(_ context.Context, password string) er
 	return nil
 }
 
+// TestPasswordPolicyPort pins AUTH-014: a host-plugged password policy (here
+// a breached-password check) is consulted by the password acceptance paths
+// after the built-in rules.
 func TestPasswordPolicyPort(t *testing.T) {
 	store := memory.New()
 	manager, err := credbound.New(credbound.Config{

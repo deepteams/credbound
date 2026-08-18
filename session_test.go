@@ -64,6 +64,9 @@ func sessionsError(sequence func(func(credbound.PageEvent[credbound.Session], er
 	return nil
 }
 
+// TestSessionLifecycle pins SESS-001: a session persists an Authentication
+// snapshot behind an opaque single-display cbs_ token, authenticates requests
+// from that token, and lists every active session with its device metadata.
 func TestSessionLifecycle(t *testing.T) {
 	f := newFixture(t)
 	recorder := &sessionRecorder{}
@@ -98,6 +101,8 @@ func TestSessionLifecycle(t *testing.T) {
 		t.Fatalf("session.created event = %#v", recorder.created)
 	}
 
+	// SESS-002: authentication restores the snapshot verbatim — the assurance
+	// level never changes in place — and touches last-seen.
 	f.now = f.now.Add(time.Minute)
 	restored, live, err := f.manager.AuthenticateSession(ctx, issued.Token)
 	if err != nil {
@@ -172,6 +177,9 @@ func TestSessionTokenForgery(t *testing.T) {
 	}
 }
 
+// TestSessionExpiryIsAbsolute proves the expiry clause of SESS-002: session
+// authentication re-checks expiry on every call, and activity never extends
+// the absolute deadline.
 func TestSessionExpiryIsAbsolute(t *testing.T) {
 	f := newFixture(t)
 	authn, _ := f.bootstrap(t)
@@ -414,6 +422,9 @@ func TestRevokeUserSessions(t *testing.T) {
 	}
 }
 
+// TestSessionRevocationCascades pins SESS-003: completing a password reset,
+// disabling a user, and revoking a user's credentials all revoke that user's
+// sessions.
 func TestSessionRevocationCascades(t *testing.T) {
 	f := newFixture(t)
 	root, workspace := f.bootstrap(t)
@@ -629,6 +640,8 @@ func TestSessionAuditUnavailableAndFaults(t *testing.T) {
 	}
 }
 
+// TestSessionSignOut proves the sign-out clause of SESS-003: possession of
+// the session token revokes it without any step-up.
 func TestSessionSignOut(t *testing.T) {
 	f := newFixture(t)
 	recorder := &sessionRecorder{}

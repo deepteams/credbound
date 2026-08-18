@@ -24,6 +24,9 @@ func collectPasskeys(t *testing.T, sequence func(func(credbound.Passkey, error) 
 	return items, nil
 }
 
+// TestPasskeyListing pins the factor-visibility contract for passkeys
+// (AUTH-011): the owner lists them without secret material, and only an
+// administrator with users read may inspect another account.
 func TestPasskeyListing(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -68,6 +71,9 @@ func TestPasskeyListing(t *testing.T) {
 	}
 }
 
+// TestTOTPStatusLifecycle pins the TOTP half of factor visibility (AUTH-011):
+// the owner reads enrolled, active, and unused-recovery-code counts without
+// any secret material.
 func TestTOTPStatusLifecycle(t *testing.T) {
 	f := newFixture(t)
 	authn, _ := f.bootstrap(t)
@@ -103,6 +109,11 @@ func TestTOTPStatusLifecycle(t *testing.T) {
 	}
 }
 
+// TestAuditRequestMetadata pins that authentication operations append audit
+// events (AUDIT-001) recording the sanitized, bounded client IP address and
+// user agent the host attached to the request context — and nothing when no
+// metadata was attached, since Credbound never reads transport headers itself
+// (AUDIT-004).
 func TestAuditRequestMetadata(t *testing.T) {
 	f := newFixture(t)
 	ctx := credbound.WithRequestMetadata(context.Background(), credbound.RequestMetadata{
@@ -149,8 +160,10 @@ func TestVerifyAuditChain(t *testing.T) {
 	if _, err := f.manager.CreateWorkspace(context.Background(), aal2(authn.UserID, f.now), credbound.CreateWorkspaceInput{Name: "Second"}); err != nil {
 		t.Fatal(err)
 	}
-	// AuthorizeAdmin audits the verification itself, so the chain holds the
-	// bootstrap, the login, the workspace creation and this admin check.
+	// AuthorizeAdmin audits the verification itself — every operation of the
+	// administration interface produces an audit event (ADMIN-007) — so the
+	// chain holds the bootstrap, the login, the workspace creation and this
+	// admin check.
 	report, err := f.manager.VerifyAuditChain(context.Background(), authn)
 	if err != nil || report.Events != 4 || report.HeadSequence != 4 || len(report.HeadHash) != 32 {
 		t.Fatalf("chain report = %#v, %v", report, err)
@@ -199,6 +212,9 @@ func (f *lockoutFixture) bootstrap(t *testing.T) credbound.Authentication {
 	return authn
 }
 
+// TestPasswordLockout pins AUTH-009: consecutive password failures lock the
+// account for the configured duration, the lockout never becomes an
+// enumeration oracle, and a successful sign-in clears the counter.
 func TestPasswordLockout(t *testing.T) {
 	f := newLockoutFixture(t, 3, 15*time.Minute)
 	f.bootstrap(t)
@@ -268,6 +284,8 @@ func TestChangePasswordLockout(t *testing.T) {
 	}
 }
 
+// TestTOTPLockout proves AUTH-009's second-factor half: consecutive TOTP
+// failures lock the account for the configured duration.
 func TestTOTPLockout(t *testing.T) {
 	f := newLockoutFixture(t, 3, 15*time.Minute)
 	authn := f.bootstrap(t)
@@ -440,6 +458,10 @@ func TestLockoutDisabled(t *testing.T) {
 	}
 }
 
+// TestWorkspaceRequireMFA pins TENANT-006: a workspace requiring MFA rejects
+// interactive AAL1 sessions with the step-up sentinel while a
+// non-interactive workspace-bound PAT keeps working, and the policy can be
+// lifted again.
 func TestWorkspaceRequireMFA(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -485,6 +507,10 @@ func TestWorkspaceRequireMFA(t *testing.T) {
 	}
 }
 
+// TestPasswordResetFlow pins AUTH-007: the reset token is single use and
+// expiring, ineligible addresses receive an indistinguishable no-token
+// answer, and completion replaces the password and revokes the account's
+// PATs.
 func TestPasswordResetFlow(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -541,6 +567,8 @@ func TestPasswordResetFlow(t *testing.T) {
 	}
 }
 
+// TestPasswordResetUnlocksAccount proves the recovery clause shared by
+// AUTH-007 and AUTH-009: completing a password reset clears the lockout.
 func TestPasswordResetUnlocksAccount(t *testing.T) {
 	f := newLockoutFixture(t, 3, 15*time.Minute)
 	f.bootstrap(t)
@@ -565,6 +593,9 @@ func TestPasswordResetUnlocksAccount(t *testing.T) {
 	}
 }
 
+// TestMagicLinkAuthentication pins AUTH-008: a single-use, short-lived email
+// token authenticates the owner of a verified address at AAL1 and reports
+// whether a TOTP factor is still required.
 func TestMagicLinkAuthentication(t *testing.T) {
 	f := newFixture(t)
 	authn, _ := f.bootstrap(t)
@@ -653,6 +684,9 @@ func TestEmailCeremonyForRemovedAddressFails(t *testing.T) {
 	}
 }
 
+// TestRevokeUserCredentials pins AUTH-010: one operation revokes a user's
+// credentials, by the user with step-up or by an authorized instance
+// administrator, and never by an unprivileged third party.
 func TestRevokeUserCredentials(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -694,6 +728,10 @@ func TestRevokeUserCredentials(t *testing.T) {
 	}
 }
 
+// TestInvitationRegistration pins the registration half of TENANT-005: the
+// single-use token is returned exactly once without its digest, only one
+// invitation may be pending per address, and the invitee registers a new
+// account whose invited address is verified by token delivery.
 func TestInvitationRegistration(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -747,6 +785,10 @@ func TestInvitationRegistration(t *testing.T) {
 	}
 }
 
+// TestInvitationAcceptRevokeAndExpiry pins the acceptance half of
+// TENANT-005: only an authenticated account owning the invited address may
+// accept, invitations are revocable and expiring, and the listing never
+// carries the digest.
 func TestInvitationAcceptRevokeAndExpiry(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -1475,6 +1517,9 @@ func (s *tamperedChainStore) AuditChainHead(ctx context.Context) (int64, []byte,
 	return sequence, hash, err
 }
 
+// TestVerifyAuditChainDetectsTampering pins the tamper evidence of AUDIT-005:
+// VerifyAuditChain fails with ErrAuditCompromised when an event was edited,
+// removed, or the persisted chain head was altered.
 func TestVerifyAuditChainDetectsTampering(t *testing.T) {
 	f := newFixture(t)
 	authn, _ := f.bootstrap(t)
@@ -1493,6 +1538,9 @@ func TestVerifyAuditChainDetectsTampering(t *testing.T) {
 	}
 }
 
+// TestAdminResetSecondFactor pins AUTH-017: an instance administrator removes
+// the target's TOTP factor, recovery codes, passkeys, and sessions in one
+// atomic operation, and can never target their own account.
 func TestAdminResetSecondFactor(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -1565,6 +1613,9 @@ func TestAdminResetSecondFactor(t *testing.T) {
 	}
 }
 
+// TestRegenerateRecoveryCodes pins AUTH-016: a fresh interactive AAL2
+// authentication replaces the recovery codes with a new single-display set,
+// and the previous set stops working in the same transaction.
 func TestRegenerateRecoveryCodes(t *testing.T) {
 	f := newFixture(t)
 	authn, _ := f.bootstrap(t)
@@ -1602,6 +1653,11 @@ func TestRegenerateRecoveryCodes(t *testing.T) {
 	}
 }
 
+// TestPATScopeEnforcement pins PAT-004: a scope is either the `*` wildcard
+// or a workspace permission string validated at creation, the permission
+// authorization denies a scoped credential anything outside its scopes, and
+// the coarse role authorization requires the wildcard, so the owner's role
+// never widens a narrow token.
 func TestPATScopeEnforcement(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -1656,6 +1712,9 @@ func TestPATScopeEnforcement(t *testing.T) {
 	}
 }
 
+// TestVerifyAuditChainFromCheckpoint pins the incremental half of AUDIT-005:
+// VerifyAuditChainFrom verifies only the delta after a caller-trusted
+// checkpoint and rejects forged or rewound checkpoints.
 func TestVerifyAuditChainFromCheckpoint(t *testing.T) {
 	f := newFixture(t)
 	authn, _ := f.bootstrap(t)

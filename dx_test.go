@@ -100,6 +100,9 @@ func TestCollectPageAndValidationError(t *testing.T) {
 	}
 }
 
+// TestTrustedRequestFromAddr pins ADMIN-006: the server adapter sets Local
+// only from the actually observed loopback peer address — never from a value
+// a remote client could supply.
 func TestTrustedRequestFromAddr(t *testing.T) {
 	cases := map[string]bool{
 		"127.0.0.1:52441":   true,

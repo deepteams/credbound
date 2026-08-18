@@ -13,6 +13,10 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
+// TestGlobalProvidersAndObserve pins the OTEL surface (OBS-001): an observed
+// operation emits a structured log record whose severity follows the
+// outcome, carrying only the operation name and two low-cardinality
+// attributes — never secrets.
 func TestGlobalProvidersAndObserve(t *testing.T) {
 	capture := &capturingLogger{Logger: lognoop.NewLoggerProvider().Logger("test")}
 	observer, err := New(Config{LoggerProvider: fixedLoggerProvider{

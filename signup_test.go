@@ -127,6 +127,10 @@ func TestSignUpValidation(t *testing.T) {
 	}
 }
 
+// TestSignUpVerificationFlow pins AUTH-015: self-service signup atomically
+// creates the user, their workspace, and their admin membership without any
+// instance role, and the unverified primary address must be proven by the
+// returned verification token before the first sign-in.
 func TestSignUpVerificationFlow(t *testing.T) {
 	f := newSignupFixture(t, false, nil)
 	ctx := context.Background()
@@ -257,6 +261,9 @@ func TestSignUpAutoVerifyEmail(t *testing.T) {
 	}
 }
 
+// TestSignUpExistingAccountIsIndistinguishable proves the collision clause of
+// AUTH-015: an address that already has an account produces an outwardly
+// identical response and reports the collision only to the host.
 func TestSignUpExistingAccountIsIndistinguishable(t *testing.T) {
 	f := newSignupFixture(t, false, nil)
 	ctx := context.Background()

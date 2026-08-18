@@ -7,6 +7,10 @@ import (
 	"testing"
 )
 
+// TestHTTPRequestMetadata pins that the HTTP adapter derives the audited
+// client IP from the observed peer address and the trusted-proxy
+// configuration, honoring X-Forwarded-For only behind a trusted proxy and
+// falling back to the peer otherwise (AUDIT-004).
 func TestHTTPRequestMetadata(t *testing.T) {
 	private := netip.MustParsePrefix("10.0.0.0/8")
 	tests := []struct {

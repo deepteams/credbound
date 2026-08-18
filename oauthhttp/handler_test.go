@@ -153,6 +153,10 @@ func (f *handlerFixture) request(method, target, body, contentType string) *http
 	return response
 }
 
+// TestHandlerDiscoveryAuthorizationTokensAndProtection pins OAUTH-009: the
+// handler serves RFC 8414 and RFC 9728 metadata plus the token and revocation
+// endpoints as a plain http.Handler — no server is started, and consent is
+// delegated to the host's PresentConsent callback rather than an imposed UI.
 func TestHandlerDiscoveryAuthorizationTokensAndProtection(t *testing.T) {
 	if _, err := New(nil, HandlerConfig{}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid handler = %v", err)
@@ -438,6 +442,8 @@ func TestHandlerAdditionalProtocolBranches(t *testing.T) {
 	if _, ok := AuthenticationFromContext(httptest.NewRequest(http.MethodGet, "/", nil)); ok {
 		t.Fatal("empty request context contained OAuth authentication")
 	}
+	// OAUTH-008: OIDC is enabled separately per issuer — an OAuth-only issuer
+	// serves RFC 8414 discovery while openid-configuration stays absent.
 	oauthOnlyIssuer, err := f.manager.CreateOAuthIssuer(t.Context(), f.actor, credbound.TrustedRequest{Local: true}, credbound.CreateOAuthIssuerInput{Issuer: "https://auth.example.com/oauth-only"})
 	if err != nil {
 		t.Fatal(err)

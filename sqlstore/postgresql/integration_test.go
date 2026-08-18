@@ -18,6 +18,9 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
+// TestPostgreSQLMigrationsAndStore applies the shipped migrations to a real
+// PostgreSQL and exercises the store against the resulting schema, proving
+// the engine is supported on par with SQLite (DATA-001).
 func TestPostgreSQLMigrationsAndStore(t *testing.T) {
 	dsn := os.Getenv("CREDBOUND_POSTGRES_DSN")
 	if dsn == "" {

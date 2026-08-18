@@ -502,7 +502,8 @@ func TestBeginFailsWhenDiscoveryFails(t *testing.T) {
 
 // TestProviderSatisfiesPortRegistration wires the adapter through
 // credbound.New to prove the registration contract (UUIDv7 + valid kind)
-// holds end to end.
+// holds end to end: the OIDC family — Google and Microsoft included —
+// plugs into the common SSOProvider port (SSO-001).
 func TestProviderSatisfiesPortRegistration(t *testing.T) {
 	var _ credbound.SSOProvider = (*Provider)(nil)
 	issuer := newTestIssuer(t)

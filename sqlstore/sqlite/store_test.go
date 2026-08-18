@@ -151,6 +151,8 @@ func TestStoreContractAndImmutableAudit(t *testing.T) {
 	if len(instancePage) < len(workspacePage) {
 		t.Fatalf("instance audit events = %d, workspace = %d", len(instancePage), len(workspacePage))
 	}
+	// AUDIT-001: the audit log is append-only — a recorded event can be
+	// neither edited nor deleted.
 	if _, err := f.db.Exec(`UPDATE credbound_audit_events SET reason = 'tampered' WHERE id = ?`, bootstrapAudit.Audit.ID); err == nil {
 		t.Fatal("audit update unexpectedly succeeded")
 	}
@@ -334,6 +336,9 @@ func TestEmailSSOAndLastSeenContract(t *testing.T) {
 	}
 }
 
+// TestBootstrapAndCreateUserRollbackBranches pins that Bootstrap and
+// CreateUser are all-or-nothing: a failure in any constituent write — the
+// instance root role included (ADMIN-002) — rolls the whole transaction back.
 func TestBootstrapAndCreateUserRollbackBranches(t *testing.T) {
 	bootstrapCases := []struct {
 		name   string
@@ -694,6 +699,8 @@ func TestLifecycleStoreContract(t *testing.T) {
 	if err := f.store.CreatePAT(ctx, pat, f.event(root.ID, "pat.create", pat.ID, workspace.ID)); err != nil {
 		t.Fatal(err)
 	}
+	// TENANT-004: suspending the membership atomically revokes its
+	// workspace-scoped PAT.
 	member.Status = credbound.MembershipSuspended
 	if err := f.store.UpsertMembership(ctx, member, f.event(root.ID, "membership.suspend", user.ID, workspace.ID)); err != nil {
 		t.Fatal(err)

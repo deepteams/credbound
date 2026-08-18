@@ -267,7 +267,11 @@ does not expose the user's global UUID.
 
 ## 5. Definition of done
 
-- The requirements above are linked to tests.
+- The requirements above are linked to tests: each behavioral requirement ID
+  is referenced from the comment of at least one test that verifies it.
+  Process requirements are enforced by tooling instead of Go tests — OPS-001
+  by the security and operations documentation, QUAL-001 by
+  `scripts/coverage.sh`, and QUAL-002 by the CI workflow.
 - `go test -race ./...`, `go vet ./...`, and `make coverage` pass. Consolidated
   coverage of maintained code is at least 89.5%; sqlc code and files marked
   as generated are excluded from the calculation.

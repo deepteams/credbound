@@ -13,6 +13,8 @@ import (
 
 type coreOnlyStore struct{ credbound.Store }
 
+// TestSCIMAPIsRequireStoreCapability pins SCIM-001: every SCIM API answers
+// ErrNotSupported when the configured store does not implement SCIMStore.
 func TestSCIMAPIsRequireStoreCapability(t *testing.T) {
 	base := memory.New()
 	manager, err := credbound.New(credbound.Config{
@@ -75,6 +77,11 @@ func TestSCIMAPIsRequireStoreCapability(t *testing.T) {
 
 type coreStoreOnly struct{ credbound.Store }
 
+// TestExtensibleWorkspaceRoles pins that the host service can register
+// additional workspace roles and permissions alongside the provided admin and
+// member roles (RBAC-001), and that the permission-based authorization
+// resolves inheritance, gives admin every registered permission, rejects
+// cyclic or dangling catalogs, and fails closed on an unknown role (RBAC-003).
 func TestExtensibleWorkspaceRoles(t *testing.T) {
 	store := memory.New()
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
@@ -136,6 +143,10 @@ func TestExtensibleWorkspaceRoles(t *testing.T) {
 	}
 }
 
+// TestSCIMLifecycleRolesGroupsAndDeprovision walks the provisioning
+// lifecycle — passwordless creation, explicit adoption of a local user,
+// group-driven role mapping, and logical deprovisioning that leaves the
+// global account enabled (SCIM-003, SCIM-005).
 func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 	f := newFixture(t)
 	root, workspace := f.bootstrap(t)
@@ -181,6 +192,8 @@ func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 	}); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("second adoption = %v", err)
 	}
+	// The token is displayed only this once, the response never carries the
+	// persisted digest, and both identifiers are UUIDv7 (SCIM-002, SCIM-006).
 	if issued.Token == "" || issued.Credential.Digest != nil || !uuidV7.MatchString(issued.Configuration.ID) || !uuidV7.MatchString(issued.Credential.ID) {
 		t.Fatalf("unsafe issued SCIM credential: %#v", issued)
 	}
@@ -198,6 +211,7 @@ func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The user's SCIM identifier is distinct from the global User.ID (SCIM-002).
 	if link.UserName != "user@example.com" || link.UserID == "" || link.ID == link.UserID {
 		t.Fatalf("invalid SCIM link: %#v", link)
 	}
@@ -207,6 +221,8 @@ func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 	if value, err := f.store.SCIMUserByUserName(context.Background(), issued.Configuration.ID, strings.ToUpper(link.UserName)); err != nil || value.ID != link.ID {
 		t.Fatalf("memory username SCIM lookup = %#v, %v", value, err)
 	}
+	// The membership names the SCIM configuration as its provisioning source
+	// (SCIM-004).
 	membership, err := f.store.Membership(context.Background(), workspace.ID, link.UserID)
 	if err != nil || membership.Role != credbound.RoleMember || membership.Status != credbound.MembershipActive || membership.ProvisioningSource != issued.Configuration.ID {
 		t.Fatalf("provisioned membership = %#v, %v", membership, err)
@@ -250,6 +266,8 @@ func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 	if len(groups.items) != 1 || groups.items[0].ID != group.ID {
 		t.Fatalf("filtered SCIM groups = %#v", groups)
 	}
+	// An ordinary local mutation cannot overwrite the SCIM-managed membership
+	// (SCIM-004, TENANT-003).
 	if err := manager.GrantRole(context.Background(), admin, workspace.ID, link.UserID, credbound.RoleAdmin); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("ordinary RBAC overrode SCIM source: %v", err)
 	}
@@ -281,6 +299,8 @@ func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 		t.Fatalf("idempotent deprovision = %v", err)
 	}
 
+	// SCIM-006: rotation issues a fresh secret and revocation ends it
+	// immediately.
 	rotated, err := manager.RotateSCIMCredential(context.Background(), admin, issued.Configuration.ID, nil)
 	if err != nil || rotated.Token == issued.Token {
 		t.Fatalf("rotated credential = %#v, %v", rotated, err)
@@ -299,6 +319,10 @@ func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 	}
 }
 
+// TestSCIMValidationConflictsAndStateTransitions pins the suspend and
+// reactivate transitions of Replace (SCIM-003) together with the fail-closed
+// group paths: an unknown member or an ambiguous role mapping is refused
+// (SCIM-005).
 func TestSCIMValidationConflictsAndStateTransitions(t *testing.T) {
 	f := newFixture(t)
 	root, workspace := f.bootstrap(t)

@@ -662,7 +662,9 @@ func TestNewDefaultsAndOverrides(t *testing.T) {
 }
 
 // TestProviderSatisfiesPortRegistration proves the registration contract
-// (UUIDv7 + the SAML kind) that credbound.New enforces holds by construction.
+// (UUIDv7 + the SAML kind) that credbound.New enforces holds by
+// construction: SAML plugs into the same common SSOProvider port as the
+// OIDC-family adapters (SSO-001).
 func TestProviderSatisfiesPortRegistration(t *testing.T) {
 	var _ credbound.SSOProvider = (*Provider)(nil)
 	idp := newTestIdP(t)

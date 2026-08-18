@@ -7,6 +7,9 @@ import (
 	"testing"
 )
 
+// TestHashVerifyAndRehash pins AUTH-002: passwords are derived with Argon2id
+// under versioned parameters, and Verify flags a hash for renewal once the
+// policy's parameters change.
 func TestHashVerifyAndRehash(t *testing.T) {
 	params := Params{Memory: 19 * 1024, Iterations: 2, Parallelism: 1, SaltLength: 16, KeyLength: 16, Random: strings.NewReader(strings.Repeat("s", 64))}
 	hasher, err := New(params)

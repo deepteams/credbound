@@ -10,6 +10,11 @@ import (
 	"github.com/deepteams/credbound"
 )
 
+// TestIdentityWorkspaceAndMembershipLifecycle covers the workspace
+// lifecycle — creation by an AAL2 admin, rename, and a disable that denies
+// every tenant-scoped capability (TENANT-002) — together with the local
+// membership lifecycle of add, suspend, reactivate, and remove under the
+// last-active-admin protection (TENANT-003).
 func TestIdentityWorkspaceAndMembershipLifecycle(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -86,6 +91,9 @@ func TestIdentityWorkspaceAndMembershipLifecycle(t *testing.T) {
 	if err := f.manager.SetInstanceRole(ctx, root, credbound.TrustedRequest{Local: true}, user.ID, credbound.InstanceRoleRoot); err != nil {
 		t.Fatal(err)
 	}
+	// USER-002: an instance administrator can disable and re-enable a global
+	// user; a disabled user can neither authenticate nor authorize, and the
+	// last enabled root administrator is protected.
 	if err := f.manager.DisableUser(ctx, root, credbound.TrustedRequest{Local: true}, user.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -103,6 +111,9 @@ func TestIdentityWorkspaceAndMembershipLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// DATA-004: users, workspaces, and memberships are exposed through
+	// paginated streamed lists (their permission checks are pinned by
+	// TestIdentityLifecycleRejectsInvalidAndUnauthorizedMutations).
 	if users := collectLifecyclePage(t, f.manager.Users(ctx, root, credbound.PageRequest{Limit: 1})); len(users) != 1 {
 		t.Fatalf("user first page = %#v", users)
 	}
@@ -262,6 +273,10 @@ func (r *userProfileRecorder) OnUserProfileUpdated(_ context.Context, event cred
 	return nil
 }
 
+// TestUpdateUserProfile pins USER-003: a user changes their own display name
+// with a recent interactive authentication, an instance administrator with an
+// admin mutation changes any account's, both operations are atomic with their
+// audit, and the user.profile_updated event exposes the replaced value.
 func TestUpdateUserProfile(t *testing.T) {
 	f := newFixture(t)
 	recorder := &userProfileRecorder{t: t}

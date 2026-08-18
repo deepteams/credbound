@@ -42,6 +42,9 @@ func TestES256Signer(t *testing.T) {
 	}
 }
 
+// TestES256KeyRingValidationAndRetirement pins OAUTH-012: the key ring
+// publishes the single active signing key alongside verification-only
+// retiring keys in the JWKS, and malformed rings are rejected outright.
 func TestES256KeyRingValidationAndRetirement(t *testing.T) {
 	active, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	retiring, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

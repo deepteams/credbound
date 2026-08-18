@@ -19,6 +19,9 @@ import (
 	"github.com/deepteams/credbound"
 )
 
+// TestJWTAssertionVerifierES256AndReplay pins OAUTH-011: a well-formed ES256
+// client assertion verifies once, and presenting the same jti again is
+// refused by the replay store.
 func TestJWTAssertionVerifierES256AndReplay(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -100,6 +103,9 @@ func TestJWTAssertionVerifierRS256ValidationAndFailures(t *testing.T) {
 	}
 }
 
+// TestJWTAssertionVerifierFetchPolicy pins the public-address-pinned JWKS
+// loading of OAUTH-011: HTTP URLs and hosts resolving to private, loopback,
+// or otherwise non-public addresses never serve client keys.
 func TestJWTAssertionVerifierFetchPolicy(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	for _, config := range []VerifierConfig{

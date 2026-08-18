@@ -70,6 +70,11 @@ func (f *fixture) bootstrap(t *testing.T) (credbound.Authentication, credbound.W
 	return authn, workspace
 }
 
+// TestBootstrapPasswordAndUUIDv7 pins the local-account contract — a
+// normalized address and password authenticate the active user, while an
+// unknown address and a wrong password answer with the same public error
+// (AUTH-001) — and that the identifiers Credbound mints are canonical UUIDv7
+// values that stay monotonic within the process (ID-001).
 func TestBootstrapPasswordAndUUIDv7(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -79,6 +84,8 @@ func TestBootstrapPasswordAndUUIDv7(t *testing.T) {
 	if authn.UserID >= workspace.ID {
 		t.Fatalf("UUIDv7 ids are not monotonic: %q >= %q", authn.UserID, workspace.ID)
 	}
+	// ADMIN-002: the first account created by Bootstrap receives the
+	// instance-level root role.
 	admin, err := f.store.InstanceAdministrator(context.Background(), authn.UserID)
 	if err != nil || admin.Role != credbound.InstanceRoleRoot {
 		t.Fatalf("bootstrap admin = %#v, %v", admin, err)
@@ -89,6 +96,9 @@ func TestBootstrapPasswordAndUUIDv7(t *testing.T) {
 		t.Fatalf("second bootstrap error = %v", err)
 	}
 
+	// AUTH-006: the unknown identifier and the invalid password produce the
+	// same public error, and the dummy derivation (asserted via verifyCalls
+	// below) keeps the cryptographic work identical.
 	if _, err := f.manager.AuthenticatePassword(context.Background(), "missing@example.com", "wrong"); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("unknown login error = %v", err)
 	}
@@ -104,6 +114,9 @@ func TestBootstrapPasswordAndUUIDv7(t *testing.T) {
 	}
 }
 
+// TestTOTPRecoveryAndReplayProtection pins AUTH-004: TOTP activates only
+// after a valid code is confirmed, the user receives single-use recovery
+// codes, and neither codes nor recovery codes can be replayed.
 func TestTOTPRecoveryAndReplayProtection(t *testing.T) {
 	f := newFixture(t)
 	authn, _ := f.bootstrap(t)
@@ -147,6 +160,11 @@ func TestTOTPRecoveryAndReplayProtection(t *testing.T) {
 	}
 }
 
+// TestPATLifecycleAndPagination pins the PAT lifecycle: the plaintext token
+// is returned exactly once at creation and the record handed back never
+// carries the digest (PAT-001, PAT-003); a user owns several named tokens
+// that are revoked independently (PAT-002); and the metadata list pages
+// through an opaque cursor with a stable order (DATA-003).
 func TestPATLifecycleAndPagination(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -190,6 +208,9 @@ func TestPATLifecycleAndPagination(t *testing.T) {
 	}
 }
 
+// TestPasskeyCeremoniesEncryptStoredCredential drives the full WebAuthn
+// registration and authentication ceremonies (AUTH-003) and proves the
+// stored credential never rests in plaintext.
 func TestPasskeyCeremoniesEncryptStoredCredential(t *testing.T) {
 	f := newFixture(t)
 	authn, _ := f.bootstrap(t)
@@ -233,6 +254,10 @@ func TestPasskeyCeremoniesEncryptStoredCredential(t *testing.T) {
 	}
 }
 
+// TestDiscoverablePasskeyAuthentication pins AUTH-018: the usernameless
+// ceremony starts without any address, names no credentials in its challenge,
+// resolves the account from the asserted credential, and fails closed when
+// the credential resolves to no account or the provider lacks the extension.
 func TestDiscoverablePasskeyAuthentication(t *testing.T) {
 	f := newFixture(t)
 	authn, _ := f.bootstrap(t)
@@ -293,12 +318,19 @@ func TestDiscoverablePasskeyAuthentication(t *testing.T) {
 	}
 }
 
+// TestAdministrationRolesAndAudit pins the instance-administration surface:
+// instance roles are separate from workspace RBAC and out of reach of
+// workspace-bound or scope-narrowed credentials (ADMIN-001), each role maps to
+// explicit permissions checked through AuthorizeAdmin (ADMIN-003), and only a
+// root may grant, modify, or remove an instance role (ADMIN-004).
 func TestAdministrationRolesAndAudit(t *testing.T) {
 	f := newFixture(t)
 	root, workspace := f.bootstrap(t)
 	if err := f.manager.AuthorizeAdmin(context.Background(), root, credbound.PermissionAdminAccess); err != nil {
 		t.Fatal(err)
 	}
+	// ADMIN-005: an administrative mutation demands fresh AAL2, except for a
+	// trusted local request.
 	if !errors.Is(f.manager.RequireAdminMutation(root, credbound.TrustedRequest{}), credbound.ErrStepUpRequired) {
 		t.Fatal("AAL1 remote admin mutation was accepted")
 	}
@@ -337,6 +369,8 @@ func TestAdministrationRolesAndAudit(t *testing.T) {
 	if err := f.manager.AuthorizeAdmin(context.Background(), wildcard, credbound.PermissionAdminAccess); err != nil {
 		t.Fatalf("wildcard PAT admin access = %v", err)
 	}
+	// ADMIN-004: a non-root instance administrator may not grant or modify an
+	// instance-administration role.
 	if err := f.manager.SetInstanceRole(context.Background(), developer, credbound.TrustedRequest{}, root.UserID, credbound.InstanceRoleSales); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("developer elevated role error = %v", err)
 	}
@@ -355,6 +389,9 @@ func TestAdministrationRolesAndAudit(t *testing.T) {
 	}
 }
 
+// TestAuditFailureFailsMutationClosed pins that a sensitive mutation fails —
+// and leaves nothing committed — when its audit event cannot be persisted
+// atomically (AUDIT-002).
 func TestAuditFailureFailsMutationClosed(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)

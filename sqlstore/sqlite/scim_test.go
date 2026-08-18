@@ -11,6 +11,10 @@ import (
 	"github.com/deepteams/credbound"
 )
 
+// TestSCIMStoreContractAndAtomicDeprovision pins SCIM-008: every
+// provisioning mutation commits atomically with its transactional hook and
+// its service audit — a rejected hook rolls the whole configuration back,
+// and deprovisioning revokes the workspace PAT in the same commit.
 func TestSCIMStoreContractAndAtomicDeprovision(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
