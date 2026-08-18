@@ -228,6 +228,28 @@ func TestConversionAndSessionFailuresAcrossCeremonies(t *testing.T) {
 	}
 }
 
+// TestFinishAuthenticationRejectsCloneWarning ensures a regressed signature
+// counter (which go-webauthn signals via CloneWarning rather than an error) is
+// rejected instead of silently authenticating a possibly cloned authenticator.
+func TestFinishAuthenticationRejectsCloneWarning(t *testing.T) {
+	credential := webauthn.Credential{ID: []byte("credential"), PublicKey: []byte("public-key")}
+	credential.Authenticator.CloneWarning = true
+	encoded, err := json.Marshal(credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &Provider{
+		webAuthn: &fakeEngine{credential: &credential}, userHandleKey: bytes(32), maxCredentials: 2,
+		parseAssertion: func([]byte) (*protocol.ParsedCredentialAssertionData, error) {
+			return &protocol.ParsedCredentialAssertionData{}, nil
+		},
+	}
+	input := userWith(credbound.Passkey{CredentialID: credential.ID, CredentialJSON: encoded})
+	if _, _, err := provider.FinishAuthentication(context.Background(), input, []byte(`{}`), []byte(`{}`)); !errors.Is(err, credbound.ErrPasskeyCloneDetected) {
+		t.Fatalf("clone warning not rejected: %v", err)
+	}
+}
+
 const sha256Size = 32
 
 func newProvider(t *testing.T, max int) *Provider {

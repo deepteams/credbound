@@ -225,6 +225,14 @@ func (p *Provider) FinishAuthentication(ctx context.Context, input credbound.Pas
 	if err != nil {
 		return nil, nil, err
 	}
+	// ValidateLogin never errors on a regressed signature counter: it sets
+	// CloneWarning and leaves the stored counter untouched. Reject the
+	// assertion so a cloned authenticator (a replayed or exfiltrated
+	// credential presenting a stale counter) cannot authenticate. The manager
+	// audits this as a distinct failure.
+	if credential.Authenticator.CloneWarning {
+		return nil, nil, credbound.ErrPasskeyCloneDetected
+	}
 	encoded, err := json.Marshal(credential)
 	if err != nil {
 		return nil, nil, err

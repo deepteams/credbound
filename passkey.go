@@ -223,11 +223,17 @@ func (m *Manager) FinishPasskeyAuthentication(ctx context.Context, continuation 
 	}
 	credentialID, credentialJSON, err := m.passkeys.FinishAuthentication(ctx, user, state.Session, response)
 	if err != nil {
-		audit, auditErr := m.recordAuthenticationAudit(ctx, state.UserID, "auth.passkey", AuditFailed, "invalid_credentials")
+		reason := "invalid_credentials"
+		if errors.Is(err, ErrPasskeyCloneDetected) {
+			// A regressed signature counter means the authenticator may be
+			// cloned; surface it distinctly so a host can alert and revoke.
+			reason = "cloned_authenticator"
+		}
+		audit, auditErr := m.recordAuthenticationAudit(ctx, state.UserID, "auth.passkey", AuditFailed, reason)
 		if auditErr != nil {
 			return Authentication{}, auditErr
 		}
-		m.emitAuthenticationFailed(ctx, "auth.passkey.authentication.finish", audit, MethodPasskey, state.UserID, "invalid_credentials")
+		m.emitAuthenticationFailed(ctx, "auth.passkey.authentication.finish", audit, MethodPasskey, state.UserID, reason)
 		return Authentication{}, ErrInvalidCredentials
 	}
 	event, err := m.newAudit(ctx, state.UserID, "auth.passkey", "user", state.UserID, "", AuditSucceeded, "")
