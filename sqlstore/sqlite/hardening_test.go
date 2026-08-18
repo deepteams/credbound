@@ -161,6 +161,41 @@ func TestHardeningStoreContract(t *testing.T) {
 		t.Fatalf("throttle after pending consumption = %#v, %v", got, err)
 	}
 
+	// AUTH-009: the possession-based sign-ins clear the throttle too.
+	passkey := credbound.Passkey{ID: f.id(), UserID: user.ID, Name: "key", CredentialID: []byte("cred-unlock"), CredentialJSON: []byte("{}"), CreatedAt: f.now}
+	if err := f.store.SavePasskey(ctx, passkey, f.event(user.ID, "passkey.create", passkey.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.TouchPasskey(ctx, user.ID, passkey.CredentialID, []byte("{}"), f.now, f.event(user.ID, "auth.passkey", passkey.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.LoginThrottleByUserID(ctx, user.ID); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("throttle after passkey sign-in = %v", err)
+	}
+
+	identity := credbound.SSOIdentity{
+		ID: f.id(), UserID: user.ID, ProviderConfigurationID: f.id(), ProviderKind: credbound.SSOProviderOIDC,
+		Issuer: "https://idp.example.com", Subject: "unlock-subject", Email: "root@example.com", CreatedAt: f.now, LastUsedAt: &f.now,
+	}
+	if _, err := f.store.RecordLoginFailure(ctx, user.ID, f.now, 3, f.now.Add(15*time.Minute), f.event(user.ID, "auth.fail", user.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.LinkSSO(ctx, identity, f.event(user.ID, "sso.link", identity.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.LoginThrottleByUserID(ctx, user.ID); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("throttle after SSO link sign-in = %v", err)
+	}
+	if _, err := f.store.RecordLoginFailure(ctx, user.ID, f.now, 3, f.now.Add(15*time.Minute), f.event(user.ID, "auth.fail", user.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.TouchSSO(ctx, user.ID, identity.ID, f.now, f.event(user.ID, "auth.sso", identity.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.LoginThrottleByUserID(ctx, user.ID); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("throttle after SSO sign-in = %v", err)
+	}
+
 	// RevokeUserCredentials revokes the user's PATs.
 	pat2 := credbound.PAT{ID: f.id(), UserID: user.ID, Name: "n2", Prefix: "aabbccddee00", Digest: []byte("d2"), Scopes: []string{"read"}, CreatedAt: f.now}
 	if err := f.store.CreatePAT(ctx, pat2, f.event(user.ID, "pat.create", pat2.ID, "")); err != nil {

@@ -956,7 +956,8 @@ func (s *Store) PasskeyByCredentialID(ctx context.Context, credentialID []byte) 
 }
 
 // TouchPasskey persists the credential's updated JSON (sign counter) and
-// last-used time after a successful assertion.
+// last-used time after a successful assertion, updating last-seen and — the
+// sign-in completed — clearing the login throttle.
 func (s *Store) TouchPasskey(ctx context.Context, userID string, credentialID, credentialJSON []byte, usedAt time.Time, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		count, err := q.TouchPasskey(ctx, db.TouchPasskeyParams{
@@ -966,7 +967,10 @@ func (s *Store) TouchPasskey(ctx context.Context, userID string, credentialID, c
 			return err
 		}
 		count, err = q.TouchUserLastSeen(ctx, db.TouchUserLastSeenParams{ID: userID, LastSeenAt: nullableTime(&usedAt)})
-		return affected(count, err)
+		if err := affected(count, err); err != nil {
+			return err
+		}
+		return mapError(q.ClearLoginThrottle(ctx, userID))
 	})
 }
 
@@ -1593,7 +1597,9 @@ func (s *Store) SSOIdentity(ctx context.Context, providerConfigurationID, issuer
 }
 
 // LinkSSO stores a new SSO identity link; an identity already linked to any
-// user reports credbound.ErrConflict.
+// user reports credbound.ErrConflict. A link carrying LastUsedAt records a
+// completed sign-in, so it also updates last-seen and clears the login
+// throttle.
 func (s *Store) LinkSSO(ctx context.Context, identity credbound.SSOIdentity, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		if err := q.InsertSSOIdentity(ctx, db.InsertSSOIdentityParams{
@@ -1605,14 +1611,18 @@ func (s *Store) LinkSSO(ctx context.Context, identity credbound.SSOIdentity, com
 		}
 		if identity.LastUsedAt != nil {
 			count, err := q.TouchUserLastSeen(ctx, db.TouchUserLastSeenParams{ID: identity.UserID, LastSeenAt: nullableTime(identity.LastUsedAt)})
-			return affected(count, err)
+			if err := affected(count, err); err != nil {
+				return err
+			}
+			return mapError(q.ClearLoginThrottle(ctx, identity.UserID))
 		}
 		return nil
 	})
 }
 
 // TouchSSO updates the identity's last-used time and the user's last-seen
-// time after a successful SSO login.
+// time after a successful SSO login, clearing the login throttle in the same
+// commit.
 func (s *Store) TouchSSO(ctx context.Context, userID, identityID string, usedAt time.Time, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		count, err := q.TouchSSOIdentity(ctx, db.TouchSSOIdentityParams{UserID: userID, ID: identityID, LastUsedAt: nullableTime(&usedAt)})
@@ -1620,7 +1630,10 @@ func (s *Store) TouchSSO(ctx context.Context, userID, identityID string, usedAt 
 			return err
 		}
 		count, err = q.TouchUserLastSeen(ctx, db.TouchUserLastSeenParams{ID: userID, LastSeenAt: nullableTime(&usedAt)})
-		return affected(count, err)
+		if err := affected(count, err); err != nil {
+			return err
+		}
+		return mapError(q.ClearLoginThrottle(ctx, userID))
 	})
 }
 

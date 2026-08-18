@@ -53,8 +53,8 @@ account inside the same transaction as the failure audit. Reaching
 `MaxFailedLogins` (default 10) locks the account for `LockoutDuration`
 (default 15 minutes); a locked attempt still performs the dummy password
 derivation and returns `ErrLocked` without confirming unknown accounts. A
-successful password, TOTP, recovery-code, magic-link, or email-OTP
-authentication — and a completed password reset — clears the counter, but only
+successful password, TOTP, recovery-code, magic-link, email-OTP, passkey, or
+SSO authentication — and a completed password reset — clears the counter, but only
 once the sign-in is complete: while a second factor is pending, a correct
 first factor (password, magic link, or email OTP) leaves the counter untouched
 so it cannot reset the guessing budget between TOTP attempts, and a locked

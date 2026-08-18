@@ -389,6 +389,43 @@ func TestEmailFlowsDoNotResetSecondFactorLockout(t *testing.T) {
 	}
 }
 
+// TestPasskeySignInUnlocksAccount proves AUTH-009's "any successful
+// authentication clears the counter" for the possession-based methods: a
+// completed passkey sign-in lifts the lockout instead of leaving the user
+// blocked for every other method until it expires.
+func TestPasskeySignInUnlocksAccount(t *testing.T) {
+	f := newLockoutFixture(t, 3, 15*time.Minute)
+	authn := f.bootstrap(t)
+	ctx := context.Background()
+	challenge, err := f.manager.BeginPasskeyRegistration(ctx, authn, "MacBook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishPasskeyRegistration(ctx, authn, challenge.Continuation, []byte("valid")); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "wrong password"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+			t.Fatalf("failure error = %v", err)
+		}
+	}
+	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("locked error = %v", err)
+	}
+	// The passkey is a possession proof, not a guessable secret, so the
+	// lockout does not block it — and its success resets the counter.
+	login, err := f.manager.BeginPasskeyAuthentication(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishPasskeyAuthentication(ctx, login.Continuation, []byte("valid")); err != nil {
+		t.Fatalf("passkey sign-in while locked = %v", err)
+	}
+	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); err != nil {
+		t.Fatalf("post-passkey login = %v", err)
+	}
+}
+
 func TestLockoutDisabled(t *testing.T) {
 	f := newLockoutFixture(t, -1, 0)
 	f.bootstrap(t)

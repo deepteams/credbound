@@ -99,6 +99,9 @@ type Store interface {
 
 	Passkeys(context.Context, string) iter.Seq2[Passkey, error]
 	SavePasskey(context.Context, Passkey, Commit) error
+	// TouchPasskey persists the credential's updated JSON and last-used time
+	// after a successful assertion, updates last_seen_at and — the sign-in
+	// completed (AUTH-009) — clears the login throttle.
 	TouchPasskey(context.Context, string, []byte, []byte, time.Time, Commit) error
 	DeletePasskey(context.Context, string, string, Commit) error
 
@@ -153,7 +156,14 @@ type Store interface {
 	RemoveInstanceRole(context.Context, string, Commit) error
 
 	SSOIdentity(context.Context, string, string, string) (SSOIdentity, error)
+	// LinkSSO stores a new SSO identity link; an identity already linked to
+	// any user reports ErrConflict. A link carrying LastUsedAt records a
+	// completed sign-in, so it also updates last_seen_at and clears the
+	// login throttle (AUTH-009).
 	LinkSSO(context.Context, SSOIdentity, Commit) error
+	// TouchSSO updates the identity's last-used time after a successful SSO
+	// login, updates last_seen_at and — the sign-in completed (AUTH-009) —
+	// clears the login throttle.
 	TouchSSO(context.Context, string, string, time.Time, Commit) error
 	// UnlinkSSO removes one linked identity, refusing with ErrConflict when
 	// it is the user's last remaining authentication method (no password

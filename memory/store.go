@@ -1232,6 +1232,7 @@ func (s *Store) TouchPasskey(ctx context.Context, userID string, credentialID, c
 			passkey.LastUsedAt = cloneTime(&usedAt)
 			s.passkeys[userID][id] = passkey
 			s.touchLastSeenLocked(userID, usedAt)
+			delete(s.throttles, userID)
 			return s.finishCommitLocked(ctx, commit, previous)
 		}
 	}
@@ -2426,6 +2427,7 @@ func (s *Store) LinkSSO(ctx context.Context, identity credbound.SSOIdentity, com
 	s.ssoKeys[key] = identity.ID
 	if identity.LastUsedAt != nil {
 		s.touchLastSeenLocked(identity.UserID, *identity.LastUsedAt)
+		delete(s.throttles, identity.UserID)
 	}
 	return s.finishCommitLocked(ctx, commit, previous)
 }
@@ -2449,6 +2451,7 @@ func (s *Store) TouchSSO(ctx context.Context, userID, identityID string, usedAt 
 	identity.LastUsedAt = cloneTime(&usedAt)
 	s.ssoIdentities[identityID] = identity
 	s.touchLastSeenLocked(userID, usedAt)
+	delete(s.throttles, userID)
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
