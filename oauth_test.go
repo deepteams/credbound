@@ -258,6 +258,28 @@ func TestOAuthAuthorizationRefreshAndDCR(t *testing.T) {
 	if _, err := f.manager.AuthenticateOAuthAccessToken(ctx, resource.Resource, refreshed.AccessToken); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("revoked access token = %v", err)
 	}
+	// The disable kill switch takes effect immediately for already-issued
+	// user access tokens — bearer validation, UserInfo, and new consent
+	// ceremonies all refuse a disabled client without waiting for expiry.
+	if err := f.manager.DisableOAuthClient(ctx, actor, credbound.TrustedRequest{Local: true}, issuedClient.Client.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.AuthenticateOAuthAccessToken(ctx, resource.Resource, tokens.AccessToken); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("disabled-client access token = %v", err)
+	}
+	if _, err := f.manager.OAuthUserInfo(ctx, issuer.Issuer, tokens.AccessToken); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("disabled-client userinfo = %v", err)
+	}
+	if _, err := f.manager.BeginOAuthAuthorization(ctx, actor, credbound.BeginOAuthAuthorizationInput{
+		Issuer: issuer.Issuer, ClientID: issuedClient.Client.ClientID,
+		RedirectURI: "https://client.example.com/callback", Resource: resource.Resource,
+		Scopes: []string{"documents.read"}, State: "state", CodeChallenge: challenge, CodeChallengeMethod: "S256",
+	}); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("disabled-client authorization begin = %v", err)
+	}
+	if err := f.manager.EnableOAuthClient(ctx, actor, credbound.TrustedRequest{Local: true}, issuedClient.Client.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	initial, err := f.manager.CreateOAuthInitialAccessToken(ctx, actor, credbound.TrustedRequest{Local: true}, issuer.ID, credbound.CreateOAuthInitialAccessTokenInput{
 		ExpiresAt: f.now.Add(time.Hour), MaxRegistrations: 1,
@@ -1009,6 +1031,15 @@ func TestOAuthClientCredentials(t *testing.T) {
 		Issuer: issuer.Issuer, ClientID: client.Client.ClientID, ClientSecret: "wrong", Resource: resource.Resource,
 	}); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("wrong secret = %v", err)
+	}
+	// A pure machine client is not registered for authorization_code and
+	// cannot begin a user-delegated consent ceremony.
+	if _, err := f.manager.BeginOAuthAuthorization(ctx, root, credbound.BeginOAuthAuthorizationInput{
+		Issuer: issuer.Issuer, ClientID: client.Client.ClientID, RedirectURI: "https://svc.example.com/cb",
+		Resource: resource.Resource, Scopes: []string{"documents.read"}, State: "state",
+		CodeChallenge: strings.Repeat("a", 43), CodeChallengeMethod: "S256",
+	}); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("machine-client consent ceremony = %v", err)
 	}
 	// A scope the client is not registered for is refused.
 	if _, err := f.manager.IssueOAuthClientCredentials(ctx, credbound.OAuthClientCredentialsInput{

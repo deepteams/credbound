@@ -14,6 +14,12 @@ breaking changes may land in any release and are called out explicitly.
   `(continuation, response)` pair can never be replayed — signature
   counters alone cannot guarantee this, since many authenticators
   legitimately report a constant zero.
+- Disabling an OAuth client now takes effect immediately for already-issued
+  user access tokens: bearer validation and UserInfo re-check
+  `client.DisabledAt` on the shared grant-validation path, closing the
+  window where a killed client kept authenticating until token expiry. A
+  disabled client can no longer drive a consent ceremony either, and only
+  clients registered for `authorization_code` may begin one.
 - **Breaking:** the transparent password rehash is a compare-and-swap:
   `Store.ReplacePassword` is replaced by `Store.RehashPassword`, which
   installs the stronger hash only while the hash the verification ran

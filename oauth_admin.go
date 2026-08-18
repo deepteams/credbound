@@ -117,8 +117,9 @@ func (m *Manager) setOAuthProtectedResourceDisabled(ctx context.Context, actor A
 	return nil
 }
 
-// DisableOAuthClient disables a client record so authorization and token
-// operations refuse it, atomically with the audit event. The actor needs
+// DisableOAuthClient disables a client record so authorization, token, and
+// bearer-validation operations refuse it — already-issued access tokens stop
+// authenticating immediately — atomically with the audit event. The actor needs
 // admin settings write and an admin mutation (fresh AAL2, or a trusted local
 // request); disabling an already disabled client is a no-op.
 func (m *Manager) DisableOAuthClient(ctx context.Context, actor Authentication, request TrustedRequest, clientID string) error {

@@ -593,6 +593,12 @@ func (m *Manager) authenticateOAuthClient(ctx context.Context, issuerURL, client
 }
 
 func (m *Manager) activeOAuthGrant(ctx context.Context, grantID string, client OAuthClient, resourceURI string) (OAuthGrant, OAuthProtectedResource, error) {
+	// A disabled client is refused here, on the shared validation path, so
+	// the admin kill switch takes effect immediately for already-issued
+	// bearer tokens too, not only at the authorization and token endpoints.
+	if client.DisabledAt != nil {
+		return OAuthGrant{}, OAuthProtectedResource{}, ErrInvalidCredentials
+	}
 	grant, err := m.oauthStore.OAuthGrant(ctx, grantID)
 	if err != nil || grant.RevokedAt != nil || grant.ClientRecordID != client.ID || !hmac.Equal(grant.MetadataHash, client.MetadataHash) {
 		return OAuthGrant{}, OAuthProtectedResource{}, ErrInvalidCredentials

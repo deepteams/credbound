@@ -457,6 +457,12 @@ func (m *Manager) BeginOAuthAuthorization(ctx context.Context, actor Authenticat
 	if err != nil {
 		return OAuthConsent{}, err
 	}
+	// A disabled client must not drive a consent ceremony, and only a
+	// client registered for the interactive code flow may begin one — a
+	// pure client_credentials machine client has no user-delegated path.
+	if client.DisabledAt != nil || !slices.Contains(client.GrantTypes, "authorization_code") {
+		return OAuthConsent{}, ErrInvalidCredentials
+	}
 	for _, scope := range input.Scopes {
 		if len(client.Scopes) > 0 && !slices.Contains(client.Scopes, strings.TrimSpace(scope)) {
 			return OAuthConsent{}, ErrForbidden
