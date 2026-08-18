@@ -87,13 +87,18 @@ type Config struct {
 	// surfaces at construction, and it never makes the adapter reach out to
 	// the network. Exactly one of MetadataXML and MetadataURL must be set.
 	MetadataXML []byte
-	// MetadataURL is fetched lazily, once, on first use, with a 10-second
-	// timeout and the same SSRF posture as the rest of the adapter: HTTPS
-	// only, except for loopback hosts which may use HTTP in development.
-	// A failed fetch is retried on the next ceremony. Prefer MetadataXML;
-	// use MetadataURL only when the IdP rotates certificates too often to
-	// redeploy with fresh static metadata.
+	// MetadataURL is fetched lazily on first use and then re-fetched every
+	// MetadataRefreshInterval, with a 10-second timeout and the same SSRF
+	// posture as the rest of the adapter: HTTPS only, except for loopback hosts
+	// which may use HTTP in development. A failed refresh keeps serving the last
+	// good metadata. Prefer MetadataXML; use MetadataURL when the IdP rotates
+	// certificates too often to redeploy with fresh static metadata.
 	MetadataURL string
+	// MetadataRefreshInterval bounds how long a fetched MetadataURL document is
+	// cached before it is re-fetched, so a rotated or revoked IdP signing
+	// certificate is picked up without a redeploy. Zero uses a default of 12
+	// hours. Ignored for static MetadataXML.
+	MetadataRefreshInterval time.Duration
 	// SPEntityID is this service provider's entity ID: the value the IdP
 	// must put in the assertion's AudienceRestriction and the Issuer of the
 	// AuthnRequests the adapter emits. Required.
@@ -149,11 +154,13 @@ type Provider struct {
 	allowTransient  bool
 	trustEmail      bool
 	metadataURL     string
+	metadataTTL     time.Duration
 	client          *http.Client
 	now             func() time.Time
 
-	mu       sync.Mutex
-	metadata *saml.EntityDescriptor
+	mu              sync.Mutex
+	metadata        *saml.EntityDescriptor
+	metadataFetched time.Time
 }
 
 // session is the opaque payload carried through credbound's sealed
@@ -229,6 +236,10 @@ func New(config Config) (*Provider, error) {
 			return nil, fmt.Errorf("samladapter: metadata url: %w", err)
 		}
 		provider.metadataURL = metadataURL
+		provider.metadataTTL = config.MetadataRefreshInterval
+		if provider.metadataTTL <= 0 {
+			provider.metadataTTL = 12 * time.Hour
+		}
 	default:
 		return nil, errors.New("samladapter: idp metadata is required (set MetadataXML or MetadataURL)")
 	}
@@ -453,15 +464,33 @@ func (p *Provider) serviceProvider(ctx context.Context, requestID string) (*saml
 	return sp, nil
 }
 
-// idpMetadata returns the cached IdP metadata, fetching MetadataURL once on
-// first use. Failures are retried on the next call; success is cached for
-// the provider's lifetime (metadata rotation means a new Provider).
+// idpMetadata returns the IdP metadata. Static MetadataXML is fixed at
+// construction. A MetadataURL is fetched lazily on first use and re-fetched
+// once metadataTTL has elapsed, so a rotated or revoked IdP signing certificate
+// is picked up without a redeploy; a failed refresh keeps serving the last good
+// document rather than breaking authentication.
 func (p *Provider) idpMetadata(ctx context.Context) (*saml.EntityDescriptor, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.metadata != nil {
+	if p.metadataURL == "" {
 		return p.metadata, nil
 	}
+	if p.metadata != nil && p.now().Before(p.metadataFetched.Add(p.metadataTTL)) {
+		return p.metadata, nil
+	}
+	metadata, err := p.fetchMetadata(ctx)
+	if err != nil {
+		if p.metadata != nil {
+			return p.metadata, nil
+		}
+		return nil, err
+	}
+	p.metadata = metadata
+	p.metadataFetched = p.now()
+	return metadata, nil
+}
+
+func (p *Provider) fetchMetadata(ctx context.Context) (*saml.EntityDescriptor, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, p.metadataURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("samladapter: fetch idp metadata: %w", err)
@@ -481,12 +510,7 @@ func (p *Provider) idpMetadata(ctx context.Context) (*saml.EntityDescriptor, err
 	if len(body) > maxMetadataSize {
 		return nil, errors.New("samladapter: idp metadata exceeds the size limit")
 	}
-	metadata, err := parseMetadata(body)
-	if err != nil {
-		return nil, err
-	}
-	p.metadata = metadata
-	return metadata, nil
+	return parseMetadata(body)
 }
 
 // parseMetadata decodes and validates an IdP metadata document: either an

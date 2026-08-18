@@ -518,6 +518,57 @@ func TestMetadataURLFetchedLazilyOnceAndRetried(t *testing.T) {
 	}
 }
 
+func TestMetadataURLRefreshedAfterTTL(t *testing.T) {
+	idp := newTestIdP(t)
+	var fetches atomic.Int64
+	fail := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches.Add(1)
+		if fail {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write(idp.metadataXML)
+	}))
+	t.Cleanup(server.Close)
+
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	provider := newTestProvider(t, idp, func(c *Config) {
+		c.MetadataXML = nil
+		c.MetadataURL = server.URL
+		c.MetadataRefreshInterval = time.Hour
+		c.Clock = func() time.Time { return now }
+	})
+
+	if _, err := provider.Begin(context.Background(), credbound.SSORequest{}); err != nil {
+		t.Fatal(err)
+	}
+	// Within the interval the cache is reused.
+	if _, err := provider.Begin(context.Background(), credbound.SSORequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if fetches.Load() != 1 {
+		t.Fatalf("cached fetch count = %d, want 1", fetches.Load())
+	}
+	// After the interval elapses the metadata is re-fetched.
+	now = now.Add(2 * time.Hour)
+	if _, err := provider.Begin(context.Background(), credbound.SSORequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if fetches.Load() != 2 {
+		t.Fatalf("refetch count = %d, want 2", fetches.Load())
+	}
+	// A failed refresh keeps serving the last good metadata.
+	fail = true
+	now = now.Add(2 * time.Hour)
+	if _, err := provider.Begin(context.Background(), credbound.SSORequest{}); err != nil {
+		t.Fatalf("stale fallback: %v", err)
+	}
+	if fetches.Load() != 3 {
+		t.Fatalf("attempted refetch count = %d, want 3", fetches.Load())
+	}
+}
+
 func TestNewValidatesConfiguration(t *testing.T) {
 	idp := newTestIdP(t)
 	key, certificate := testKeyCert()
