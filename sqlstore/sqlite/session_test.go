@@ -392,4 +392,21 @@ func TestAnonymizeUserStore(t *testing.T) {
 	if err != nil || stored.UserAgent != "" || stored.IPAddress != "" {
 		t.Fatalf("session not scrubbed: %#v, %v", stored, err)
 	}
+
+	// A user who solely administers a workspace cannot be anonymized: the
+	// disable would orphan the workspace, so the store refuses with
+	// ErrConflict and leaves the account untouched.
+	owner := f.newSessionMember(t, users, "owner@example.com")
+	solo := credbound.Workspace{ID: f.id(), Name: "Solo", CreatedAt: f.now, UpdatedAt: f.now}
+	soloMembership := credbound.Membership{WorkspaceID: solo.ID, UserID: owner.ID, Role: credbound.RoleAdmin, Status: credbound.MembershipActive, CreatedAt: f.now, UpdatedAt: f.now}
+	if err := f.store.CreateWorkspace(ctx, solo, soloMembership, f.event(owner.ID, "workspace.create", solo.ID, solo.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.AnonymizeUser(ctx, owner.ID, f.now, f.event(users.root.ID, "user.anonymize.orphan", owner.ID, "")); !errors.Is(err, credbound.ErrConflict) {
+		t.Fatalf("orphaning anonymize error = %v", err)
+	}
+	untouched, err := f.store.UserByID(ctx, owner.ID)
+	if err != nil || untouched.Disabled || untouched.DisplayName == "" {
+		t.Fatalf("refused anonymize mutated the user: %#v, %v", untouched, err)
+	}
 }

@@ -314,6 +314,23 @@ func TestHandlerProtocolErrorsAndDCR(t *testing.T) {
 	if value, ok := AuthenticationFromContext(contextRequest); !ok || value.UserID != "user" {
 		t.Fatalf("context authentication = %#v, %v", value, ok)
 	}
+	// The OIDC max_age parameter: absent means no constraint, zero forces
+	// re-authentication via the smallest positive age, malformed and negative
+	// values are refused, and seconds convert to a duration.
+	for raw, want := range map[string]struct {
+		age time.Duration
+		ok  bool
+	}{
+		"":    {0, true},
+		"0":   {time.Nanosecond, true},
+		"60":  {time.Minute, true},
+		"-1":  {0, false},
+		"abc": {0, false},
+	} {
+		if age, ok := parseMaxAge(raw); age != want.age || ok != want.ok {
+			t.Fatalf("parseMaxAge(%q) = %v, %v", raw, age, ok)
+		}
+	}
 }
 
 func TestHandlerAdditionalProtocolBranches(t *testing.T) {
