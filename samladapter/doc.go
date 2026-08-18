@@ -70,11 +70,13 @@
 // ceremony and is rejected unless Config.AllowTransientNameID is set for
 // IdPs that mislabel stable identifiers. Email is read from the standard
 // attributes (mail, email, urn:oid:0.9.2342.19200300.100.1.3, and the WS-Fed
-// emailaddress claim URI) and forwarded as verified when it parses as a
-// valid address: unlike an OIDC profile email, a SAML attribute is asserted
-// by the IdP itself under the same signature as the subject. A malformed or
-// oversized value is dropped, never fatal — credbound keys SSO identities on
-// issuer and subject, never on email.
+// emailaddress claim URI) but dropped by default: SAML carries no
+// email_verified equivalent, so an IdP that lets a subject influence its
+// outbound attributes could assert someone else's address. Set
+// Config.TrustAssertedEmail for an IdP whose email attribute is
+// authoritative; only then is a well-formed value forwarded as verified. A
+// malformed or oversized value is dropped, never fatal — credbound keys SSO
+// identities on issuer and subject, never on email.
 //
 // # Step-up limitation
 //

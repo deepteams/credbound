@@ -552,6 +552,9 @@ type TransactionHook interface {
     ApplyMembershipChange(context.Context, Tx, MembershipChange) error
     ApplyWorkspaceInvitationChange(context.Context, Tx, WorkspaceInvitationChange) error
     ApplyUserCredentialRevocation(context.Context, Tx, UserCredentialRevocation) error
+    ApplySecondFactorReset(context.Context, Tx, SecondFactorReset) error
+    ApplyUserAnonymization(context.Context, Tx, UserAnonymization) error
+    ApplyRecoveryCodeRegeneration(context.Context, Tx, RecoveryCodeRegeneration) error
     ApplyOAuthChange(context.Context, Tx, OAuthChange) error
     ApplyWorkspaceDomainChange(context.Context, Tx, WorkspaceDomainChange) error
     ApplySessionCreation(context.Context, Tx, SessionCreation) error
