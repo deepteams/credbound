@@ -617,7 +617,7 @@ func (m *Manager) authorizeWorkspaceMutation(ctx context.Context, actor Authenti
 }
 
 func (m *Manager) emitWorkspaceChange(ctx context.Context, name EventName, change WorkspaceChange) {
-	event := WorkspaceChangedEvent{EventMeta: change.EventMeta, Workspace: change.Workspace, Previous: change.Previous}
+	event := WorkspaceChangedEvent(change)
 	m.events.emit(ctx, name, func(listener EventListener) error { return listener.OnWorkspaceChanged(ctx, event) })
 }
 
@@ -627,6 +627,6 @@ func (m *Manager) emitUserProfileChange(ctx context.Context, change UserProfileC
 }
 
 func (m *Manager) emitMembershipChange(ctx context.Context, name EventName, change MembershipChange) {
-	event := MembershipChangedEvent{EventMeta: change.EventMeta, Membership: change.Membership, Previous: change.Previous, Removed: change.Removed}
+	event := MembershipChangedEvent(change)
 	m.events.emit(ctx, name, func(listener EventListener) error { return listener.OnMembershipChanged(ctx, event) })
 }

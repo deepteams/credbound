@@ -1145,7 +1145,7 @@ func normalizeRedirectURIs(applicationType OAuthApplicationType, input []string)
 			if value.Scheme != "https" {
 				return nil, fmt.Errorf("%w: web redirect URIs require HTTPS", ErrInvalidInput)
 			}
-		} else if value.Scheme != "https" && !(value.Scheme == "http" && isLoopbackRedirectHost(value.Hostname())) {
+		} else if value.Scheme != "https" && (value.Scheme != "http" || !isLoopbackRedirectHost(value.Hostname())) {
 			return nil, fmt.Errorf("%w: native HTTP redirects require a loopback host", ErrInvalidInput)
 		}
 		result = append(result, raw)

@@ -25,14 +25,13 @@ func TestJWTAssertionVerifierES256AndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinate := func(value []byte) string {
-		padded := make([]byte, 32)
-		copy(padded[32-len(value):], value)
-		return base64.RawURLEncoding.EncodeToString(padded)
+	raw, err := key.PublicKey.Bytes()
+	if err != nil {
+		t.Fatal(err)
 	}
 	jwk, _ := json.Marshal(map[string]any{"keys": []map[string]string{{
 		"kty": "EC", "kid": "client-key", "use": "sig", "alg": "ES256", "crv": "P-256",
-		"x": coordinate(key.X.Bytes()), "y": coordinate(key.Y.Bytes()),
+		"x": base64.RawURLEncoding.EncodeToString(raw[1:33]), "y": base64.RawURLEncoding.EncodeToString(raw[33:65]),
 	}}})
 	verifier, err := NewJWTAssertionVerifier(VerifierConfig{
 		ReplayStore: NewMemoryReplayStore(func() time.Time { return now }), Clock: func() time.Time { return now },
@@ -188,10 +187,14 @@ func TestJWTAssertionVerifierParsingKeyAndJWKSFailures(t *testing.T) {
 			}
 		})
 	}
+	one := make([]byte, 32)
+	one[31] = 1
 	keys := []jwk{
 		{KeyType: "EC", Curve: "P-384"},
 		{KeyType: "EC", Curve: "P-256", X: "%%%", Y: "%%%"},
 		{KeyType: "EC", Curve: "P-256", X: base64.RawURLEncoding.EncodeToString(make([]byte, 31)), Y: base64.RawURLEncoding.EncodeToString(make([]byte, 32))},
+		// (1, 1) is not on P-256: the parse must reject an off-curve point.
+		{KeyType: "EC", Curve: "P-256", X: base64.RawURLEncoding.EncodeToString(one), Y: base64.RawURLEncoding.EncodeToString(one)},
 	}
 	for _, key := range keys {
 		if _, err := ecKey(key); !errors.Is(err, credbound.ErrInvalidCredentials) {

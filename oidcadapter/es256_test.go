@@ -63,6 +63,16 @@ func TestES256KeyRingValidationAndRetirement(t *testing.T) {
 		"invalid retiring": func() (*ES256Signer, error) {
 			return NewES256KeyRing("active", active, ES256VerificationKey{KID: "retiring"})
 		},
+		"zero-value retiring": func() (*ES256Signer, error) {
+			return NewES256KeyRing("active", active, ES256VerificationKey{KID: "retiring", PublicKey: &ecdsa.PublicKey{Curve: elliptic.P256()}})
+		},
+		"wrong-curve retiring": func() (*ES256Signer, error) {
+			p384, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+			if err != nil {
+				return nil, nil
+			}
+			return NewES256KeyRing("active", active, ES256VerificationKey{KID: "retiring", PublicKey: &p384.PublicKey})
+		},
 	} {
 		if _, err := build(); err == nil {
 			t.Fatalf("%s key ring accepted", name)

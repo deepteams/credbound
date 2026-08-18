@@ -319,8 +319,14 @@ func ecKey(key jwk) (*ecdsa.PublicKey, error) {
 	if errX != nil || errY != nil || len(x) != 32 || len(y) != 32 {
 		return nil, credbound.ErrInvalidCredentials
 	}
-	public := &ecdsa.PublicKey{Curve: elliptic.P256(), X: new(big.Int).SetBytes(x), Y: new(big.Int).SetBytes(y)}
-	if !public.Curve.IsOnCurve(public.X, public.Y) {
+	// ParseUncompressedPublicKey performs the on-curve check natively, so the
+	// deprecated raw-coordinate construction is unnecessary.
+	uncompressed := make([]byte, 0, 65)
+	uncompressed = append(uncompressed, 0x04)
+	uncompressed = append(uncompressed, x...)
+	uncompressed = append(uncompressed, y...)
+	public, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), uncompressed)
+	if err != nil {
 		return nil, credbound.ErrInvalidCredentials
 	}
 	return public, nil
