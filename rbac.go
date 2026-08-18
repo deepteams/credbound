@@ -11,7 +11,10 @@ import (
 // workspace. Missing or insufficient memberships, disabled users or
 // workspaces, and workspace-bound credentials used elsewhere fail with
 // ErrForbidden; a workspace requiring MFA rejects interactive AAL1 contexts
-// with ErrStepUpRequired. AuthorizePermission is the canonical, finer check.
+// with ErrStepUpRequired. A scoped credential (a PAT) passes this coarse
+// role check only with the "*" wildcard scope — a narrowed token has no
+// role-shaped privilege, so route it through AuthorizePermission, the
+// canonical, finer check.
 func (m *Manager) Authorize(ctx context.Context, authn Authentication, workspaceID string, minimumRole Role) error {
 	if authn.UserID == "" {
 		return ErrUnauthorized
@@ -26,6 +29,10 @@ func (m *Manager) Authorize(ctx context.Context, authn Authentication, workspace
 	required, err := m.workspaceRoles.normalize(minimumRole)
 	if err != nil {
 		return err
+	}
+	if len(authn.Scopes) > 0 && !authn.HasScope("*") {
+		m.emitAuthorizationDenied(ctx, authn, workspaceID, required)
+		return ErrForbidden
 	}
 	if authn.WorkspaceID != "" && authn.WorkspaceID != workspaceID {
 		m.emitAuthorizationDenied(ctx, authn, workspaceID, required)
@@ -61,7 +68,11 @@ func (m *Manager) Authorize(ctx context.Context, authn Authentication, workspace
 
 // AuthorizePermission is the canonical tenant authorization: it checks that
 // the authentication belongs to an enabled user with an active membership
-// whose role carries the workspace permission. Failures behave exactly like
+// whose role carries the workspace permission. A scoped credential (a PAT)
+// must additionally carry the permission itself — or the "*" wildcard — as
+// a scope: scopes are the least privilege the owner chose at creation, and
+// without this check the role lookup would silently widen a narrow token
+// back to the member's full permission set. Failures behave exactly like
 // Authorize — ErrForbidden fails closed, and a workspace requiring MFA
 // rejects interactive AAL1 contexts with ErrStepUpRequired while
 // non-interactive credentials such as PATs are unaffected.
@@ -71,6 +82,10 @@ func (m *Manager) AuthorizePermission(ctx context.Context, authn Authentication,
 	}
 	if workspaceID == "" || !workspacePermissionPattern.MatchString(string(permission)) {
 		return fmt.Errorf("%w: workspace id and permission are required", ErrInvalidInput)
+	}
+	if len(authn.Scopes) > 0 && !authn.HasScope(string(permission)) {
+		m.emitAuthorizationDenied(ctx, authn, workspaceID, Role(""))
+		return ErrForbidden
 	}
 	user, err := m.store.UserByID(ctx, authn.UserID)
 	if err != nil || user.Disabled {

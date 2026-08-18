@@ -40,6 +40,7 @@ Credbound provides a reusable, testable, transport-independent core.
 | PAT-001 | Creation | A PAT uses at least 256 bits of entropy, is returned in plaintext only once, and only an HMAC digest is persisted. |
 | PAT-002 | Multiplicity | A user may own multiple named PATs that can be revoked independently. |
 | PAT-003 | Visibility | Lists expose metadata, prefix, creation time, expiration, and latest use, but never the secret. |
+| PAT-004 | Scope enforcement | A PAT scope is either the `*` wildcard or a workspace permission string, validated at creation. The canonical permission authorization denies a scoped credential any permission outside its scopes, and the coarse role authorization requires the wildcard, so the member's role never widens a narrow token. |
 | TENANT-001 | Isolation | Every resource-access authorization is evaluated for an explicit `workspace_id`. |
 | TENANT-002 | Workspace lifecycle | An AAL2 user can create a workspace and becomes its `admin`; authorized administrators can rename or disable it atomically. A disabled workspace denies every tenant-scoped capability. |
 | TENANT-003 | Membership lifecycle | Authorized administrators can add, suspend, reactivate, and remove local memberships. SCIM-managed memberships remain directory-owned and the last active workspace administrator cannot be removed, suspended, or demoted. |
@@ -192,8 +193,10 @@ regardless of their age.
 
 The raw token has the form `cbp_<prefix>_<secret>`. The prefix enables an indexed
 lookup; the secret is checked in constant time against an HMAC-SHA-256. Successful
-authentication updates `last_used_at` and honors expiration, revocation, the
-optional workspace, and scopes.
+authentication updates `last_used_at` and honors expiration, revocation, and
+the optional workspace. The scopes chosen at creation are the ceiling of what
+the token can authorize: `AuthorizePermission` requires the permission itself
+(or `*`) among the scopes, and role-based `Authorize` requires `*`.
 
 ### SSO
 

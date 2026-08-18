@@ -22,7 +22,8 @@ be reimplemented in every project:
 - transactional tracking of the latest authentication (`last_seen_at`);
 - optional SSO per SaaS application (Google, GitHub, Microsoft, OIDC, and SAML);
 - freshness checks for step-up operations;
-- Personal Access Tokens (PATs) displayed only once;
+- Personal Access Tokens (PATs) displayed only once, whose scopes are
+  enforced ceilings on workspace permissions, not labels;
 - workspace isolation and extensible RBAC (`admin`, `member`, and application roles);
 - workspace invitations whose invitee chooses their own password, and an
   optional per-workspace MFA requirement;

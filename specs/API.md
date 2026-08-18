@@ -272,6 +272,14 @@ nothing: the actor proved possession of the current password, so a routine
 change is not a compromise response — hosts that want the cascade pair it with
 `RevokeUserSessions` or `RevokeUserCredentials`.
 
+`AuthorizePermission` is the canonical tenant authorization. For a scoped
+authentication (a PAT), the permission itself — or the `*` wildcard — must
+additionally appear among the scopes: scopes are the least privilege chosen at
+creation, and the membership role never widens them back. The coarse
+role-based `Authorize` accepts a scoped credential only with the `*` wildcard.
+A PAT scope is validated at creation as either `*` or a workspace permission
+string.
+
 `RegenerateRecoveryCodes` replaces the actor's recovery codes with a fresh
 single-display set under a fresh interactive AAL2 authentication; the previous
 set stops working in the same transaction. `AdminResetSecondFactor` is the

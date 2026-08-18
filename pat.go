@@ -15,7 +15,11 @@ import (
 // and returns the raw token exactly once; only its HMAC digest is persisted,
 // atomically with the audit event. It requires a fresh AAL2 step-up, and
 // binding the token to a workspace additionally requires access to that
-// workspace.
+// workspace. Each scope is either the "*" wildcard or a workspace
+// permission string: AuthorizePermission denies a scoped authentication any
+// permission outside its scopes, and the coarse role-based Authorize
+// requires the wildcard, so the scopes chosen here are the ceiling of what
+// the token can ever do.
 func (m *Manager) CreatePAT(ctx context.Context, actor Authentication, input CreatePATInput) (_ IssuedPAT, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.pat.create", started, err) }()
@@ -217,6 +221,11 @@ func parsePAT(raw string) (string, bool) {
 	return parts[1], true
 }
 
+// normalizeScopes validates and deduplicates the requested PAT scopes. A
+// scope is either the "*" wildcard or a workspace permission string —
+// AuthorizePermission enforces the set on every scoped authorization, so a
+// name outside the permission grammar would create a token that can never
+// authorize anything.
 func normalizeScopes(scopes []string) ([]string, error) {
 	if len(scopes) == 0 {
 		return nil, &ValidationError{Field: "scopes", Rule: "required", Message: "at least one PAT scope is required"}
@@ -225,8 +234,8 @@ func normalizeScopes(scopes []string) ([]string, error) {
 	result := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
 		scope = strings.TrimSpace(scope)
-		if scope == "" || len(scope) > 100 {
-			return nil, &ValidationError{Field: "scopes", Rule: "format", Message: "invalid PAT scope"}
+		if scope != "*" && !workspacePermissionPattern.MatchString(scope) {
+			return nil, &ValidationError{Field: "scopes", Rule: "format", Message: "a PAT scope must be \"*\" or a workspace permission"}
 		}
 		if _, duplicate := seen[scope]; duplicate {
 			continue

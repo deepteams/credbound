@@ -297,8 +297,9 @@ func TestWorkspaceRequireMFA(t *testing.T) {
 	if err := f.manager.Authorize(ctx, stepUp, secure.ID, credbound.RoleAdmin); err != nil {
 		t.Fatalf("AAL2 authorization = %v", err)
 	}
-	// A workspace-bound PAT is non-interactive and stays usable.
-	issued, err := f.manager.CreatePAT(ctx, stepUp, credbound.CreatePATInput{Name: "ci", WorkspaceID: secure.ID, Scopes: []string{"read"}})
+	// A workspace-bound PAT is non-interactive and stays usable, within the
+	// permissions its scopes name.
+	issued, err := f.manager.CreatePAT(ctx, stepUp, credbound.CreatePATInput{Name: "ci", WorkspaceID: secure.ID, Scopes: []string{string(credbound.PermissionWorkspaceAccess)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1403,5 +1404,59 @@ func TestRegenerateRecoveryCodes(t *testing.T) {
 	status, err := f.manager.TOTPStatus(ctx, stepUp, "")
 	if err != nil || status.UnusedRecoveryCodes != 9 {
 		t.Fatalf("status after regeneration = %#v, %v", status, err)
+	}
+}
+
+func TestPATScopeEnforcement(t *testing.T) {
+	f := newFixture(t)
+	authn, workspace := f.bootstrap(t)
+	ctx := context.Background()
+	stepUp := aal2(authn.UserID, f.now)
+
+	// Scopes outside the permission grammar are rejected at creation.
+	if _, err := f.manager.CreatePAT(ctx, stepUp, credbound.CreatePATInput{
+		Name: "bad", WorkspaceID: workspace.ID, Scopes: []string{"Read Only"},
+	}); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("invalid scope error = %v", err)
+	}
+
+	narrow, err := f.manager.CreatePAT(ctx, stepUp, credbound.CreatePATInput{
+		Name: "narrow", WorkspaceID: workspace.ID, Scopes: []string{string(credbound.PermissionWorkspaceAccess)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	narrowAuthn, err := f.manager.AuthenticatePAT(ctx, narrow.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.AuthorizePermission(ctx, narrowAuthn, workspace.ID, credbound.PermissionWorkspaceAccess); err != nil {
+		t.Fatalf("in-scope permission = %v", err)
+	}
+	// The owner is a workspace admin, but the token's scopes stay the
+	// ceiling: the role never widens a narrow PAT.
+	if err := f.manager.AuthorizePermission(ctx, narrowAuthn, workspace.ID, credbound.PermissionWorkspaceUsersRead); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("out-of-scope permission error = %v", err)
+	}
+	// The coarse role check requires the wildcard from scoped credentials.
+	if err := f.manager.Authorize(ctx, narrowAuthn, workspace.ID, credbound.RoleMember); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("scoped role authorization error = %v", err)
+	}
+
+	wildcard, err := f.manager.CreatePAT(ctx, stepUp, credbound.CreatePATInput{
+		Name: "wildcard", WorkspaceID: workspace.ID, Scopes: []string{"*"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wildcardAuthn, err := f.manager.AuthenticatePAT(ctx, wildcard.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.AuthorizePermission(ctx, wildcardAuthn, workspace.ID, credbound.PermissionWorkspaceUsersRead); err != nil {
+		t.Fatalf("wildcard permission = %v", err)
+	}
+	if err := f.manager.Authorize(ctx, wildcardAuthn, workspace.ID, credbound.RoleAdmin); err != nil {
+		t.Fatalf("wildcard role authorization = %v", err)
 	}
 }

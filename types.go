@@ -485,6 +485,8 @@ func (a Authentication) Interactive() bool {
 
 // HasScope reports whether the context carries the required scope. An empty
 // requirement always passes and the literal "*" scope matches everything.
+// AuthorizePermission consults it for every scoped authentication, so hosts
+// only need it for checks outside the workspace RBAC model.
 func (a Authentication) HasScope(required string) bool {
 	if required == "" {
 		return true
