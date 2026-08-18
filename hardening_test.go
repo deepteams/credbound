@@ -1920,3 +1920,129 @@ func TestAnonymizeUser(t *testing.T) {
 		t.Fatalf("anonymized events = %d, want 1", anonymizedEvents)
 	}
 }
+
+// TestPendingSecondFactorCannotBypassMFA pins the fix for the second-factor
+// bypass: an Authentication whose second factor is still pending
+// (SecondFactorRequired) proves the first factor only, so every self-service
+// operation behind requireRecentInteractive refuses it with ErrStepUpRequired
+// — most critically the ones that mint a new credential (passkey
+// registration, SSO linking, TOTP re-enrollment), which would otherwise let
+// an attacker knowing only the password enroll their own second factor and
+// come back at AAL2. The one operation such a context exists for — completing
+// the pending factor through VerifyTOTP — keeps working, and the promoted
+// context regains access.
+func TestPendingSecondFactorCannotBypassMFA(t *testing.T) {
+	provider := &fakeSSOProvider{
+		configurationID: "0198b463-0000-7000-8000-0000000000cc", kind: credbound.SSOProviderOIDC,
+		claims: credbound.SSOClaims{Issuer: "https://idp.example.com", Subject: "subject-pending"},
+	}
+	f := newFixture(t, provider)
+	authn, _ := f.bootstrap(t)
+	ctx := context.Background()
+	if _, err := f.manager.BeginTOTPEnrollment(ctx, authn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.ConfirmTOTPEnrollment(ctx, authn, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery")
+	if err != nil || !pending.SecondFactorRequired {
+		t.Fatalf("pending sign-in = %#v, %v", pending, err)
+	}
+
+	operations := map[string]func() error{
+		"passkey.registration.begin": func() error {
+			_, err := f.manager.BeginPasskeyRegistration(ctx, pending, "Attacker key")
+			return err
+		},
+		"passkey.registration.finish": func() error {
+			_, err := f.manager.FinishPasskeyRegistration(ctx, pending, "junk", []byte("{}"))
+			return err
+		},
+		"sso.link.begin": func() error {
+			_, err := f.manager.BeginSSOLink(ctx, pending, provider.configurationID)
+			return err
+		},
+		"sso.step_up.begin": func() error {
+			_, err := f.manager.BeginSSOStepUp(ctx, pending, provider.configurationID)
+			return err
+		},
+		"totp.enroll.begin": func() error {
+			_, err := f.manager.BeginTOTPEnrollment(ctx, pending)
+			return err
+		},
+		"totp.enroll.confirm": func() error {
+			_, err := f.manager.ConfirmTOTPEnrollment(ctx, pending, "123456")
+			return err
+		},
+		"password.change": func() error {
+			return f.manager.ChangePassword(ctx, pending, "correct horse battery", "eight nine ten eleven")
+		},
+		"email.add.begin": func() error {
+			_, err := f.manager.BeginEmailAddition(ctx, pending, "attacker@example.com")
+			return err
+		},
+		"user.profile.update": func() error {
+			_, err := f.manager.UpdateUser(ctx, pending, credbound.UpdateUserInput{DisplayName: "Mallory"})
+			return err
+		},
+		"user.data.export": func() error {
+			_, err := f.manager.ExportUserData(ctx, pending, "")
+			return err
+		},
+		"workspace.invitation.accept": func() error {
+			_, err := f.manager.AcceptInvitation(ctx, pending, "junk")
+			return err
+		},
+		"totp.status": func() error {
+			_, err := f.manager.TOTPStatus(ctx, pending, "")
+			return err
+		},
+		"user.read": func() error {
+			_, err := f.manager.User(ctx, pending, "")
+			return err
+		},
+		"passkey.list": func() error {
+			_, err := collectPasskeys(t, f.manager.Passkeys(ctx, pending, ""))
+			return err
+		},
+		"pat.list": func() error {
+			_, _, err := credbound.CollectPage(f.manager.PATs(ctx, pending, "", credbound.PageRequest{}))
+			return err
+		},
+		"email.list": func() error {
+			_, _, err := credbound.CollectPage(f.manager.Emails(ctx, pending, "", credbound.PageRequest{}))
+			return err
+		},
+		"sso.identity.list": func() error {
+			_, _, err := credbound.CollectPage(f.manager.SSOIdentities(ctx, pending, "", credbound.PageRequest{}))
+			return err
+		},
+	}
+	for operation, call := range operations {
+		if err := call(); !errors.Is(err, credbound.ErrStepUpRequired) {
+			t.Fatalf("%s with pending second factor = %v, want ErrStepUpRequired", operation, err)
+		}
+	}
+
+	// A hand-assembled AAL2 context that still carries the pending flag must
+	// not satisfy a step-up either.
+	forged := credbound.Authentication{
+		UserID: pending.UserID, Method: credbound.MethodTOTP, Level: credbound.AAL2,
+		AuthenticatedAt: f.now, SecondFactorRequired: true,
+	}
+	if err := f.manager.RequireStepUp(forged); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("forged pending AAL2 step-up = %v, want ErrStepUpRequired", err)
+	}
+
+	// Completing the pending factor stays reachable, and the promoted context
+	// regains the guarded operations.
+	f.now = f.now.Add(time.Minute)
+	promoted, err := f.manager.VerifyTOTP(ctx, pending, "123456")
+	if err != nil || promoted.SecondFactorRequired || promoted.Level != credbound.AAL2 {
+		t.Fatalf("TOTP completion = %#v, %v", promoted, err)
+	}
+	if _, err := f.manager.BeginPasskeyRegistration(ctx, promoted, "Laptop"); err != nil {
+		t.Fatalf("promoted passkey registration = %v", err)
+	}
+}

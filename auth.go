@@ -508,7 +508,10 @@ func (m *Manager) RequireStepUp(authn Authentication) error {
 		return ErrUnauthorized
 	}
 	age := m.now().Sub(authn.AuthenticatedAt)
-	if !authn.Interactive() || authn.Level < AAL2 || age < 0 || age > m.stepUpMaxAge {
+	// SecondFactorRequired never coexists with AAL2 in a Manager-minted
+	// context, but a host-assembled one must not satisfy a step-up while its
+	// second factor is pending.
+	if !authn.Interactive() || authn.Level < AAL2 || authn.SecondFactorRequired || age < 0 || age > m.stepUpMaxAge {
 		return ErrStepUpRequired
 	}
 	return nil
@@ -532,12 +535,20 @@ func (m *Manager) requireStepUp(ctx context.Context, authn Authentication, opera
 	return err
 }
 
+// requireRecentInteractive gates the self-service operations that demand a
+// recent interactive authentication with every required factor verified. A
+// context whose second factor is still pending (SecondFactorRequired) is
+// refused with ErrStepUpRequired, exactly like Authorize: the only operations
+// such a context may perform are the ones that complete the pending factor
+// (VerifyTOTP), never ones that register a new credential — a passkey or SSO
+// identity minted mid-MFA would let a password-only attacker sidestep the
+// second factor entirely.
 func (m *Manager) requireRecentInteractive(ctx context.Context, authn Authentication) error {
 	if authn.UserID == "" {
 		return ErrUnauthorized
 	}
 	age := m.now().Sub(authn.AuthenticatedAt)
-	if !authn.Interactive() || age < 0 || age > m.stepUpMaxAge {
+	if !authn.Interactive() || authn.SecondFactorRequired || age < 0 || age > m.stepUpMaxAge {
 		return ErrStepUpRequired
 	}
 	return m.requireActiveUser(ctx, authn.UserID)

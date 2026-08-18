@@ -101,7 +101,13 @@
 //
 // A password or email login yields AAL1 and reports through
 // SecondFactorRequired whether an active TOTP factor still has to be
-// verified; VerifyTOTP upgrades the context to AAL2. Passkey authentication
+// verified; VerifyTOTP upgrades the context to AAL2. A pending context is a
+// first factor only: until VerifyTOTP completes it, every operation that
+// requires a recent interactive authentication — registering a passkey,
+// linking an SSO identity, re-enrolling TOTP, changing the password, adding
+// an email address, and the other self-service operations — refuses it with
+// ErrStepUpRequired, so a stolen password alone can never enroll a
+// replacement second factor. Passkey authentication
 // produces AAL2 directly. SSO yields AAL2 only when the provider carries a
 // Config.SSOAssurance policy the asserted context satisfies (or that trusts
 // the provider unverified); otherwise it is AAL1, because SSO never mints
