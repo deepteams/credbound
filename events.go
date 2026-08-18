@@ -89,6 +89,7 @@ const (
 	EventAuthorizationDenied          EventName = "authorization.denied"
 	EventEmailAdded                   EventName = "email.added"
 	EventEmailConfirmed               EventName = "email.confirmed"
+	EventEmailVerificationResent      EventName = "email.verification_resent"
 	EventPrimaryEmailChanged          EventName = "email.primary_changed"
 	EventEmailRemoved                 EventName = "email.removed"
 	EventTOTPEnrollmentStarted        EventName = "totp.enrollment_started"
@@ -519,6 +520,11 @@ type EmailConfirmedEvent struct {
 	Email EmailAddress
 }
 
+type EmailVerificationResentEvent struct {
+	EventMeta
+	Email EmailAddress
+}
+
 type PrimaryEmailChangedEvent struct {
 	EventMeta
 	UserID  string
@@ -932,6 +938,7 @@ type EventListener interface {
 	OnAuthorizationDenied(context.Context, AuthorizationDeniedEvent) error
 	OnEmailAdded(context.Context, EmailAddedEvent) error
 	OnEmailConfirmed(context.Context, EmailConfirmedEvent) error
+	OnEmailVerificationResent(context.Context, EmailVerificationResentEvent) error
 	OnPrimaryEmailChanged(context.Context, PrimaryEmailChangedEvent) error
 	OnEmailRemoved(context.Context, EmailRemovedEvent) error
 	OnTOTPEnrollmentStarted(context.Context, TOTPEnrollmentStartedEvent) error

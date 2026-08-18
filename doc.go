@@ -41,8 +41,8 @@
 //   - Second factor: Begin/ConfirmTOTPEnrollment, DisableTOTP,
 //     RegenerateRecoveryCodes, TOTPStatus; Begin/FinishPasskeyRegistration,
 //     DeletePasskey, Passkeys; AdminResetSecondFactor for total loss.
-//   - Email addresses: BeginEmailAddition, ConfirmEmail, SetPrimaryEmail,
-//     RemoveEmail, Emails.
+//   - Email addresses: BeginEmailAddition, ConfirmEmail,
+//     ResendEmailVerification, SetPrimaryEmail, RemoveEmail, Emails.
 //   - Server-side sessions: CreateSession, AuthenticateSession, SignOut,
 //     Sessions, RevokeSession, RevokeUserSessions.
 //   - SSO linking and domains: BeginSSOLink, BeginSSOStepUp, UnlinkSSO,

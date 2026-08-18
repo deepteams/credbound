@@ -258,6 +258,10 @@ func (UnimplementedEventListener) OnEmailConfirmed(context.Context, EmailConfirm
 	return nil
 }
 
+func (UnimplementedEventListener) OnEmailVerificationResent(context.Context, EmailVerificationResentEvent) error {
+	return nil
+}
+
 func (UnimplementedEventListener) OnPrimaryEmailChanged(context.Context, PrimaryEmailChangedEvent) error {
 	return nil
 }

@@ -121,10 +121,16 @@ func (m *Manager) ResendEmailVerification(ctx context.Context, address string) (
 	if err != nil {
 		return IssuedEmailVerification{}, err
 	}
+	meta, err := m.newEventMeta(EventEmailVerificationResent, "auth.email.verification.resend", email.UserID, "", event)
+	if err != nil {
+		return IssuedEmailVerification{}, err
+	}
 	if err := m.store.ReissueEmailVerification(ctx, email.ID, verification, Commit{Audit: event}); err != nil {
 		return IssuedEmailVerification{}, m.mapStoreError(ctx, "auth.email.verification.resend", err)
 	}
 	email.UpdatedAt = now
+	resent := EmailVerificationResentEvent{EventMeta: meta, Email: email}
+	m.events.emit(ctx, EventEmailVerificationResent, func(listener EventListener) error { return listener.OnEmailVerificationResent(ctx, resent) })
 	return IssuedEmailVerification{Email: email, Token: raw}, nil
 }
 
