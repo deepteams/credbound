@@ -350,6 +350,20 @@ func TestDomainEnforcedSSO(t *testing.T) {
 	if reset, err := f.manager.BeginPasswordReset(ctx, "ghost@other.example"); err != nil || reset.Token != "" {
 		t.Fatalf("foreign reset = %#v, %v", reset, err)
 	}
+	// An invitation must not carve a password account onto an SSO-enforced
+	// domain: RegisterFromInvitation is refused just like signup and password
+	// authentication.
+	invite, err := f.manager.InviteToWorkspace(ctx, stepUp, workspace.ID, credbound.InviteToWorkspaceInput{
+		Email: "invitee@example.com", Role: credbound.RoleMember,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.manager.RegisterFromInvitation(ctx, invite.Token, credbound.RegisterFromInvitationInput{
+		DisplayName: "Invitee", Password: "chosen by invitee strong",
+	}); !errors.Is(err, credbound.ErrSSORequired) {
+		t.Fatalf("invitation register on SSO-enforced domain = %v", err)
+	}
 	// Removing the domain lifts enforcement immediately.
 	if err := f.manager.RemoveWorkspaceDomain(ctx, aal2(authn.UserID, f.now), issued.Domain.ID); err != nil {
 		t.Fatal(err)

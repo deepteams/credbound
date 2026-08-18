@@ -159,6 +159,15 @@ func (m *Manager) RegisterFromInvitation(ctx context.Context, raw string, input 
 	if err != nil {
 		return Authentication{}, User{}, err
 	}
+	// A verified domain that enforces SSO forbids password accounts on its
+	// addresses. RegisterFromInvitation mints a password credential, so it must
+	// honor the same enforcement as signup and password authentication;
+	// otherwise an invitation would carve a password account onto an
+	// SSO-enforced domain. AcceptInvitation is exempt: it adds a membership to
+	// an already-authenticated user and creates no credential.
+	if err := m.domainRequiresSSO(ctx, invitation.Email, "workspace.invitation.register"); err != nil {
+		return Authentication{}, User{}, err
+	}
 	displayName := strings.TrimSpace(input.DisplayName)
 	if displayName == "" {
 		return Authentication{}, User{}, &ValidationError{Field: "display_name", Rule: "required", Message: "display name is required"}
