@@ -32,7 +32,7 @@ type HandlerConfig struct {
 	Authenticate func(*http.Request) (credbound.Authentication, error)
 	// PresentConsent renders the consent (or auto-approval) UI for a
 	// validated authorization request; the host later completes it with
-	// Manager.ApproveOAuthAuthorization. Nil disables the authorization
+	// Manager.CompleteOAuthAuthorization. Nil disables the authorization
 	// endpoint.
 	PresentConsent func(http.ResponseWriter, *http.Request, credbound.OAuthConsent)
 }

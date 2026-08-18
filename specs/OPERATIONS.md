@@ -113,9 +113,12 @@ routine verification stays cheap as the log grows; run the full
 
 ## Recovery and privacy
 
-Password reset and destructive account deletion are not generic v0 endpoints.
-The host must design enumeration-resistant delivery, abuse controls, identity
-proofing, session revocation, and audit policy before adding recovery.
+Password reset ships as enumeration-resistant primitives — BeginPasswordReset
+and CompletePasswordReset, the latter atomically revoking the account's PATs
+and OAuth grants and clearing its lockout — but the host still owns token
+delivery, abuse controls, and any identity proofing around them. Destructive
+account deletion is not a v0 endpoint: the host designs it, starting from the
+privacy procedure below.
 
 For a privacy request, disable the user first, export or erase application-owned
 business data according to the host retention policy, and review any proposed
