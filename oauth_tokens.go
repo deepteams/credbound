@@ -35,8 +35,17 @@ func (m *Manager) ExchangeOAuthAuthorizationCode(ctx context.Context, input Exch
 		return OAuthTokenResponse{}, ErrInvalidCredentials
 	}
 	code, err := store.OAuthAuthorizationCodeByPrefix(ctx, prefix)
-	if err != nil || code.ClientRecordID != client.ID || code.RedirectURI != input.RedirectURI || code.UsedAt != nil || !m.now().Before(code.ExpiresAt) ||
-		!hmac.Equal(code.Digest, m.oauthDigest("authorization-code", input.Code)) || !verifyPKCE(input.CodeVerifier, code.CodeChallenge) {
+	if err != nil || code.ClientRecordID != client.ID || !hmac.Equal(code.Digest, m.oauthDigest("authorization-code", input.Code)) {
+		return OAuthTokenResponse{}, ErrInvalidCredentials
+	}
+	if code.UsedAt != nil {
+		// Presenting an authentic, already-redeemed code is evidence the
+		// code leaked (RFC 9700): revoke the grant so every token derived
+		// from the code dies immediately, whichever party redeemed it first.
+		m.revokeOAuthGrantForCodeReplay(ctx, client, code)
+		return OAuthTokenResponse{}, ErrInvalidCredentials
+	}
+	if code.RedirectURI != input.RedirectURI || !m.now().Before(code.ExpiresAt) || !verifyPKCE(input.CodeVerifier, code.CodeChallenge) {
 		return OAuthTokenResponse{}, ErrInvalidCredentials
 	}
 	grant, resource, err := m.activeOAuthGrant(ctx, code.GrantID, client, input.Resource)
@@ -681,6 +690,31 @@ func (m *Manager) newOAuthRefreshToken(grant OAuthGrant, familyID string, ttl ti
 		ClientRecordID: grant.ClientRecordID, UserID: grant.UserID, WorkspaceID: grant.WorkspaceID,
 		ResourceID: grant.ResourceID, Scopes: slices.Clone(grant.Scopes), CreatedAt: now, ExpiresAt: now.Add(ttl),
 	}, raw, nil
+}
+
+// revokeOAuthGrantForCodeReplay is the RFC 9700 response to an authentic
+// authorization code presented a second time: the code leaked, so the grant
+// it minted — and with it every derived access and refresh token — is
+// revoked. Best effort: the exchange answers ErrInvalidCredentials either
+// way, and an already-revoked grant needs no second cascade.
+func (m *Manager) revokeOAuthGrantForCodeReplay(ctx context.Context, client OAuthClient, code OAuthAuthorizationCode) {
+	grant, err := m.oauthStore.OAuthGrant(ctx, code.GrantID)
+	if err != nil || grant.RevokedAt != nil {
+		return
+	}
+	audit, err := m.newAudit(ctx, client.ID, "oauth.code.reuse_detected", "oauth_grant", grant.ID, grant.WorkspaceID, AuditSucceeded, "reuse_detected")
+	if err != nil {
+		return
+	}
+	audit.ActorKind = ActorService
+	change, commit, err := m.newOAuthChange(EventOAuthCodeReuseDetected, "oauth.code.reuse_detected", audit, client, grant.ID, "", grant.ResourceID, grant.WorkspaceID, grant.Scopes)
+	if err != nil {
+		return
+	}
+	if err := m.oauthStore.RevokeOAuthGrant(ctx, grant.ID, m.now(), commit); err != nil {
+		return
+	}
+	m.emitOAuthChange(ctx, change)
 }
 
 func (m *Manager) revokeOAuthRefreshFamily(ctx context.Context, token OAuthRefreshToken, client OAuthClient, reason string) error {

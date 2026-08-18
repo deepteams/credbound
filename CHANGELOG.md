@@ -14,12 +14,21 @@ breaking changes may land in any release and are called out explicitly.
   `(continuation, response)` pair can never be replayed — signature
   counters alone cannot guarantee this, since many authenticators
   legitimately report a constant zero.
-- Disabling an OAuth client now takes effect immediately for already-issued
-  user access tokens: bearer validation and UserInfo re-check
-  `client.DisabledAt` on the shared grant-validation path, closing the
-  window where a killed client kept authenticating until token expiry. A
-  disabled client can no longer drive a consent ceremony either, and only
-  clients registered for `authorization_code` may begin one.
+- Bearer validation and UserInfo now re-check `client.DisabledAt` on the
+  shared grant-validation path. The bundled stores already revoked a
+  disabled client's grants and tokens in the disable transaction; the
+  re-check makes the kill switch hold for custom stores without that
+  cascade. A disabled client can no longer drive a consent ceremony either,
+  and only clients registered for `authorization_code` may begin one.
+- Replaying an authentic, already-redeemed authorization code now revokes
+  the grant and every access and refresh token derived from it (RFC 9700's
+  reuse-detection response), emitting the new
+  `oauth.authorization_code.reuse_detected` event; a replayed code
+  previously failed alone while the first redeemer's tokens survived.
+- `RevokeOAuthRefreshFamily` (refresh reuse detection and RFC 7009 refresh
+  revocation) now also revokes the access tokens of the grants the family
+  descends from, so a thief's already-minted access token dies with the
+  family instead of surviving until expiry.
 - **Breaking:** the transparent password rehash is a compare-and-swap:
   `Store.ReplacePassword` is replaced by `Store.RehashPassword`, which
   installs the stronger hash only while the hash the verification ran

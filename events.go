@@ -150,6 +150,7 @@ const (
 	EventOAuthTokenRefreshed          EventName = "oauth.token.refreshed"
 	EventOAuthTokenRevoked            EventName = "oauth.token.revoked"
 	EventOAuthRefreshReuseDetected    EventName = "oauth.refresh_token.reuse_detected"
+	EventOAuthCodeReuseDetected       EventName = "oauth.authorization_code.reuse_detected"
 	EventOAuthConsentRevoked          EventName = "oauth.consent.revoked"
 )
 

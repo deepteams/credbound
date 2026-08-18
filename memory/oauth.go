@@ -806,22 +806,23 @@ func (s *Store) RevokeOAuthAccessToken(ctx context.Context, id string, at time.T
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
-// RevokeOAuthRefreshFamily revokes every token in the refresh-token family,
-// the fail-safe response to detected refresh token reuse.
+// RevokeOAuthRefreshFamily revokes every token in the refresh-token family
+// and the access tokens of the grants the family descends from, the
+// fail-safe response to detected refresh token reuse: the thief's already-
+// minted access token must die with the family, not survive until expiry.
 func (s *Store) RevokeOAuthRefreshFamily(ctx context.Context, familyID string, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	found := false
+	grants := make(map[string]bool)
 	for _, token := range s.oauthRefreshTokens {
 		if token.FamilyID == familyID {
-			found = true
-			break
+			grants[token.GrantID] = true
 		}
 	}
-	if !found {
+	if len(grants) == 0 {
 		return credbound.ErrNotFound
 	}
 	previous, err := s.prepareCommitLocked(commit)
@@ -832,6 +833,12 @@ func (s *Store) RevokeOAuthRefreshFamily(ctx context.Context, familyID string, a
 		if token.FamilyID == familyID && token.RevokedAt == nil {
 			token.RevokedAt = cloneTime(&at)
 			s.oauthRefreshTokens[id] = token
+		}
+	}
+	for id, token := range s.oauthAccessTokens {
+		if grants[token.GrantID] && token.RevokedAt == nil {
+			token.RevokedAt = cloneTime(&at)
+			s.oauthAccessTokens[id] = token
 		}
 	}
 	return s.finishCommitLocked(ctx, commit, previous)

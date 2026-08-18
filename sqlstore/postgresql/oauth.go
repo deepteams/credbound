@@ -397,21 +397,25 @@ func (s *Store) RevokeOAuthAccessToken(ctx context.Context, id string, at time.T
 	})
 }
 
-// RevokeOAuthRefreshFamily revokes every token in the refresh-token family,
-// the fail-safe response to detected refresh token reuse.
+// RevokeOAuthRefreshFamily revokes every token in the refresh-token family
+// and the access tokens of the grants the family descends from, the
+// fail-safe response to detected refresh token reuse: the thief's already-
+// minted access token must die with the family, not survive until expiry.
 func (s *Store) RevokeOAuthRefreshFamily(ctx context.Context, familyID string, at time.Time, commit credbound.Commit) error {
 	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
-		count, err := q.OAuthRevokeRefreshFamily(ctx, db.OAuthRevokeRefreshFamilyParams{FamilyID: familyID, RevokedAt: nullableTime(&at)})
+		grantIDs, err := q.OAuthRefreshFamilyGrantIDs(ctx, familyID)
 		if err != nil {
 			return mapError(err)
 		}
-		if count == 0 {
-			exists, err := q.OAuthRefreshFamilyExists(ctx, familyID)
-			if err != nil {
-				return mapError(err)
-			}
-			if !exists {
-				return credbound.ErrNotFound
+		if len(grantIDs) == 0 {
+			return credbound.ErrNotFound
+		}
+		if _, err := q.OAuthRevokeRefreshFamily(ctx, db.OAuthRevokeRefreshFamilyParams{FamilyID: familyID, RevokedAt: nullableTime(&at)}); err != nil {
+			return mapError(err)
+		}
+		for _, grantID := range grantIDs {
+			if err := s.revokeOAuthAccessTokens(ctx, q, grantID, at); err != nil {
+				return err
 			}
 		}
 		return nil

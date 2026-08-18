@@ -2366,6 +2366,33 @@ func (q *Queries) OAuthRefreshFamilyExists(ctx context.Context, familyID string)
 	return exists, err
 }
 
+const oAuthRefreshFamilyGrantIDs = `-- name: OAuthRefreshFamilyGrantIDs :many
+SELECT DISTINCT grant_id FROM credbound.oauth_refresh_tokens WHERE family_id = $1
+`
+
+func (q *Queries) OAuthRefreshFamilyGrantIDs(ctx context.Context, familyID string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, oAuthRefreshFamilyGrantIDs, familyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var grant_id string
+		if err := rows.Scan(&grant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, grant_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const oAuthRefreshTokenByPrefix = `-- name: OAuthRefreshTokenByPrefix :one
 SELECT data_json, used_at, revoked_at FROM credbound.oauth_refresh_tokens WHERE prefix = $1
 `

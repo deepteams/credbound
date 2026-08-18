@@ -337,6 +337,10 @@ type OAuthStore interface {
 	OAuthRefreshTokenByPrefix(context.Context, string) (OAuthRefreshToken, error)
 	RotateOAuthRefreshToken(context.Context, string, time.Time, OAuthAccessToken, OAuthRefreshToken, Commit) error
 	RevokeOAuthAccessToken(context.Context, string, time.Time, Commit) error
+	// RevokeOAuthRefreshFamily stamps RevokedAt on every token of the
+	// refresh-token family and on the access tokens of the grants the
+	// family descends from, so a detected reuse (or an RFC 7009 refresh
+	// revocation) leaves no derived bearer credential alive.
 	RevokeOAuthRefreshFamily(context.Context, string, time.Time, Commit) error
 }
 

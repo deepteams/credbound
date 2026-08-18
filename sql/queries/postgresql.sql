@@ -575,6 +575,9 @@ UPDATE credbound.oauth_refresh_tokens SET revoked_at = $2 WHERE family_id = $1 A
 -- name: OAuthRefreshFamilyExists :one
 SELECT EXISTS(SELECT 1 FROM credbound.oauth_refresh_tokens WHERE family_id = $1);
 
+-- name: OAuthRefreshFamilyGrantIDs :many
+SELECT DISTINCT grant_id FROM credbound.oauth_refresh_tokens WHERE family_id = $1;
+
 -- name: InsertWorkspaceDomain :exec
 INSERT INTO credbound.workspace_domains (id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
