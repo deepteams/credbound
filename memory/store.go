@@ -80,6 +80,8 @@ type Store struct {
 	oauthCodeKeys      map[string]string
 	oauthAccessTokens  map[string]credbound.OAuthAccessToken
 	oauthAccessKeys    map[string]string
+	oauthClientTokens  map[string]credbound.OAuthClientAccessToken
+	oauthClientTokenKeys map[string]string
 	oauthRefreshTokens map[string]credbound.OAuthRefreshToken
 	oauthRefreshKeys   map[string]string
 	throttles          map[string]credbound.LoginThrottle
@@ -163,6 +165,7 @@ func New() *Store {
 		oauthInitialTokens: make(map[string]credbound.OAuthInitialAccessToken), oauthInitialKeys: make(map[string]string),
 		oauthGrants: make(map[string]credbound.OAuthGrant), oauthCodes: make(map[string]credbound.OAuthAuthorizationCode), oauthCodeKeys: make(map[string]string),
 		oauthAccessTokens: make(map[string]credbound.OAuthAccessToken), oauthAccessKeys: make(map[string]string),
+		oauthClientTokens: make(map[string]credbound.OAuthClientAccessToken), oauthClientTokenKeys: make(map[string]string),
 		oauthRefreshTokens: make(map[string]credbound.OAuthRefreshToken), oauthRefreshKeys: make(map[string]string),
 	}
 }
@@ -2563,6 +2566,8 @@ type storeState struct {
 	oauthCodeKeys      map[string]string
 	oauthAccessTokens  map[string]credbound.OAuthAccessToken
 	oauthAccessKeys    map[string]string
+	oauthClientTokens  map[string]credbound.OAuthClientAccessToken
+	oauthClientTokenKeys map[string]string
 	oauthRefreshTokens map[string]credbound.OAuthRefreshToken
 	oauthRefreshKeys   map[string]string
 	throttles          map[string]credbound.LoginThrottle
@@ -2603,6 +2608,7 @@ func (s *Store) snapshotLocked() storeState {
 		oauthInitialTokens: make(map[string]credbound.OAuthInitialAccessToken, len(s.oauthInitialTokens)), oauthInitialKeys: make(map[string]string, len(s.oauthInitialKeys)),
 		oauthGrants: make(map[string]credbound.OAuthGrant, len(s.oauthGrants)), oauthCodes: make(map[string]credbound.OAuthAuthorizationCode, len(s.oauthCodes)), oauthCodeKeys: make(map[string]string, len(s.oauthCodeKeys)),
 		oauthAccessTokens: make(map[string]credbound.OAuthAccessToken, len(s.oauthAccessTokens)), oauthAccessKeys: make(map[string]string, len(s.oauthAccessKeys)),
+		oauthClientTokens: make(map[string]credbound.OAuthClientAccessToken, len(s.oauthClientTokens)), oauthClientTokenKeys: make(map[string]string, len(s.oauthClientTokenKeys)),
 		oauthRefreshTokens: make(map[string]credbound.OAuthRefreshToken, len(s.oauthRefreshTokens)), oauthRefreshKeys: make(map[string]string, len(s.oauthRefreshKeys)),
 	}
 	for key, value := range s.users {
@@ -2719,8 +2725,8 @@ func (s *Store) snapshotLocked() storeState {
 	for key, value := range s.oauthClients {
 		state.oauthClients[key] = cloneOAuthClient(value)
 	}
-	for key, value := range s.oauthClientKeys {
-		state.oauthClientKeys[key] = value
+	for key, value := range s.oauthClientTokenKeys {
+		state.oauthClientTokenKeys[key] = value
 	}
 	for key, value := range s.oauthInitialTokens {
 		state.oauthInitialTokens[key] = cloneOAuthInitialToken(value)
@@ -2742,6 +2748,12 @@ func (s *Store) snapshotLocked() storeState {
 	}
 	for key, value := range s.oauthAccessKeys {
 		state.oauthAccessKeys[key] = value
+	}
+	for key, value := range s.oauthClientTokens {
+		state.oauthClientTokens[key] = cloneOAuthClientAccessToken(value)
+	}
+	for key, value := range s.oauthClientTokenKeys {
+		state.oauthClientTokenKeys[key] = value
 	}
 	for key, value := range s.oauthRefreshTokens {
 		state.oauthRefreshTokens[key] = cloneOAuthRefreshToken(value)
@@ -2773,6 +2785,7 @@ func (s *Store) restoreLocked(state storeState) {
 	s.oauthInitialTokens, s.oauthInitialKeys = state.oauthInitialTokens, state.oauthInitialKeys
 	s.oauthGrants, s.oauthCodes, s.oauthCodeKeys = state.oauthGrants, state.oauthCodes, state.oauthCodeKeys
 	s.oauthAccessTokens, s.oauthAccessKeys = state.oauthAccessTokens, state.oauthAccessKeys
+	s.oauthClientTokens, s.oauthClientTokenKeys = state.oauthClientTokens, state.oauthClientTokenKeys
 	s.oauthRefreshTokens, s.oauthRefreshKeys = state.oauthRefreshTokens, state.oauthRefreshKeys
 	s.audits, s.auditIDs = state.audits, state.auditIDs
 	s.auditSequence, s.auditHead = state.auditSequence, state.auditHead

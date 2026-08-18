@@ -265,7 +265,7 @@ func TestHandlerProtocolErrorsAndDCR(t *testing.T) {
 	if response := f.request(http.MethodGet, invalidRedirect, "", ""); response.Code != http.StatusBadRequest || response.Header().Get("Location") != "" {
 		t.Fatalf("invalid redirect = %d %#v", response.Code, response.Header())
 	}
-	if response := f.request(http.MethodPost, "/tenant/token", "grant_type=client_credentials", "application/x-www-form-urlencoded"); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "unsupported_grant_type") {
+	if response := f.request(http.MethodPost, "/tenant/token", "grant_type=password", "application/x-www-form-urlencoded"); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "unsupported_grant_type") {
 		t.Fatalf("unsupported grant = %d %s", response.Code, response.Body.String())
 	}
 	if response := f.request(http.MethodPost, "/tenant/token", strings.Repeat("x", maxProtocolBody+1), "application/x-www-form-urlencoded"); response.Code != http.StatusBadRequest {
@@ -467,5 +467,34 @@ func TestHandlerAdditionalProtocolBranches(t *testing.T) {
 		if response := f.request(method, target, `{}`, "application/json"); response.Code != http.StatusNotFound {
 			t.Fatalf("disabled issuer endpoint %s = %d", target, response.Code)
 		}
+	}
+}
+
+func TestHandlerClientCredentials(t *testing.T) {
+	f := newHandlerFixture(t)
+	client, err := f.manager.PreRegisterOAuthClient(t.Context(), f.actor, credbound.TrustedRequest{Local: true}, f.issuerID, credbound.OAuthClientRegistrationInput{
+		Name: "Service", ApplicationType: credbound.OAuthApplicationWeb, RedirectURIs: []string{"https://svc.example.com/cb"},
+		GrantTypes: []string{"client_credentials"}, Scopes: []string{"documents.read"}, TokenEndpointAuthMethod: credbound.OAuthAuthClientSecretBasic,
+	})
+	if err != nil || client.ClientSecret == "" {
+		t.Fatalf("client = %#v, %v", client, err)
+	}
+	form := url.Values{
+		"grant_type": {"client_credentials"}, "client_id": {client.Client.ClientID}, "client_secret": {client.ClientSecret},
+		"resource": {testResource}, "scope": {"documents.read"},
+	}
+	response := f.request(http.MethodPost, "/tenant/token", form.Encode(), "application/x-www-form-urlencoded")
+	if response.Code != http.StatusOK {
+		t.Fatalf("client_credentials token = %d %s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["access_token"] == "" || body["token_type"] != "Bearer" || body["scope"] != "documents.read" {
+		t.Fatalf("token body = %#v", body)
+	}
+	if _, ok := body["refresh_token"]; ok {
+		t.Fatal("client_credentials must not return a refresh token")
 	}
 }

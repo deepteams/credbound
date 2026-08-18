@@ -782,6 +782,11 @@ func (m *Manager) newOAuthClient(issuer OAuthIssuer, source OAuthClientSource, i
 	if method != OAuthAuthNone && method != OAuthAuthPrivateKeyJWT && method != OAuthAuthClientSecretBasic {
 		return OAuthClient{}, "", fmt.Errorf("%w: unsupported OAuth client authentication method", ErrInvalidInput)
 	}
+	// client_credentials is a confidential-client grant: a public client (no
+	// authentication) must not be able to obtain machine-to-machine tokens.
+	if method == OAuthAuthNone && slices.Contains(grants, "client_credentials") {
+		return OAuthClient{}, "", fmt.Errorf("%w: client_credentials requires client authentication", ErrInvalidInput)
+	}
 	if method == OAuthAuthPrivateKeyJWT && len(input.JWKS) == 0 && input.JWKSURI == "" {
 		return OAuthClient{}, "", fmt.Errorf("%w: private_key_jwt requires jwks or jwks_uri", ErrInvalidInput)
 	}
@@ -1123,12 +1128,18 @@ func normalizeOAuthFlowMetadata(grants, responses []string) ([]string, []string,
 	slices.Sort(responses)
 	grants, responses = slices.Compact(grants), slices.Compact(responses)
 	for _, grant := range grants {
-		if grant != "authorization_code" && grant != "refresh_token" {
+		if grant != "authorization_code" && grant != "refresh_token" && grant != "client_credentials" {
 			return nil, nil, fmt.Errorf("%w: unsupported OAuth grant type", ErrInvalidInput)
 		}
 	}
-	if !slices.Contains(grants, "authorization_code") || len(responses) != 1 || responses[0] != "code" {
-		return nil, nil, fmt.Errorf("%w: authorization_code and response type code are required", ErrInvalidInput)
+	hasCode := slices.Contains(grants, "authorization_code")
+	if !hasCode && !slices.Contains(grants, "client_credentials") {
+		return nil, nil, fmt.Errorf("%w: at least one of authorization_code or client_credentials is required", ErrInvalidInput)
+	}
+	// The interactive code flow requires response type code; a pure
+	// client_credentials (machine-to-machine) client has no browser response.
+	if hasCode && (len(responses) != 1 || responses[0] != "code") {
+		return nil, nil, fmt.Errorf("%w: authorization_code requires response type code", ErrInvalidInput)
 	}
 	return grants, responses, nil
 }

@@ -494,6 +494,12 @@ SELECT data_json FROM credbound_oauth_authorization_codes WHERE id = ?1;
 UPDATE credbound_oauth_authorization_codes SET used_at = ?2, data_json = ?3
 WHERE id = ?1 AND used_at IS NULL AND expires_at > ?4;
 
+-- name: OAuthInsertClientAccessToken :exec
+INSERT INTO credbound_oauth_client_access_tokens (id, prefix, client_record_id, data_json) VALUES (?1, ?2, ?3, ?4);
+
+-- name: OAuthClientAccessTokenJSONByPrefix :one
+SELECT data_json FROM credbound_oauth_client_access_tokens WHERE prefix = ?1;
+
 -- name: OAuthInsertAccessToken :exec
 INSERT INTO credbound_oauth_access_tokens (id, prefix, grant_id, data_json) VALUES (?1, ?2, ?3, ?4);
 

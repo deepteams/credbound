@@ -1720,6 +1720,17 @@ func (q *Queries) OAuthAuthorizationCodeJSONByPrefix(ctx context.Context, prefix
 	return data_json, err
 }
 
+const oAuthClientAccessTokenJSONByPrefix = `-- name: OAuthClientAccessTokenJSONByPrefix :one
+SELECT data_json FROM credbound_oauth_client_access_tokens WHERE prefix = ?1
+`
+
+func (q *Queries) OAuthClientAccessTokenJSONByPrefix(ctx context.Context, prefix string) (string, error) {
+	row := q.db.QueryRowContext(ctx, oAuthClientAccessTokenJSONByPrefix, prefix)
+	var data_json string
+	err := row.Scan(&data_json)
+	return data_json, err
+}
+
 const oAuthClientJSONByClientID = `-- name: OAuthClientJSONByClientID :one
 SELECT data_json FROM credbound_oauth_clients WHERE issuer_id = ?1 AND client_id = ?2
 `
@@ -2050,6 +2061,27 @@ func (q *Queries) OAuthInsertClient(ctx context.Context, arg OAuthInsertClientPa
 		arg.IssuerID,
 		arg.ClientID,
 		arg.CreatedAt,
+		arg.DataJson,
+	)
+	return err
+}
+
+const oAuthInsertClientAccessToken = `-- name: OAuthInsertClientAccessToken :exec
+INSERT INTO credbound_oauth_client_access_tokens (id, prefix, client_record_id, data_json) VALUES (?1, ?2, ?3, ?4)
+`
+
+type OAuthInsertClientAccessTokenParams struct {
+	ID             string `json:"id"`
+	Prefix         string `json:"prefix"`
+	ClientRecordID string `json:"client_record_id"`
+	DataJson       string `json:"data_json"`
+}
+
+func (q *Queries) OAuthInsertClientAccessToken(ctx context.Context, arg OAuthInsertClientAccessTokenParams) error {
+	_, err := q.db.ExecContext(ctx, oAuthInsertClientAccessToken,
+		arg.ID,
+		arg.Prefix,
+		arg.ClientRecordID,
 		arg.DataJson,
 	)
 	return err

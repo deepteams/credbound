@@ -88,10 +88,13 @@ func TestOAuthProtocolValidationHelpers(t *testing.T) {
 	if err != nil || len(grants) != 1 || responses[0] != "code" {
 		t.Fatalf("default flow = %v/%v, %v", grants, responses, err)
 	}
-	for _, grants := range [][]string{{"client_credentials"}, {"refresh_token"}} {
+	for _, grants := range [][]string{{"refresh_token"}, {"nope"}} {
 		if _, _, err := normalizeOAuthFlowMetadata(grants, nil); err == nil {
 			t.Fatalf("invalid grants accepted: %v", grants)
 		}
+	}
+	if g, _, err := normalizeOAuthFlowMetadata([]string{"client_credentials"}, nil); err != nil || len(g) != 1 {
+		t.Fatalf("client_credentials-only grant = %v, %v", g, err)
 	}
 	if _, _, err := normalizeOAuthFlowMetadata([]string{"authorization_code"}, []string{"token"}); err == nil {
 		t.Fatal("implicit response accepted")

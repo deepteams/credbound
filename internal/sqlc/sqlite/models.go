@@ -107,6 +107,13 @@ type CredboundOauthClient struct {
 	DataJson  string    `json:"data_json"`
 }
 
+type CredboundOauthClientAccessToken struct {
+	ID             string `json:"id"`
+	Prefix         string `json:"prefix"`
+	ClientRecordID string `json:"client_record_id"`
+	DataJson       string `json:"data_json"`
+}
+
 type CredboundOauthGrant struct {
 	ID             string    `json:"id"`
 	ClientRecordID string    `json:"client_record_id"`

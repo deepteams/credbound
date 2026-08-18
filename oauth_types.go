@@ -244,6 +244,23 @@ type OAuthAccessToken struct {
 	RevokedAt      *time.Time
 }
 
+// OAuthClientAccessToken is the persisted metadata of a client-credentials
+// access token: a machine-to-machine bearer with no user subject, bound to a
+// client, resource and workspace. It has no refresh token (RFC 6749 §4.4.3);
+// revocation is implicit when the client, resource or issuer is disabled.
+type OAuthClientAccessToken struct {
+	ID             string
+	Prefix         string
+	Digest         []byte
+	ClientRecordID string
+	IssuerID       string
+	ResourceID     string
+	WorkspaceID    string
+	Scopes         []string
+	CreatedAt      time.Time
+	ExpiresAt      time.Time
+}
+
 // OAuthRefreshToken is the persisted metadata of a rotating refresh token.
 // Tokens descending from the same initial issuance share a FamilyID; reuse
 // of a rotated token revokes the whole family.
@@ -438,6 +455,20 @@ type BeginOAuthAuthorizationInput struct {
 	// re-authenticates the user. Zero leaves the decision to the per-scope
 	// server policy alone.
 	MaxAge time.Duration
+}
+
+// OAuthClientCredentialsInput authenticates a confidential client and requests
+// a machine-to-machine access token bound to a protected resource. Scopes may
+// be empty to receive every non-reserved scope the resource defines that the
+// client is registered for.
+type OAuthClientCredentialsInput struct {
+	Issuer              string
+	ClientID            string
+	ClientSecret        string
+	ClientAssertion     string
+	ClientAssertionType string
+	Resource            string
+	Scopes              []string
 }
 
 // OAuthConsentScope is one scope of a pending consent with its

@@ -669,6 +669,46 @@ func (s *Store) OAuthAccessTokenByPrefix(ctx context.Context, prefix string) (cr
 	return cloneOAuthAccessToken(s.oauthAccessTokens[id]), nil
 }
 
+func cloneOAuthClientAccessToken(v credbound.OAuthClientAccessToken) credbound.OAuthClientAccessToken {
+	v.Digest = slices.Clone(v.Digest)
+	v.Scopes = slices.Clone(v.Scopes)
+	return v
+}
+
+// CreateOAuthClientAccessToken stores a client-credentials access token.
+func (s *Store) CreateOAuthClientAccessToken(ctx context.Context, value credbound.OAuthClientAccessToken, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.oauthClientTokenKeys[value.Prefix]; ok {
+		return credbound.ErrConflict
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	s.oauthClientTokens[value.ID] = cloneOAuthClientAccessToken(value)
+	s.oauthClientTokenKeys[value.Prefix] = value.ID
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+// OAuthClientAccessTokenByPrefix returns the client-credentials access token
+// addressed by its lookup prefix.
+func (s *Store) OAuthClientAccessTokenByPrefix(ctx context.Context, prefix string) (credbound.OAuthClientAccessToken, error) {
+	if err := ctx.Err(); err != nil {
+		return credbound.OAuthClientAccessToken{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id, ok := s.oauthClientTokenKeys[prefix]
+	if !ok {
+		return credbound.OAuthClientAccessToken{}, credbound.ErrNotFound
+	}
+	return cloneOAuthClientAccessToken(s.oauthClientTokens[id]), nil
+}
+
 // OAuthRefreshTokenByPrefix returns the refresh token record addressed by
 // its lookup prefix.
 func (s *Store) OAuthRefreshTokenByPrefix(ctx context.Context, prefix string) (credbound.OAuthRefreshToken, error) {

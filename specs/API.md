@@ -208,6 +208,7 @@ ValidateOAuthAuthorizationRedirect(ctx, issuerURL, clientID, redirectURI) error
 CompleteOAuthAuthorization(ctx, authn, continuation, approved) (OAuthAuthorizationResult, error)
 ExchangeOAuthAuthorizationCode(ctx, ExchangeOAuthAuthorizationCodeInput) (OAuthTokenResponse, error)
 RefreshOAuthToken(ctx, RefreshOAuthTokenInput) (OAuthTokenResponse, error)
+IssueOAuthClientCredentials(ctx, OAuthClientCredentialsInput) (OAuthTokenResponse, error)
 RevokeOAuthToken(ctx, RevokeOAuthTokenInput) error
 RevokeOAuthGrant(ctx, authn, grantID) error
 OAuthIssuers(ctx, authn, PageRequest) iter.Seq2[PageEvent[OAuthIssuer], error]

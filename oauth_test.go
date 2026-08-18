@@ -971,3 +971,71 @@ type rejectOAuthHook struct {
 func (rejectOAuthHook) ApplyOAuthChange(context.Context, credbound.Tx, credbound.OAuthChange) error {
 	return credbound.ErrForbidden
 }
+
+// TestOAuthClientCredentials exercises the machine-to-machine grant: a
+// confidential client obtains a userless access token bound to a resource, the
+// token authenticates with no user subject, and the guard rails hold.
+func TestOAuthClientCredentials(t *testing.T) {
+	f := newOAuthFixture(t)
+	ctx := context.Background()
+	actor, workspace := f.bootstrap(t)
+	root := aal2(actor.UserID, f.now)
+
+	issuer, err := f.manager.CreateOAuthIssuer(ctx, root, credbound.TrustedRequest{Local: true}, credbound.CreateOAuthIssuerInput{
+		Issuer: "https://auth.example.com", OIDCEnabled: true, CIMDMode: credbound.OAuthCIMDDisabled, DCRMode: credbound.OAuthDCRDisabled,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource, err := f.manager.CreateOAuthProtectedResource(ctx, root, workspace.ID, credbound.CreateOAuthProtectedResourceInput{
+		IssuerID: issuer.ID, Resource: "https://mcp.example.com/workspaces/acme",
+		Scopes: []credbound.OAuthScopeDefinition{{Name: "documents.read", Description: "Read", Permissions: []credbound.WorkspacePermission{credbound.PermissionWorkspaceAccess}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := f.manager.PreRegisterOAuthClient(ctx, root, credbound.TrustedRequest{Local: true}, issuer.ID, credbound.OAuthClientRegistrationInput{
+		Name: "Service", ApplicationType: credbound.OAuthApplicationWeb, RedirectURIs: []string{"https://svc.example.com/cb"},
+		GrantTypes: []string{"client_credentials"}, Scopes: []string{"documents.read"}, TokenEndpointAuthMethod: credbound.OAuthAuthClientSecretBasic,
+	})
+	if err != nil || client.ClientSecret == "" {
+		t.Fatalf("client = %#v, %v", client, err)
+	}
+
+	// A public client (or the wrong secret) cannot use the grant.
+	if _, err := f.manager.IssueOAuthClientCredentials(ctx, credbound.OAuthClientCredentialsInput{
+		Issuer: issuer.Issuer, ClientID: client.Client.ClientID, ClientSecret: "wrong", Resource: resource.Resource,
+	}); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("wrong secret = %v", err)
+	}
+	// A scope the client is not registered for is refused.
+	if _, err := f.manager.IssueOAuthClientCredentials(ctx, credbound.OAuthClientCredentialsInput{
+		Issuer: issuer.Issuer, ClientID: client.Client.ClientID, ClientSecret: client.ClientSecret, Resource: resource.Resource, Scopes: []string{"documents.write"},
+	}); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("unregistered scope = %v", err)
+	}
+
+	// The happy path issues a Bearer token with no refresh token.
+	tokens, err := f.manager.IssueOAuthClientCredentials(ctx, credbound.OAuthClientCredentialsInput{
+		Issuer: issuer.Issuer, ClientID: client.Client.ClientID, ClientSecret: client.ClientSecret, Resource: resource.Resource, Scopes: []string{"documents.read"},
+	})
+	if err != nil || tokens.AccessToken == "" || tokens.RefreshToken != "" || tokens.TokenType != "Bearer" || tokens.Scope != "documents.read" {
+		t.Fatalf("client-credentials tokens = %#v, %v", tokens, err)
+	}
+	// The token authenticates with a client subject and no user.
+	principal, err := f.manager.AuthenticateOAuthAccessToken(ctx, resource.Resource, tokens.AccessToken)
+	if err != nil || principal.UserID != "" || principal.ClientID != client.Client.ClientID || !principal.HasScope("documents.read") || principal.WorkspaceID != workspace.ID {
+		t.Fatalf("principal = %#v, %v", principal, err)
+	}
+	// It is rejected for a different resource.
+	if _, err := f.manager.AuthenticateOAuthAccessToken(ctx, "https://other.example.com/x", tokens.AccessToken); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("wrong-resource auth = %v", err)
+	}
+	// Disabling the client revokes its tokens implicitly.
+	if err := f.manager.DisableOAuthClient(ctx, root, credbound.TrustedRequest{Local: true}, client.Client.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.AuthenticateOAuthAccessToken(ctx, resource.Resource, tokens.AccessToken); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("disabled-client auth = %v", err)
+	}
+}

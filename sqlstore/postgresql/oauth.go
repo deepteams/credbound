@@ -316,6 +316,19 @@ func (s *Store) OAuthAccessTokenByPrefix(ctx context.Context, prefix string) (cr
 	return oauthDecodeQuery[credbound.OAuthAccessToken](s.queries.OAuthAccessTokenJSONByPrefix(ctx, prefix))
 }
 
+// CreateOAuthClientAccessToken stores a client-credentials access token.
+func (s *Store) CreateOAuthClientAccessToken(ctx context.Context, value credbound.OAuthClientAccessToken, commit credbound.Commit) error {
+	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
+		return mapError(q.OAuthInsertClientAccessToken(ctx, db.OAuthInsertClientAccessTokenParams{ID: value.ID, Prefix: value.Prefix, ClientRecordID: value.ClientRecordID, DataJson: oauthParam(value)}))
+	})
+}
+
+// OAuthClientAccessTokenByPrefix returns the client-credentials access token
+// addressed by its lookup prefix.
+func (s *Store) OAuthClientAccessTokenByPrefix(ctx context.Context, prefix string) (credbound.OAuthClientAccessToken, error) {
+	return oauthDecodeQuery[credbound.OAuthClientAccessToken](s.queries.OAuthClientAccessTokenJSONByPrefix(ctx, prefix))
+}
+
 // OAuthRefreshTokenByPrefix returns the refresh token record addressed by
 // its lookup prefix.
 func (s *Store) OAuthRefreshTokenByPrefix(ctx context.Context, prefix string) (credbound.OAuthRefreshToken, error) {

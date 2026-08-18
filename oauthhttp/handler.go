@@ -260,6 +260,12 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 			ClientAssertionType: form.Get("client_assertion_type"),
 			RefreshToken:        form.Get("refresh_token"), Resource: form.Get("resource"), Scopes: strings.Fields(form.Get("scope")),
 		})
+	case "client_credentials":
+		result, err = h.manager.IssueOAuthClientCredentials(r.Context(), credbound.OAuthClientCredentialsInput{
+			Issuer: h.config.Issuer, ClientID: clientID, ClientSecret: secret, ClientAssertion: form.Get("client_assertion"),
+			ClientAssertionType: form.Get("client_assertion_type"),
+			Resource:            form.Get("resource"), Scopes: strings.Fields(form.Get("scope")),
+		})
 	default:
 		h.writeOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "unsupported grant_type")
 		return

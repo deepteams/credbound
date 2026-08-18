@@ -79,6 +79,100 @@ func (m *Manager) ExchangeOAuthAuthorizationCode(ctx context.Context, input Exch
 	}, nil
 }
 
+// IssueOAuthClientCredentials authenticates a confidential client and issues a
+// machine-to-machine access token bound to a protected resource, with no user
+// subject and no refresh token (RFC 6749 §4.4). The client must authenticate
+// (client_secret or private_key_jwt, never a public client) and be registered
+// for the client_credentials grant; the requested scopes must be non-reserved
+// scopes the resource defines and the client is allowed. Revocation is implicit
+// when the client, resource or issuer is disabled.
+func (m *Manager) IssueOAuthClientCredentials(ctx context.Context, input OAuthClientCredentialsInput) (_ OAuthTokenResponse, err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "oauth.token.client_credentials", started, err) }()
+	store, _, err := m.requireOAuth()
+	if err != nil {
+		return OAuthTokenResponse{}, err
+	}
+	issuer, client, err := m.authenticateOAuthClient(ctx, input.Issuer, input.ClientID, input.ClientSecret, input.ClientAssertion, input.ClientAssertionType)
+	if err != nil {
+		return OAuthTokenResponse{}, err
+	}
+	if client.TokenEndpointAuthMethod == OAuthAuthNone || !slices.Contains(client.GrantTypes, "client_credentials") {
+		return OAuthTokenResponse{}, ErrForbidden
+	}
+	resourceURL, err := validateResourceURL(input.Resource)
+	if err != nil {
+		return OAuthTokenResponse{}, err
+	}
+	resource, err := store.OAuthProtectedResourceByURI(ctx, resourceURL)
+	if err != nil || resource.IssuerID != issuer.ID || resource.DisabledAt != nil {
+		return OAuthTokenResponse{}, ErrForbidden
+	}
+	scopes, err := clientCredentialsScopes(client, resource, input.Scopes)
+	if err != nil {
+		return OAuthTokenResponse{}, err
+	}
+	id, err := m.newID()
+	if err != nil {
+		return OAuthTokenResponse{}, err
+	}
+	prefix, raw, err := m.newOAuthBearer("cba")
+	if err != nil {
+		return OAuthTokenResponse{}, err
+	}
+	now := m.now()
+	token := OAuthClientAccessToken{
+		ID: id, Prefix: prefix, Digest: m.oauthDigest("access-token", raw),
+		ClientRecordID: client.ID, IssuerID: issuer.ID, ResourceID: resource.ID, WorkspaceID: resource.WorkspaceID,
+		Scopes: scopes, CreatedAt: now, ExpiresAt: now.Add(issuer.AccessTokenTTL),
+	}
+	audit, err := m.newAudit(ctx, client.ID, "oauth.token.client_credentials", "oauth_client", client.ID, resource.WorkspaceID, AuditSucceeded, "")
+	if err != nil {
+		return OAuthTokenResponse{}, err
+	}
+	audit.ActorKind = ActorService
+	if err := store.CreateOAuthClientAccessToken(ctx, token, Commit{Audit: audit}); err != nil {
+		return OAuthTokenResponse{}, m.mapOAuthCredentialStoreError(ctx, "oauth.token.client_credentials", err)
+	}
+	return OAuthTokenResponse{
+		AccessToken: raw, TokenType: "Bearer", ExpiresIn: int64(issuer.AccessTokenTTL / time.Second),
+		Scope: strings.Join(scopes, " "),
+	}, nil
+}
+
+// clientCredentialsScopes resolves the scopes a client-credentials token may
+// carry: non-reserved scopes the resource defines and the client is registered
+// for. An empty request grants every eligible resource scope.
+func clientCredentialsScopes(client OAuthClient, resource OAuthProtectedResource, requested []string) ([]string, error) {
+	allowed := func(scope string) bool {
+		if oauthReservedScope(scope) {
+			return false
+		}
+		if _, ok := oauthScopeDefinition(resource.Scopes, scope); !ok {
+			return false
+		}
+		return len(client.Scopes) == 0 || slices.Contains(client.Scopes, scope)
+	}
+	if len(requested) == 0 {
+		granted := make([]string, 0, len(resource.Scopes))
+		for _, definition := range resource.Scopes {
+			if allowed(definition.Name) {
+				granted = append(granted, definition.Name)
+			}
+		}
+		return granted, nil
+	}
+	granted := make([]string, 0, len(requested))
+	for _, scope := range requested {
+		scope = strings.TrimSpace(scope)
+		if !allowed(scope) {
+			return nil, ErrForbidden
+		}
+		granted = append(granted, scope)
+	}
+	return granted, nil
+}
+
 // RefreshOAuthToken rotates a refresh token: it authenticates the client,
 // re-validates the grant, and atomically retires the presented token while
 // issuing a new access/refresh pair, optionally narrowed to a subset of the
@@ -225,6 +319,11 @@ func (m *Manager) AuthenticateOAuthAccessToken(ctx context.Context, resourceURI,
 		return OAuthAuthentication{}, ErrInvalidCredentials
 	}
 	token, err := store.OAuthAccessTokenByPrefix(ctx, prefix)
+	if errors.Is(err, ErrNotFound) {
+		// A "cba" bearer that is not a user access token may be a
+		// client-credentials token, stored separately and with no user subject.
+		return m.authenticateOAuthClientToken(ctx, store, prefix, raw, resourceURI)
+	}
 	if err != nil || token.RevokedAt != nil || !m.now().Before(token.ExpiresAt) || !hmac.Equal(token.Digest, m.oauthDigest("access-token", raw)) {
 		return OAuthAuthentication{}, ErrInvalidCredentials
 	}
@@ -239,6 +338,44 @@ func (m *Manager) AuthenticateOAuthAccessToken(ctx context.Context, resourceURI,
 	return OAuthAuthentication{
 		TokenID: token.ID, GrantID: grant.ID, ClientRecordID: client.ID, ClientID: client.ClientID,
 		UserID: token.UserID, WorkspaceID: token.WorkspaceID, Resource: resource.Resource,
+		Scopes: slices.Clone(token.Scopes), AuthenticatedAt: m.now(),
+	}, nil
+}
+
+// authenticateOAuthClientToken validates a client-credentials access token. It
+// mirrors the resource-server checks of the user path — token freshness and
+// digest, client/issuer/resource enabled, resource match — but carries no user
+// subject, so the returned OAuthAuthentication has an empty UserID.
+func (m *Manager) authenticateOAuthClientToken(ctx context.Context, store OAuthStore, prefix, raw, resourceURI string) (OAuthAuthentication, error) {
+	token, err := store.OAuthClientAccessTokenByPrefix(ctx, prefix)
+	if err != nil || !m.now().Before(token.ExpiresAt) || !hmac.Equal(token.Digest, m.oauthDigest("access-token", raw)) {
+		return OAuthAuthentication{}, ErrInvalidCredentials
+	}
+	client, err := store.OAuthClientByID(ctx, token.ClientRecordID)
+	if err != nil || client.DisabledAt != nil {
+		return OAuthAuthentication{}, ErrInvalidCredentials
+	}
+	issuer, err := store.OAuthIssuerByID(ctx, token.IssuerID)
+	if err != nil || issuer.DisabledAt != nil {
+		return OAuthAuthentication{}, ErrInvalidCredentials
+	}
+	resource, err := store.OAuthProtectedResourceByID(ctx, token.ResourceID)
+	if err != nil || resource.DisabledAt != nil || resource.IssuerID != issuer.ID || resource.WorkspaceID != token.WorkspaceID {
+		return OAuthAuthentication{}, ErrInvalidCredentials
+	}
+	if resourceURI != "" {
+		normalized, normalizeErr := validateResourceURL(resourceURI)
+		if normalizeErr != nil || normalized != resource.Resource {
+			return OAuthAuthentication{}, ErrInvalidCredentials
+		}
+	}
+	workspace, err := m.store.WorkspaceByID(ctx, token.WorkspaceID)
+	if err != nil || workspace.DisabledAt != nil {
+		return OAuthAuthentication{}, ErrInvalidCredentials
+	}
+	return OAuthAuthentication{
+		TokenID: token.ID, ClientRecordID: client.ID, ClientID: client.ClientID,
+		WorkspaceID: token.WorkspaceID, Resource: resource.Resource,
 		Scopes: slices.Clone(token.Scopes), AuthenticatedAt: m.now(),
 	}, nil
 }
@@ -315,7 +452,7 @@ func (m *Manager) OAuthAuthorizationServerMetadata(ctx context.Context, issuerUR
 	result := OAuthAuthorizationServerMetadata{
 		Issuer: issuer.Issuer, AuthorizationEndpoint: issuer.Issuer + "/authorize",
 		TokenEndpoint: issuer.Issuer + "/token", RevocationEndpoint: issuer.Issuer + "/revoke",
-		ResponseTypesSupported: []string{"code"}, GrantTypesSupported: []string{"authorization_code", "refresh_token"},
+		ResponseTypesSupported: []string{"code"}, GrantTypesSupported: []string{"authorization_code", "refresh_token", "client_credentials"},
 		TokenEndpointAuthMethodsSupported: []string{string(OAuthAuthNone), string(OAuthAuthPrivateKeyJWT), string(OAuthAuthClientSecretBasic)},
 		CodeChallengeMethodsSupported:     []string{"S256"}, AuthorizationResponseIssuerParameterSupport: true,
 		ClientIDMetadataDocumentSupported: issuer.CIMDMode != OAuthCIMDDisabled,
