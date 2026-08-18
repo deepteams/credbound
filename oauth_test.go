@@ -115,6 +115,20 @@ func TestOAuthAPIsRequireConfiguration(t *testing.T) {
 	assertLifecycleError(t, f.manager.OAuthGrants(ctx, actor, "workspace", credbound.PageRequest{}), credbound.ErrNotSupported)
 }
 
+// TestOAuthConfigRequiresCapableStore checks that enabling Config.OAuth with a
+// Store that cannot back it fails construction instead of surfacing
+// ErrNotSupported from every OAuth call at runtime.
+func TestOAuthConfigRequiresCapableStore(t *testing.T) {
+	_, err := credbound.New(credbound.Config{
+		Store: coreStore{Store: memory.New()}, Passwords: &fakePasswords{}, TOTP: fakeTOTP{}, Passkeys: &fakePasskeys{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		OAuth: &credbound.OAuthConfig{Pepper: bytesOf(4, 32), OIDCSigner: fakeOIDCSigner{}},
+	})
+	if !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("Config.OAuth with incapable store = %v, want ErrInvalidInput", err)
+	}
+}
+
 func TestOAuthAuthorizationRefreshAndDCR(t *testing.T) {
 	f := newOAuthFixture(t)
 	ctx := context.Background()

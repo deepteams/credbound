@@ -371,6 +371,11 @@ func New(cfg Config) (*Manager, error) {
 	domainStore, _ := cfg.Store.(DomainStore)
 	var signupConfig *SignUpConfig
 	if cfg.SignUp != nil {
+		// SignUp is an explicit opt-in, so a Store that cannot back it is a
+		// configuration error, not a silently disabled capability.
+		if _, ok := cfg.Store.(SignupStore); !ok {
+			return nil, fmt.Errorf("%w: Config.SignUp is set but Store does not implement SignupStore", ErrInvalidInput)
+		}
 		signupConfig = &SignUpConfig{AutoVerifyEmail: cfg.SignUp.AutoVerifyEmail}
 	}
 	var oauthStore OAuthStore
@@ -379,7 +384,13 @@ func New(cfg Config) (*Manager, error) {
 		if len(cfg.OAuth.Pepper) < 32 {
 			return nil, fmt.Errorf("%w: OAuth pepper must contain at least 32 bytes", ErrInvalidInput)
 		}
-		oauthStore, _ = cfg.Store.(OAuthStore)
+		// Config.OAuth is explicit intent: fail construction rather than let
+		// every OAuth operation surface ErrNotSupported at runtime.
+		var ok bool
+		oauthStore, ok = cfg.Store.(OAuthStore)
+		if !ok {
+			return nil, fmt.Errorf("%w: Config.OAuth is set but Store does not implement OAuthStore", ErrInvalidInput)
+		}
 		oauthConfig = &OAuthConfig{
 			Pepper: append([]byte(nil), cfg.OAuth.Pepper...), MetadataFetcher: cfg.OAuth.MetadataFetcher,
 			ClientAssertions: cfg.OAuth.ClientAssertions, OIDCSigner: cfg.OAuth.OIDCSigner,

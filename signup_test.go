@@ -85,10 +85,15 @@ func TestSignUpNotSupported(t *testing.T) {
 	if _, err := f.manager.SignUp(ctx, signUpInput("visitor@example.com")); !errors.Is(err, credbound.ErrNotSupported) {
 		t.Fatalf("disabled signup error = %v", err)
 	}
-	// Config.SignUp set but the store lacks the SignupStore capability.
-	limited := newSignupFixture(t, false, coreStore{Store: memory.New()})
-	if _, err := limited.manager.SignUp(ctx, signUpInput("visitor@example.com")); !errors.Is(err, credbound.ErrNotSupported) {
-		t.Fatalf("incapable store signup error = %v", err)
+	// Config.SignUp set but the store lacks the SignupStore capability is a
+	// construction error, not a silently disabled capability.
+	_, err := credbound.New(credbound.Config{
+		Store: coreStore{Store: memory.New()}, Passwords: &fakePasswords{}, TOTP: fakeTOTP{}, Passkeys: &fakePasskeys{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		SignUp: &credbound.SignUpConfig{},
+	})
+	if !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("incapable store with Config.SignUp = %v, want ErrInvalidInput", err)
 	}
 }
 
