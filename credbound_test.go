@@ -658,6 +658,9 @@ func (f *fakePasskeys) BeginDecoyAuthentication(_ context.Context, _ []byte) (js
 	return json.RawMessage(`{"publicKey":{}}`), []byte("decoy-session"), nil
 }
 func (f *fakePasskeys) FinishAuthentication(_ context.Context, _ credbound.PasskeyUser, session, response []byte) ([]byte, []byte, error) {
+	if string(session) == "authentication-session" && string(response) == "cloned" {
+		return nil, nil, credbound.ErrPasskeyCloneDetected
+	}
 	if string(session) != "authentication-session" || string(response) != "valid" {
 		return nil, nil, errors.New("invalid ceremony")
 	}
@@ -672,7 +675,7 @@ func (f *fakePasskeys) FinishDiscoverableAuthentication(ctx context.Context, ses
 	}
 	credentialID := ""
 	switch string(response) {
-	case "valid":
+	case "valid", "cloned":
 		credentialID = "credential"
 	case "unknown":
 		credentialID = "missing"
@@ -681,6 +684,9 @@ func (f *fakePasskeys) FinishDiscoverableAuthentication(ctx context.Context, ses
 	}
 	if _, err := lookup(ctx, []byte(credentialID)); err != nil {
 		return nil, nil, err
+	}
+	if string(response) == "cloned" {
+		return nil, nil, credbound.ErrPasskeyCloneDetected
 	}
 	return []byte(credentialID), []byte(`{"id":"credential","counter":2}`), nil
 }

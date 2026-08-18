@@ -2046,3 +2046,117 @@ func TestPendingSecondFactorCannotBypassMFA(t *testing.T) {
 		t.Fatalf("promoted passkey registration = %v", err)
 	}
 }
+
+// TestPasskeyMidCeremonyRefusals pins the checks that run between Begin and
+// Finish of the passkey ceremonies: a registration continuation bound to
+// another actor or failed by the provider is refused, a cloned authenticator
+// (regressed signature counter) is rejected on both sign-in flows, an account
+// disabled mid-ceremony cannot finish either flow, and a confirmed EnforceSSO
+// domain refuses the usernameless flow against the resolved account's address.
+func TestPasskeyMidCeremonyRefusals(t *testing.T) {
+	provider := &fakeSSOProvider{
+		configurationID: "0198b463-0000-7000-8000-0000000000dd", kind: credbound.SSOProviderOIDC,
+		claims: credbound.SSOClaims{Issuer: "https://idp.example.com", Subject: "subject-passkey"},
+	}
+	f := newFixture(t, provider)
+	authn, workspace := f.bootstrap(t)
+	ctx := context.Background()
+	root := aal2(authn.UserID, f.now)
+	local := credbound.TrustedRequest{Local: true}
+	member, err := f.manager.CreateUser(ctx, root, workspace.ID, credbound.CreateUserInput{
+		Email: "member@corp.example.com", DisplayName: "Member", Password: "another strong password", Role: credbound.RoleMember,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberActor := aal2(member.ID, f.now)
+
+	// A ceremony the provider fails is audited and refused, and its
+	// continuation cannot be finished by a different actor even with a valid
+	// response.
+	failed, err := f.manager.BeginPasskeyRegistration(ctx, memberActor, "Member key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishPasskeyRegistration(ctx, memberActor, failed.Continuation, []byte("bogus")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("failed registration ceremony = %v", err)
+	}
+	if _, err := f.manager.FinishPasskeyRegistration(ctx, root, failed.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("cross-actor registration continuation = %v", err)
+	}
+
+	registration, err := f.manager.BeginPasskeyRegistration(ctx, memberActor, "Member key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishPasskeyRegistration(ctx, memberActor, registration.Continuation, []byte("valid")); err != nil {
+		t.Fatal(err)
+	}
+
+	// A regressed signature counter reports a possibly cloned authenticator:
+	// both the email-first and the usernameless flow refuse it as invalid
+	// credentials.
+	cloned, err := f.manager.BeginPasskeyAuthentication(ctx, "member@corp.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishPasskeyAuthentication(ctx, cloned.Continuation, []byte("cloned")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("cloned email-first sign-in = %v", err)
+	}
+	clonedDiscoverable, err := f.manager.BeginDiscoverablePasskeyAuthentication(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishDiscoverablePasskeyAuthentication(ctx, clonedDiscoverable.Continuation, []byte("cloned")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("cloned discoverable sign-in = %v", err)
+	}
+
+	// An account disabled between Begin and Finish cannot mint AAL2 through
+	// either flow.
+	pendingEmailFirst, err := f.manager.BeginPasskeyAuthentication(ctx, "member@corp.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingDiscoverable, err := f.manager.BeginDiscoverablePasskeyAuthentication(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.DisableUser(ctx, root, local, member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishPasskeyAuthentication(ctx, pendingEmailFirst.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("disabled email-first sign-in = %v", err)
+	}
+	if _, err := f.manager.FinishDiscoverablePasskeyAuthentication(ctx, pendingDiscoverable.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("disabled discoverable sign-in = %v", err)
+	}
+	if err := f.manager.EnableUser(ctx, root, local, member.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// A confirmed EnforceSSO domain refuses the usernameless flow too: the
+	// policy is enforced against the resolved account's primary address, so a
+	// passkey registered before confirmation cannot bypass it.
+	issued, err := f.manager.CreateWorkspaceDomain(ctx, root, workspace.ID, "corp.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.ConfirmWorkspaceDomain(ctx, root, issued.Domain.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.UpdateWorkspaceDomainPolicy(ctx, root, issued.Domain.ID, credbound.WorkspaceDomainPolicyInput{
+		EnforceSSO: true, SSOProviderConfigurationID: provider.configurationID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.BeginPasskeyAuthentication(ctx, "member@corp.example.com"); !errors.Is(err, credbound.ErrSSORequired) {
+		t.Fatalf("email-first begin under EnforceSSO = %v", err)
+	}
+	enforced, err := f.manager.BeginDiscoverablePasskeyAuthentication(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishDiscoverablePasskeyAuthentication(ctx, enforced.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrSSORequired) {
+		t.Fatalf("discoverable finish under EnforceSSO = %v", err)
+	}
+}
