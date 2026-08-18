@@ -87,8 +87,11 @@ func (m *Manager) BeginPasswordReset(ctx context.Context, email string) (_ Issue
 // CompletePasswordReset consumes a reset token and installs the new password.
 // For a passwordless member provisioned by SSO JIT or SCIM this installs
 // their first password: the verified email proof is the same authority every
-// reset rests on, and an address under a confirmed EnforceSSO domain can
-// never reach this path because BeginPasswordReset refuses it up front.
+// reset rests on. An address under a confirmed EnforceSSO domain is refused
+// by BeginPasswordReset up front, and the account's primary address is
+// re-checked here so an in-flight token does not outlive an EnforceSSO
+// confirmation — consuming it would install an unusable password yet still
+// revoke the account's sessions, PATs and grants.
 // As required by the recovery policy, it atomically revokes every PAT and
 // OAuth grant of the account and clears its login throttle. When the store
 // supports sessions (SessionStore) the user's server-side sessions are
@@ -136,6 +139,12 @@ func (m *Manager) CompletePasswordReset(ctx context.Context, raw, newPassword st
 			return User{}, auditErr
 		}
 		return User{}, ErrInvalidCredentials
+	}
+	// SSO-006: see the doc comment — the policy can be confirmed between
+	// issuance and redemption, so the in-flight token is refused rather than
+	// left as a working denial-of-access lever.
+	if ssoErr := m.domainRequiresSSO(ctx, normalizeEmail(user.Email), "password.reset.complete"); ssoErr != nil {
+		return User{}, ssoErr
 	}
 	hash, err := m.passwords.Hash(newPassword)
 	if err != nil {

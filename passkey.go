@@ -241,8 +241,16 @@ func (m *Manager) FinishPasskeyAuthentication(ctx context.Context, continuation 
 	// disabled user) and Finish. Re-check here so the ceremony cannot mint an
 	// AAL2 authentication for a disabled account, mirroring AuthenticatePassword
 	// and FinishSSO.
-	if record, lookupErr := m.store.UserByID(ctx, state.UserID); lookupErr != nil || record.Disabled {
+	record, lookupErr := m.store.UserByID(ctx, state.UserID)
+	if lookupErr != nil || record.Disabled {
 		return Authentication{}, ErrInvalidCredentials
+	}
+	// SSO-006: the policy can also be confirmed between Begin and Finish, so
+	// the resolved account's primary address is re-checked exactly like the
+	// discoverable flow — an in-flight ceremony must not outlive an
+	// EnforceSSO confirmation.
+	if ssoErr := m.domainRequiresSSO(ctx, normalizeEmail(record.Email), "passkey.authentication.finish"); ssoErr != nil {
+		return Authentication{}, ssoErr
 	}
 	credentialID, credentialJSON, err := m.passkeys.FinishAuthentication(ctx, user, state.Session, response)
 	if err != nil {

@@ -154,6 +154,19 @@ func (m *Manager) CompleteEmailOTP(ctx context.Context, continuation, code strin
 		}
 		return Authentication{}, ErrInvalidCredentials
 	}
+	// SSO-006: the policy can be confirmed between issuance and redemption,
+	// so the credential's address is re-checked here — an in-flight code
+	// must not outlive an EnforceSSO confirmation.
+	address, addressErr := m.emailAddressByID(ctx, user.ID, credential.EmailID)
+	if addressErr != nil {
+		if errors.Is(addressErr, ErrNotFound) {
+			return Authentication{}, ErrInvalidCredentials
+		}
+		return Authentication{}, addressErr
+	}
+	if err := m.domainRequiresSSO(ctx, address, "auth.email_otp"); err != nil {
+		return Authentication{}, err
+	}
 	if err := m.requireUnlocked(ctx, user.ID, "auth.email_otp"); err != nil {
 		return Authentication{}, err
 	}

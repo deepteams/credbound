@@ -620,6 +620,39 @@ func TestMagicLinkAuthentication(t *testing.T) {
 	}
 }
 
+// TestEmailCeremonyForRemovedAddressFails: a magic link or email OTP issued
+// for an address that is removed before redemption must fail like any invalid
+// credential — the mailbox proof no longer names an address of the account.
+func TestEmailCeremonyForRemovedAddressFails(t *testing.T) {
+	f := newFixture(t)
+	authn, _ := f.bootstrap(t)
+	ctx := context.Background()
+	issued, err := f.manager.BeginEmailAddition(ctx, authn, "alias@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.ConfirmEmail(ctx, issued.Token); err != nil {
+		t.Fatal(err)
+	}
+	link, err := f.manager.BeginEmailAuthentication(ctx, "alias@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otp, err := f.manager.BeginEmailOTP(ctx, "alias@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.RemoveEmail(ctx, aal2(authn.UserID, f.now), issued.Email.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.CompleteEmailAuthentication(ctx, link.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("magic link for removed address = %v", err)
+	}
+	if _, err := f.manager.CompleteEmailOTP(ctx, otp.Continuation, otp.Code); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("email OTP for removed address = %v", err)
+	}
+}
+
 func TestRevokeUserCredentials(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)

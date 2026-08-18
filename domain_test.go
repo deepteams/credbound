@@ -424,6 +424,71 @@ func TestDomainEnforcedSSO(t *testing.T) {
 	}
 }
 
+// TestDomainEnforcedSSOInFlightCeremonies proves enforcement at redemption:
+// a ceremony issued before EnforceSSO is confirmed must be refused when it is
+// consumed after, otherwise the policy only binds sign-ins started after the
+// switch and every in-flight token remains a working non-SSO login.
+func TestDomainEnforcedSSOInFlightCeremonies(t *testing.T) {
+	provider := jitProvider("subject-1", "root@example.com", true)
+	f := newFixture(t, provider)
+	ctx := context.Background()
+	authn, workspace := f.bootstrap(t)
+	stepUp := aal2(authn.UserID, f.now)
+
+	challenge, err := f.manager.BeginPasskeyRegistration(ctx, stepUp, "MacBook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishPasskeyRegistration(ctx, stepUp, challenge.Continuation, []byte("valid")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Every ceremony starts while the domain is unenforced.
+	link, err := f.manager.BeginEmailAuthentication(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otp, err := f.manager.BeginEmailOTP(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	passkeyLogin, err := f.manager.BeginPasskeyAuthentication(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reset, err := f.manager.BeginPasswordReset(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	issued, err := f.manager.CreateWorkspaceDomain(ctx, stepUp, workspace.ID, "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.ConfirmWorkspaceDomain(ctx, stepUp, issued.Domain.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.UpdateWorkspaceDomainPolicy(ctx, stepUp, issued.Domain.ID, credbound.WorkspaceDomainPolicyInput{
+		AutoJoin: true, SSOProviderConfigurationID: domainProviderA, EnforceSSO: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Redeeming any of them now answers the enforcement sentinel.
+	if _, err := f.manager.CompleteEmailAuthentication(ctx, link.Token); !errors.Is(err, credbound.ErrSSORequired) {
+		t.Fatalf("in-flight magic link error = %v", err)
+	}
+	if _, err := f.manager.CompleteEmailOTP(ctx, otp.Continuation, otp.Code); !errors.Is(err, credbound.ErrSSORequired) {
+		t.Fatalf("in-flight email OTP error = %v", err)
+	}
+	if _, err := f.manager.FinishPasskeyAuthentication(ctx, passkeyLogin.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrSSORequired) {
+		t.Fatalf("in-flight passkey ceremony error = %v", err)
+	}
+	if _, err := f.manager.CompletePasswordReset(ctx, reset.Token, "fresh account password"); !errors.Is(err, credbound.ErrSSORequired) {
+		t.Fatalf("in-flight password reset error = %v", err)
+	}
+}
+
 func setupJITDomain(t *testing.T, f *fixture, workspaceID string, actor credbound.Authentication, policy credbound.WorkspaceDomainPolicyInput) credbound.WorkspaceDomain {
 	t.Helper()
 	ctx := context.Background()

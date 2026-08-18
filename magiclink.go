@@ -134,6 +134,19 @@ func (m *Manager) CompleteEmailAuthentication(ctx context.Context, raw string) (
 		}
 		return Authentication{}, ErrInvalidCredentials
 	}
+	// SSO-006: the policy can be confirmed between issuance and redemption,
+	// so the credential's address is re-checked here — an in-flight magic
+	// link must not outlive an EnforceSSO confirmation.
+	address, addressErr := m.emailAddressByID(ctx, user.ID, credential.EmailID)
+	if addressErr != nil {
+		if errors.Is(addressErr, ErrNotFound) {
+			return Authentication{}, ErrInvalidCredentials
+		}
+		return Authentication{}, addressErr
+	}
+	if err := m.domainRequiresSSO(ctx, address, "auth.email_link"); err != nil {
+		return Authentication{}, err
+	}
 	// Redeeming the link proves control of the mailbox, so — exactly like
 	// CompleteEmailOTP — a locked account answers ErrLocked here without
 	// becoming an enumeration oracle.
@@ -170,6 +183,19 @@ func (m *Manager) CompleteEmailAuthentication(ctx context.Context, raw string) (
 	}
 	m.emitAuthenticationSucceeded(ctx, "auth.email_link.complete", event, authentication)
 	return authentication, nil
+}
+
+// emailAddressByID resolves one of the user's address records by ID.
+func (m *Manager) emailAddressByID(ctx context.Context, userID, emailID string) (string, error) {
+	for email, err := range m.userEmails(ctx, userID) {
+		if err != nil {
+			return "", err
+		}
+		if email.ID == emailID {
+			return email.Address, nil
+		}
+	}
+	return "", ErrNotFound
 }
 
 // verifiedEmailID resolves the verified address record used by a magic link.
