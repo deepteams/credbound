@@ -115,6 +115,12 @@ func TestTOTPRecoveryAndReplayProtection(t *testing.T) {
 	if err != nil || len(codes) != 10 {
 		t.Fatalf("recovery codes = %d, %v", len(codes), err)
 	}
+	// The enrollment code's step is now consumed: replaying it as a full second
+	// factor within the same window is rejected.
+	if _, err := f.manager.VerifyTOTP(context.Background(), authn, "123456"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("enrollment code replay error = %v", err)
+	}
+	f.now = f.now.Add(30 * time.Second)
 	promoted, err := f.manager.VerifyTOTP(context.Background(), authn, "123456")
 	if err != nil || promoted.Level != credbound.AAL2 || promoted.Method != credbound.MethodTOTP {
 		t.Fatalf("promoted = %#v, %v", promoted, err)

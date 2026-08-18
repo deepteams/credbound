@@ -209,7 +209,17 @@ func TestPATPasskeyAndTOTPFailurePaths(t *testing.T) {
 	base := memory.New()
 	fault := &faultStore{Store: base}
 	passkeys := &failingPasskeys{}
-	manager := managerWith(t, fault, &fakePasswords{}, fakeTOTP{}, passkeys, nil)
+	// A mutable clock: ConfirmTOTPEnrollment now consumes its step, so later
+	// TOTP operations must fall in a fresh step.
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	manager, err := credbound.New(credbound.Config{
+		Store: fault, Passwords: &fakePasswords{}, TOTP: fakeTOTP{}, Passkeys: passkeys,
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		Clock: func() time.Time { return now }, Random: &counterReader{next: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	authn, workspace, err := manager.Bootstrap(ctx, credbound.BootstrapInput{
 		Email: "root@example.com", DisplayName: "Root", Password: "correct horse battery", WorkspaceName: "Main",
 	})
@@ -244,6 +254,9 @@ func TestPATPasskeyAndTOTPFailurePaths(t *testing.T) {
 		t.Fatalf("recovery audit failure = %v", err)
 	}
 	fault.consumeRecoveryErr = nil
+	// Move to a fresh step so the disable code is not rejected as a replay of
+	// the step the enrollment/verification already consumed.
+	now = now.Add(30 * time.Second)
 	fault.disableTOTPErr = credbound.ErrAuditUnavailable
 	if err := manager.DisableTOTP(ctx, authn, "123456"); !errors.Is(err, credbound.ErrAuditUnavailable) {
 		t.Fatalf("disable TOTP audit failure = %v", err)

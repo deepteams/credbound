@@ -42,6 +42,8 @@ func TestCredboundtestTOTPEnrollmentAndVerification(t *testing.T) {
 	if err != nil || len(codes) == 0 {
 		t.Fatalf("recovery codes = %d, %v", len(codes), err)
 	}
+	// Enrollment consumes its step, so verifying needs the next one.
+	clock.Advance(30 * time.Second)
 	promoted, err := manager.VerifyTOTP(context.Background(), authn, credboundtest.ValidTOTPCode)
 	if err != nil || promoted.Level != credbound.AAL2 || promoted.Method != credbound.MethodTOTP {
 		t.Fatalf("promoted = %#v, %v", promoted, err)

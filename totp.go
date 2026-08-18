@@ -80,7 +80,7 @@ func (m *Manager) ConfirmTOTPEnrollment(ctx context.Context, actor Authenticatio
 	if err != nil {
 		return nil, err
 	}
-	_, valid := m.totp.Validate(strings.TrimSpace(code), secret, m.now())
+	step, valid := m.totp.Validate(strings.TrimSpace(code), secret, m.now())
 	if !valid {
 		if auditErr := m.appendAuthenticationAudit(ctx, actor.UserID, "totp.enrollment.confirm", AuditFailed, "invalid_credentials"); auditErr != nil {
 			return nil, auditErr
@@ -92,6 +92,9 @@ func (m *Manager) ConfirmTOTPEnrollment(ctx context.Context, actor Authenticatio
 		return nil, err
 	}
 	factor.Active = true
+	// Record the enrollment code's step as consumed so it cannot be replayed as
+	// a full second factor through VerifyTOTP within its remaining window.
+	factor.LastUsedStep = step
 	factor.UpdatedAt = m.now()
 	event, err := m.newAudit(ctx, actor.UserID, "totp.enrollment.confirm", "user", actor.UserID, "", AuditSucceeded, "")
 	if err != nil {
