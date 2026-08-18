@@ -637,7 +637,8 @@ func TestSSOJITConflictRaceFailsAsUnknownIdentity(t *testing.T) {
 	manager, err := credbound.New(credbound.Config{
 		Store: store, Passwords: &fakePasswords{}, TOTP: fakeTOTP{}, Passkeys: &fakePasskeys{},
 		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
-		SSOProviders: []credbound.SSOProvider{provider},
+		SSOProviders:                 []credbound.SSOProvider{provider},
+		TrustActorDomainVerification: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -875,6 +876,37 @@ func (v *fakeDomainVerifier) VerifyDomain(_ context.Context, domain, challenge s
 		return errors.New("challenge not published in DNS")
 	}
 	return nil
+}
+
+// TestConfirmWorkspaceDomainRequiresVerifierOrOptIn locks the fail-closed
+// default: without a DomainVerifier and without the explicit
+// TrustActorDomainVerification opt-in, confirmation refuses.
+func TestConfirmWorkspaceDomainRequiresVerifierOrOptIn(t *testing.T) {
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	manager, err := credbound.New(credbound.Config{
+		Store: memory.New(), Passwords: &fakePasswords{}, TOTP: fakeTOTP{}, Passkeys: &fakePasskeys{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		Clock: func() time.Time { return now }, Random: &counterReader{next: 0x73},
+		StepUpMaxAge: 10 * time.Minute, CeremonyTTL: 5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	root, workspace, err := manager.Bootstrap(ctx, credbound.BootstrapInput{
+		Email: "root@example.com", DisplayName: "Root", Password: "correct horse battery", WorkspaceName: "Main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := aal2(root.UserID, now)
+	issued, err := manager.CreateWorkspaceDomain(ctx, actor, workspace.ID, "corp.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ConfirmWorkspaceDomain(ctx, actor, issued.Domain.ID); !errors.Is(err, credbound.ErrNotSupported) {
+		t.Fatalf("confirmation without verifier or opt-in = %v", err)
+	}
 }
 
 func TestConfirmWorkspaceDomainVerifier(t *testing.T) {

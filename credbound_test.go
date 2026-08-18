@@ -44,8 +44,11 @@ func newFixture(t *testing.T, ssoProviders ...credbound.SSOProvider) *fixture {
 		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
 		Clock: func() time.Time { return f.now }, Random: &counterReader{next: 0x42},
 		StepUpMaxAge: 10 * time.Minute, CeremonyTTL: 5 * time.Minute,
-		SSOProviders:     ssoProviders,
-		SSOAssurance:     assurance,
+		SSOProviders: ssoProviders,
+		SSOAssurance: assurance,
+		// Domain confirmations in tests assert verification out of band;
+		// TestConfirmWorkspaceDomainVerifier covers the DNS-verifier path.
+		TrustActorDomainVerification: true,
 		TransactionHooks: []credbound.TransactionHook{credbound.UnimplementedTransactionHook{}},
 		EventListeners:   []credbound.EventListener{credbound.UnimplementedEventListener{}},
 	})
@@ -348,6 +351,15 @@ func TestConfigurationValidation(t *testing.T) {
 	}
 	if _, err := credbound.New(bad); err != nil {
 		t.Fatalf("restrictive admin permission override = %v", err)
+	}
+	// A configured email cooldown must fail construction when the store
+	// cannot back it — never degrade into a silent no-op. Embedding the store
+	// behind the base interface strips the optional capabilities.
+	bad = valid
+	bad.Store = struct{ credbound.Store }{valid.Store}
+	bad.EmailIssuanceCooldown = time.Minute
+	if _, err := credbound.New(bad); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("inert email cooldown accepted = %v", err)
 	}
 	validProvider := &fakeSSOProvider{configurationID: "0198b463-0000-7000-8000-0000000000aa", kind: credbound.SSOProviderGoogle}
 	bad = valid

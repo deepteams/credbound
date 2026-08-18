@@ -32,11 +32,18 @@ type Config struct {
 	// Passkeys is the optional WebAuthn provider; without it the passkey
 	// ceremonies return ErrNotSupported.
 	Passkeys PasskeyProvider
-	// DomainVerifier optionally proves control of a workspace domain inside
-	// ConfirmWorkspaceDomain; see DomainVerifier. Nil trusts the actor's
-	// out-of-band verification, so a self-serve deployment exposing
-	// ConfirmWorkspaceDomain directly should register one.
+	// DomainVerifier proves control of a workspace domain inside
+	// ConfirmWorkspaceDomain; see DomainVerifier. Without one,
+	// ConfirmWorkspaceDomain refuses with ErrNotSupported unless
+	// TrustActorDomainVerification opts into trusting the actor instead.
 	DomainVerifier DomainVerifier
+	// TrustActorDomainVerification lets ConfirmWorkspaceDomain succeed
+	// without a DomainVerifier, treating the call as the administrator's
+	// assertion that DNS verification completed out of band. Dangerous
+	// wherever ConfirmWorkspaceDomain is reachable from self-serve actors: a
+	// confirmed domain governs SSO enforcement and JIT provisioning for every
+	// address on it. Ignored when a DomainVerifier is registered.
+	TrustActorDomainVerification bool
 	// SecretKey is the 32-byte root key. Distinct AEAD and HMAC keys are
 	// derived from it with HKDF to seal ceremony continuations and TOTP
 	// secrets and to digest single-use tokens.
@@ -131,7 +138,8 @@ type Config struct {
 	// magic-link, email OTP, verification resend). Within the window the flow
 	// answers with its usual enumeration-safe decoy and issues no token, so a
 	// user cannot be bombarded with mails. Zero disables the cooldown. It
-	// requires an EmailThrottleStore-capable store; otherwise it is inert.
+	// requires an EmailThrottleStore-capable store; New fails construction
+	// otherwise, so a configured protection can never be silently inert.
 	EmailIssuanceCooldown time.Duration
 	// SSOProviders registers the identity providers the host enables. Each
 	// must expose a unique UUIDv7 configuration ID and a known kind.
@@ -236,6 +244,7 @@ type Manager struct {
 	emailThrottle         EmailThrottleStore
 	domainStore           DomainStore
 	domainVerifier        DomainVerifier
+	trustActorDomains     bool
 	dummyHash             string
 	idMu                  sync.Mutex
 	idUnixMilli           int64
@@ -400,6 +409,11 @@ func New(cfg Config) (*Manager, error) {
 	sessionStore, _ := cfg.Store.(SessionStore)
 	emailThrottle, _ := cfg.Store.(EmailThrottleStore)
 	domainStore, _ := cfg.Store.(DomainStore)
+	// A configured cooldown is explicit intent, like SignUp and OAuth below:
+	// an anti-mail-bombing protection must never be silently inert.
+	if cfg.EmailIssuanceCooldown > 0 && emailThrottle == nil {
+		return nil, fmt.Errorf("%w: Config.EmailIssuanceCooldown is set but Store does not implement EmailThrottleStore", ErrInvalidInput)
+	}
 	var signupConfig *SignUpConfig
 	if cfg.SignUp != nil {
 		// SignUp is an explicit opt-in, so a Store that cannot back it is a
@@ -471,6 +485,7 @@ func New(cfg Config) (*Manager, error) {
 		emailThrottle:         emailThrottle,
 		domainStore:           domainStore,
 		domainVerifier:        cfg.DomainVerifier,
+		trustActorDomains:     cfg.TrustActorDomainVerification,
 		dummyHash:             dummyHash,
 	}, nil
 }

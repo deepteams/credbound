@@ -89,16 +89,23 @@ func (m *Manager) CreateWorkspaceDomain(ctx context.Context, actor Authenticatio
 // ConfirmWorkspaceDomain marks the pending domain verified. When a
 // Config.DomainVerifier is registered it proves control here — resolving the
 // challenge against the domain's DNS — and fails with ErrDomainVerification
-// when the challenge is not published; without one, calling it is the actor's
-// assertion that DNS verification completed and Credbound never queries DNS
-// itself. It requires a fresh AAL2 step-up and workspace settings write in the
-// owning workspace, and fails with ErrConflict when the domain was already
-// confirmed. Only from this point on does the domain's policy apply.
+// when the challenge is not published. Without one it refuses with
+// ErrNotSupported unless Config.TrustActorDomainVerification explicitly opts
+// into treating the call as the actor's assertion that DNS verification
+// completed; Credbound never queries DNS itself. It requires a fresh AAL2
+// step-up and workspace settings write in the owning workspace, and fails
+// with ErrConflict when the domain was already confirmed. Only from this
+// point on does the domain's policy apply.
 func (m *Manager) ConfirmWorkspaceDomain(ctx context.Context, actor Authentication, domainID string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "workspace.domain.confirm", started, err) }()
 	if m.domainStore == nil {
 		return ErrNotSupported
+	}
+	// Confirming on the actor's bare word is an explicit, dangerous opt-in;
+	// without it a missing verifier must not silently weaken domain proof.
+	if m.domainVerifier == nil && !m.trustActorDomains {
+		return fmt.Errorf("%w: ConfirmWorkspaceDomain requires Config.DomainVerifier or Config.TrustActorDomainVerification", ErrNotSupported)
 	}
 	domain, err := m.authorizedWorkspaceDomain(ctx, actor, domainID, "workspace.domain.confirm")
 	if err != nil {
