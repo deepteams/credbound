@@ -403,6 +403,34 @@ type PasskeyProvider interface {
 	FinishAuthentication(context.Context, PasskeyUser, []byte, []byte) (credentialID, credentialJSON []byte, err error)
 }
 
+// PasskeyUserLookup resolves the account owning a credential ID during a
+// discoverable ceremony. It reports ErrNotFound for an unknown credential.
+type PasskeyUserLookup func(ctx context.Context, credentialID []byte) (PasskeyUser, error)
+
+// DiscoverablePasskeyProvider is an optional extension of PasskeyProvider
+// enabling usernameless (discoverable-credential) authentication: the
+// ceremony starts with an empty allowCredentials list, so no per-address
+// challenge exists to enumerate — the full fix for the residual
+// allowCredentials-count signal the per-address decoy cannot close.
+type DiscoverablePasskeyProvider interface {
+	// BeginDiscoverableAuthentication starts an assertion ceremony bound to
+	// no account; the authenticator offers its resident credentials.
+	BeginDiscoverableAuthentication(context.Context) (json.RawMessage, []byte, error)
+	// FinishDiscoverableAuthentication validates the browser response,
+	// resolving the account through the lookup and verifying the asserted
+	// user handle belongs to it.
+	FinishDiscoverableAuthentication(ctx context.Context, session, response []byte, lookup PasskeyUserLookup) (credentialID, credentialJSON []byte, err error)
+}
+
+// PasskeyCredentialStore is an optional persistence capability required by
+// discoverable passkey authentication: a global credential-ID lookup, which
+// the per-user Passkeys stream cannot provide.
+type PasskeyCredentialStore interface {
+	// PasskeyByCredentialID returns the passkey owning the credential ID,
+	// or ErrNotFound.
+	PasskeyByCredentialID(ctx context.Context, credentialID []byte) (Passkey, error)
+}
+
 // SSOProvider is the network adapter for one registered identity provider.
 // ConfigurationID returns the stable UUIDv7 the host addresses it by, Begin
 // starts a ceremony (honoring SSORequest.ForceReauthentication for

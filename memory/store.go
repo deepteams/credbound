@@ -1194,6 +1194,24 @@ func (s *Store) SavePasskey(ctx context.Context, passkey credbound.Passkey, comm
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// PasskeyByCredentialID returns the passkey owning the credential ID, for
+// discoverable (usernameless) authentication.
+func (s *Store) PasskeyByCredentialID(ctx context.Context, credentialID []byte) (credbound.Passkey, error) {
+	if err := ctx.Err(); err != nil {
+		return credbound.Passkey{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, byID := range s.passkeys {
+		for _, passkey := range byID {
+			if hmac.Equal(passkey.CredentialID, credentialID) {
+				return clonePasskey(passkey), nil
+			}
+		}
+	}
+	return credbound.Passkey{}, credbound.ErrNotFound
+}
+
 // TouchPasskey persists the credential's updated JSON (sign counter) and
 // last-used time after a successful assertion.
 func (s *Store) TouchPasskey(ctx context.Context, userID string, credentialID, credentialJSON []byte, usedAt time.Time, commit credbound.Commit) error {

@@ -938,6 +938,20 @@ func (s *Store) SavePasskey(ctx context.Context, passkey credbound.Passkey, comm
 	})
 }
 
+// PasskeyByCredentialID returns the passkey owning the credential ID, for
+// discoverable (usernameless) authentication.
+func (s *Store) PasskeyByCredentialID(ctx context.Context, credentialID []byte) (credbound.Passkey, error) {
+	row, err := s.queries.GetPasskeyByCredentialID(ctx, credentialID)
+	if err != nil {
+		return credbound.Passkey{}, mapError(err)
+	}
+	return credbound.Passkey{
+		ID: row.ID, UserID: row.UserID, Name: row.Name,
+		CredentialID: row.CredentialID, CredentialJSON: row.CredentialJson,
+		CreatedAt: row.CreatedAt, LastUsedAt: timePointer(row.LastUsedAt),
+	}, nil
+}
+
 // TouchPasskey persists the credential's updated JSON (sign counter) and
 // last-used time after a successful assertion.
 func (s *Store) TouchPasskey(ctx context.Context, userID string, credentialID, credentialJSON []byte, usedAt time.Time, commit credbound.Commit) error {

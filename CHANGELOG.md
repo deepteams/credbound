@@ -101,6 +101,17 @@ breaking changes may land in any release and are called out explicitly.
 
 ### Added
 
+- Usernameless passkey sign-in over discoverable credentials:
+  `BeginDiscoverablePasskeyAuthentication` starts a ceremony bound to no
+  address (empty `allowCredentials`), and
+  `FinishDiscoverablePasskeyAuthentication` resolves the account from the
+  asserted credential, refusing disabled accounts and EnforceSSO domains
+  and consuming the single-use ceremony like the email-first flow. This
+  closes the residual enumeration signal of the per-address decoy, whose
+  fabricated credential list always holds one entry. Enabled by the new
+  `DiscoverablePasskeyProvider` port extension (implemented by
+  `webauthnadapter`) and the new optional `PasskeyCredentialStore` store
+  capability (implemented by the bundled stores).
 - Bundled `githubadapter` implementing `SSOProvider` for GitHub sign-in
   (OAuth 2.0 + REST — GitHub is not an OIDC issuer, so `ssoadapter` cannot
   serve it). The subject is the stable numeric account id, the primary

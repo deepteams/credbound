@@ -233,6 +233,66 @@ func TestPasskeyCeremoniesEncryptStoredCredential(t *testing.T) {
 	}
 }
 
+func TestDiscoverablePasskeyAuthentication(t *testing.T) {
+	f := newFixture(t)
+	authn, _ := f.bootstrap(t)
+	ctx := context.Background()
+	registration, err := f.manager.BeginPasskeyRegistration(ctx, authn, "MacBook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishPasskeyRegistration(ctx, authn, registration.Continuation, []byte("valid")); err != nil {
+		t.Fatal(err)
+	}
+
+	// The usernameless ceremony asks for no address, so there is no
+	// per-address challenge left to probe for passkey presence or count.
+	challenge, err := f.manager.BeginDiscoverablePasskeyAuthentication(ctx)
+	if err != nil || len(challenge.Options) == 0 || challenge.Continuation == "" {
+		t.Fatalf("discoverable challenge = %#v, %v", challenge, err)
+	}
+	login, err := f.manager.FinishDiscoverablePasskeyAuthentication(ctx, challenge.Continuation, []byte("valid"))
+	if err != nil || login.UserID != authn.UserID || login.Level != credbound.AAL2 || login.Method != credbound.MethodPasskey {
+		t.Fatalf("discoverable auth = %#v, %v", login, err)
+	}
+	// The ceremony is single use, exactly like the email-first flow.
+	if _, err := f.manager.FinishDiscoverablePasskeyAuthentication(ctx, challenge.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("replayed discoverable ceremony = %v", err)
+	}
+	// An assertion whose credential resolves to no account fails closed.
+	unresolved, err := f.manager.BeginDiscoverablePasskeyAuthentication(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishDiscoverablePasskeyAuthentication(ctx, unresolved.Continuation, []byte("unknown")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("unresolved discoverable ceremony = %v", err)
+	}
+	// A continuation from the email-first flow cannot finish the
+	// discoverable one and vice versa.
+	emailFirst, err := f.manager.BeginPasskeyAuthentication(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishDiscoverablePasskeyAuthentication(ctx, emailFirst.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("cross-flow continuation = %v", err)
+	}
+
+	// A provider without the discoverable extension reports ErrNotSupported.
+	legacy, err := credbound.New(credbound.Config{
+		Store: memory.New(), Passwords: &fakePasswords{}, Passkeys: legacyPasskeys{inner: &fakePasskeys{}},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.BeginDiscoverablePasskeyAuthentication(ctx); !errors.Is(err, credbound.ErrNotSupported) {
+		t.Fatalf("legacy provider begin = %v", err)
+	}
+	if _, err := legacy.FinishDiscoverablePasskeyAuthentication(ctx, challenge.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrNotSupported) {
+		t.Fatalf("legacy provider finish = %v", err)
+	}
+}
+
 func TestAdministrationRolesAndAudit(t *testing.T) {
 	f := newFixture(t)
 	root, workspace := f.bootstrap(t)
@@ -548,6 +608,47 @@ func (f *fakePasskeys) FinishAuthentication(_ context.Context, _ credbound.Passk
 		return nil, nil, errors.New("invalid ceremony")
 	}
 	return []byte("credential"), []byte(`{"id":"credential","counter":1}`), nil
+}
+func (f *fakePasskeys) BeginDiscoverableAuthentication(context.Context) (json.RawMessage, []byte, error) {
+	return json.RawMessage(`{"publicKey":{}}`), []byte("discoverable-session"), nil
+}
+func (f *fakePasskeys) FinishDiscoverableAuthentication(ctx context.Context, session, response []byte, lookup credbound.PasskeyUserLookup) ([]byte, []byte, error) {
+	if string(session) != "discoverable-session" {
+		return nil, nil, errors.New("invalid ceremony")
+	}
+	credentialID := ""
+	switch string(response) {
+	case "valid":
+		credentialID = "credential"
+	case "unknown":
+		credentialID = "missing"
+	default:
+		return nil, nil, errors.New("invalid ceremony")
+	}
+	if _, err := lookup(ctx, []byte(credentialID)); err != nil {
+		return nil, nil, err
+	}
+	return []byte(credentialID), []byte(`{"id":"credential","counter":2}`), nil
+}
+
+// legacyPasskeys narrows fakePasskeys to the base PasskeyProvider port, for
+// the ErrNotSupported branch of the discoverable flow.
+type legacyPasskeys struct{ inner *fakePasskeys }
+
+func (l legacyPasskeys) BeginRegistration(ctx context.Context, user credbound.PasskeyUser) (json.RawMessage, []byte, error) {
+	return l.inner.BeginRegistration(ctx, user)
+}
+func (l legacyPasskeys) FinishRegistration(ctx context.Context, user credbound.PasskeyUser, session, response []byte) ([]byte, []byte, error) {
+	return l.inner.FinishRegistration(ctx, user, session, response)
+}
+func (l legacyPasskeys) BeginAuthentication(ctx context.Context, user credbound.PasskeyUser) (json.RawMessage, []byte, error) {
+	return l.inner.BeginAuthentication(ctx, user)
+}
+func (l legacyPasskeys) BeginDecoyAuthentication(ctx context.Context, seed []byte) (json.RawMessage, []byte, error) {
+	return l.inner.BeginDecoyAuthentication(ctx, seed)
+}
+func (l legacyPasskeys) FinishAuthentication(ctx context.Context, user credbound.PasskeyUser, session, response []byte) ([]byte, []byte, error) {
+	return l.inner.FinishAuthentication(ctx, user, session, response)
 }
 
 type counterReader struct{ next byte }

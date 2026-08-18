@@ -55,6 +55,28 @@ func TestChangePasswordAndEmailReissue(t *testing.T) {
 	}
 }
 
+func TestPasskeyByCredentialID(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	user := credbound.User{ID: f.id(), Email: "root@example.com", DisplayName: "Root", CreatedAt: f.now, UpdatedAt: f.now}
+	workspace := credbound.Workspace{ID: f.id(), Name: "Main", CreatedAt: f.now, UpdatedAt: f.now}
+	membership := credbound.Membership{WorkspaceID: workspace.ID, UserID: user.ID, Role: credbound.RoleAdmin, CreatedAt: f.now, UpdatedAt: f.now}
+	if err := f.store.Bootstrap(ctx, user, f.email(user), credbound.PasswordCredential{UserID: user.ID, Hash: "hash", UpdatedAt: f.now}, workspace, membership, credbound.InstanceAdministrator{UserID: user.ID, Role: credbound.InstanceRoleRoot, CreatedAt: f.now, UpdatedAt: f.now}, f.event(user.ID, "bootstrap", workspace.ID, workspace.ID)); err != nil {
+		t.Fatal(err)
+	}
+	passkey := credbound.Passkey{ID: f.id(), UserID: user.ID, Name: "MacBook", CredentialID: []byte("credential"), CredentialJSON: []byte("sealed"), CreatedAt: f.now}
+	if err := f.store.SavePasskey(ctx, passkey, f.event(user.ID, "passkey.create", passkey.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.store.PasskeyByCredentialID(ctx, []byte("credential"))
+	if err != nil || got.ID != passkey.ID || got.UserID != user.ID || string(got.CredentialJSON) != "sealed" {
+		t.Fatalf("passkey by credential = %#v, %v", got, err)
+	}
+	if _, err := f.store.PasskeyByCredentialID(ctx, []byte("missing")); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("missing credential = %v", err)
+	}
+}
+
 func TestOAuthClientAccessTokenLifecycle(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

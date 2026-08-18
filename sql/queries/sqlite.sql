@@ -271,6 +271,9 @@ SELECT COUNT(*) FROM credbound_recovery_codes WHERE user_id = ?1 AND used_at IS 
 -- name: InsertPasskey :exec
 INSERT INTO credbound_passkeys (id, user_id, name, credential_id, credential_json, created_at, last_used_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL);
 
+-- name: GetPasskeyByCredentialID :one
+SELECT id, user_id, name, credential_id, credential_json, created_at, last_used_at FROM credbound_passkeys WHERE credential_id = ?1;
+
 -- name: TouchPasskey :execrows
 UPDATE credbound_passkeys SET credential_json = ?3, last_used_at = ?4 WHERE user_id = ?1 AND credential_id = ?2;
 

@@ -70,6 +70,8 @@ type engine interface {
 	CreateCredential(webauthn.User, webauthn.SessionData, *protocol.ParsedCredentialCreationData) (*webauthn.Credential, error)
 	BeginLogin(webauthn.User, ...webauthn.LoginOption) (*protocol.CredentialAssertion, *webauthn.SessionData, error)
 	ValidateLogin(webauthn.User, webauthn.SessionData, *protocol.ParsedCredentialAssertionData) (*webauthn.Credential, error)
+	BeginDiscoverableLogin(...webauthn.LoginOption) (*protocol.CredentialAssertion, *webauthn.SessionData, error)
+	ValidateDiscoverableLogin(webauthn.DiscoverableUserHandler, webauthn.SessionData, *protocol.ParsedCredentialAssertionData) (*webauthn.Credential, error)
 }
 
 // New validates config and returns a Provider. A user handle key shorter
@@ -240,6 +242,68 @@ func (p *Provider) FinishAuthentication(ctx context.Context, input credbound.Pas
 	return slices.Clone(credential.ID), encoded, nil
 }
 
+// BeginDiscoverableAuthentication starts a usernameless assertion ceremony:
+// the request options carry an empty allowCredentials list and the
+// authenticator offers its resident (discoverable) credentials, so no
+// per-account challenge exists to enumerate.
+func (p *Provider) BeginDiscoverableAuthentication(ctx context.Context) (json.RawMessage, []byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	assertion, session, err := p.webAuthn.BeginDiscoverableLogin(webauthn.WithUserVerification(protocol.VerificationRequired))
+	if err != nil {
+		return nil, nil, err
+	}
+	return marshalCeremony(assertion, session)
+}
+
+// FinishDiscoverableAuthentication validates the browser's assertion
+// response, resolving the account through the lookup by the asserted
+// credential ID and verifying the asserted user handle is the HMAC of that
+// account's ID, so a tampered handle can never bind the assertion to a
+// different user.
+func (p *Provider) FinishDiscoverableAuthentication(ctx context.Context, rawSession, response []byte, lookup credbound.PasskeyUserLookup) ([]byte, []byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	session, err := unmarshalSession(rawSession)
+	if err != nil {
+		return nil, nil, err
+	}
+	parsed, err := p.parseAssertion(response)
+	if err != nil {
+		return nil, nil, err
+	}
+	handler := func(rawID, userHandle []byte) (webauthn.User, error) {
+		input, err := lookup(ctx, rawID)
+		if err != nil {
+			return nil, err
+		}
+		resolved, err := p.convertUser(input)
+		if err != nil {
+			return nil, err
+		}
+		if !hmac.Equal(resolved.id, userHandle) {
+			return nil, errors.New("webauthn: user handle does not match the credential owner")
+		}
+		return resolved, nil
+	}
+	credential, err := p.webAuthn.ValidateDiscoverableLogin(handler, session, parsed)
+	if err != nil {
+		return nil, nil, err
+	}
+	// See FinishAuthentication: a regressed signature counter marks a
+	// possibly cloned authenticator and must not authenticate.
+	if credential.Authenticator.CloneWarning {
+		return nil, nil, credbound.ErrPasskeyCloneDetected
+	}
+	encoded, err := json.Marshal(credential)
+	if err != nil {
+		return nil, nil, err
+	}
+	return slices.Clone(credential.ID), encoded, nil
+}
+
 type user struct {
 	id          []byte
 	name        string
@@ -295,4 +359,7 @@ func unmarshalSession(raw []byte) (webauthn.SessionData, error) {
 	return session, nil
 }
 
-var _ credbound.PasskeyProvider = (*Provider)(nil)
+var (
+	_ credbound.PasskeyProvider             = (*Provider)(nil)
+	_ credbound.DiscoverablePasskeyProvider = (*Provider)(nil)
+)

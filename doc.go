@@ -35,6 +35,7 @@
 // the entry points by domain so the one you need is a search away:
 //
 //   - Sign-in: AuthenticatePassword, VerifyTOTP, Begin/FinishPasskeyAuthentication,
+//     Begin/FinishDiscoverablePasskeyAuthentication (usernameless),
 //     Begin/CompleteEmailAuthentication (magic link), Begin/CompleteEmailOTP,
 //     Begin/FinishSSO, AuthenticatePAT, SignUp.
 //   - Passwords: ChangePassword, Begin/CompletePasswordReset.

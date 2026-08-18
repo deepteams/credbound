@@ -12,6 +12,7 @@ import (
 const (
 	passkeyRegistration   = "passkey_registration"
 	passkeyAuthentication = "passkey_authentication"
+	passkeyDiscoverable   = "passkey_discoverable"
 )
 
 // BeginPasskeyRegistration starts a WebAuthn registration ceremony for the
@@ -195,8 +196,9 @@ func (m *Manager) BeginPasskeyAuthentication(ctx context.Context, email string) 
 // repeated probes see the same fabricated credentials. Its continuation carries
 // no user id, so FinishPasskeyAuthentication fails it as invalid credentials.
 // A residual signal remains — the fabricated allowCredentials list holds one
-// entry, so an account with several passkeys is still distinguishable by count;
-// closing that fully needs discoverable-credential ceremonies.
+// entry, so an account with several passkeys is still distinguishable by
+// count; BeginDiscoverablePasskeyAuthentication closes that fully by asking
+// for no address at all.
 func (m *Manager) decoyPasskeyChallenge(ctx context.Context, normalizedEmail string) (PasskeyChallenge, error) {
 	seed := digest(m.digestKey, "passkey-decoy:"+normalizedEmail)
 	options, session, err := m.passkeys.BeginDecoyAuthentication(ctx, seed)
@@ -257,7 +259,14 @@ func (m *Manager) FinishPasskeyAuthentication(ctx context.Context, continuation 
 		m.emitAuthenticationFailed(ctx, "auth.passkey.authentication.finish", audit, MethodPasskey, state.UserID, reason)
 		return Authentication{}, ErrInvalidCredentials
 	}
-	event, err := m.newAudit(ctx, state.UserID, "auth.passkey", "user", state.UserID, "", AuditSucceeded, "")
+	return m.commitPasskeyAuthentication(ctx, "auth.passkey.authentication.finish", state, state.UserID, credentialID, credentialJSON)
+}
+
+// commitPasskeyAuthentication is the shared success tail of the two passkey
+// sign-in flows: it touches the credential, consumes the single-use ceremony
+// in the same commit, and mints the AAL2 authentication.
+func (m *Manager) commitPasskeyAuthentication(ctx context.Context, operation string, state ceremonyContinuation, userID string, credentialID, credentialJSON []byte) (Authentication, error) {
+	event, err := m.newAudit(ctx, userID, "auth.passkey", "user", userID, "", AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, err
 	}
@@ -266,8 +275,8 @@ func (m *Manager) FinishPasskeyAuthentication(ctx context.Context, continuation 
 	if err != nil {
 		return Authentication{}, err
 	}
-	passkeyID := m.passkeyIDByCredential(ctx, state.UserID, credentialID)
-	if err := m.store.TouchPasskey(ctx, state.UserID, credentialID, sealedCredential, now, Commit{Audit: event, Ceremony: state.consumption()}); err != nil {
+	passkeyID := m.passkeyIDByCredential(ctx, userID, credentialID)
+	if err := m.store.TouchPasskey(ctx, userID, credentialID, sealedCredential, now, Commit{Audit: event, Ceremony: state.consumption()}); err != nil {
 		if errors.Is(err, ErrConflict) {
 			// The ceremony was already consumed: a replayed response can
 			// never mint a second authentication — even for authenticators
@@ -275,15 +284,132 @@ func (m *Manager) FinishPasskeyAuthentication(ctx context.Context, continuation 
 			// invalid credential.
 			return Authentication{}, ErrInvalidCredentials
 		}
-		return Authentication{}, m.mapStoreError(ctx, "auth.passkey.authentication.finish", err)
+		return Authentication{}, m.mapStoreError(ctx, operation, err)
 	}
-	authentication := Authentication{UserID: state.UserID, Method: MethodPasskey, Level: AAL2, AuthenticatedAt: now}
-	if meta, metaErr := m.newEventMeta(EventPasskeyAuthenticated, "auth.passkey.authentication.finish", state.UserID, "", event); metaErr == nil {
-		authenticated := PasskeyAuthenticatedEvent{EventMeta: meta, PasskeyID: passkeyID, UserID: state.UserID}
+	authentication := Authentication{UserID: userID, Method: MethodPasskey, Level: AAL2, AuthenticatedAt: now}
+	if meta, metaErr := m.newEventMeta(EventPasskeyAuthenticated, operation, userID, "", event); metaErr == nil {
+		authenticated := PasskeyAuthenticatedEvent{EventMeta: meta, PasskeyID: passkeyID, UserID: userID}
 		m.events.emit(ctx, EventPasskeyAuthenticated, func(listener EventListener) error { return listener.OnPasskeyAuthenticated(ctx, authenticated) })
 	}
-	m.emitAuthenticationSucceeded(ctx, "auth.passkey.authentication.finish", event, authentication)
+	m.emitAuthenticationSucceeded(ctx, operation, event, authentication)
 	return authentication, nil
+}
+
+// BeginDiscoverablePasskeyAuthentication starts a usernameless WebAuthn
+// ceremony: no address is asked and the challenge carries an empty
+// allowCredentials list, so the authenticator offers its discoverable
+// credentials. Because the challenge is bound to no account, there is no
+// per-address answer left to probe — this closes the residual enumeration
+// signal of the per-address decoy, whose fabricated allowCredentials list
+// holds one entry while a real account may show several. It requires a
+// provider implementing DiscoverablePasskeyProvider and a
+// PasskeyCredentialStore-capable store; otherwise it returns
+// ErrNotSupported.
+func (m *Manager) BeginDiscoverablePasskeyAuthentication(ctx context.Context) (_ PasskeyChallenge, err error) {
+	provider, _, err := m.discoverablePasskeys()
+	if err != nil {
+		return PasskeyChallenge{}, err
+	}
+	started := m.now()
+	defer func() { m.observe(ctx, "auth.passkey.discoverable.begin", started, err) }()
+	options, session, err := provider.BeginDiscoverableAuthentication(ctx)
+	if err != nil {
+		return PasskeyChallenge{}, ErrInvalidCredentials
+	}
+	ceremonyID, err := m.newID()
+	if err != nil {
+		return PasskeyChallenge{}, err
+	}
+	continuation, err := m.encodeContinuation(ceremonyContinuation{
+		ID: ceremonyID, Operation: passkeyDiscoverable,
+		ExpiresAt: m.now().Add(m.ceremonyTTL), Session: session,
+	})
+	if err != nil {
+		return PasskeyChallenge{}, err
+	}
+	return PasskeyChallenge{Options: options, Continuation: continuation}, nil
+}
+
+// FinishDiscoverablePasskeyAuthentication validates the browser response of
+// a discoverable ceremony, resolves the account from the asserted credential,
+// and returns an AAL2 interactive authentication with the same single-use
+// ceremony consumption as FinishPasskeyAuthentication. A disabled account
+// and a confirmed EnforceSSO domain are refused — the domain policy, checked
+// by address at Begin in the email-first flow, is enforced here against the
+// resolved account's primary address.
+func (m *Manager) FinishDiscoverablePasskeyAuthentication(ctx context.Context, continuation string, response []byte) (_ Authentication, err error) {
+	provider, credentialStore, err := m.discoverablePasskeys()
+	if err != nil {
+		return Authentication{}, err
+	}
+	started := m.now()
+	defer func() { m.observe(ctx, "auth.passkey.discoverable.finish", started, err) }()
+	state, err := m.decodeContinuation(continuation, passkeyDiscoverable)
+	if err != nil {
+		return Authentication{}, err
+	}
+	resolvedUserID := ""
+	lookup := func(ctx context.Context, credentialID []byte) (PasskeyUser, error) {
+		passkey, lookupErr := credentialStore.PasskeyByCredentialID(ctx, credentialID)
+		if lookupErr != nil {
+			return PasskeyUser{}, lookupErr
+		}
+		user, lookupErr := m.passkeyUser(ctx, passkey.UserID)
+		if lookupErr != nil {
+			return PasskeyUser{}, lookupErr
+		}
+		resolvedUserID = passkey.UserID
+		return user, nil
+	}
+	credentialID, credentialJSON, err := provider.FinishDiscoverableAuthentication(ctx, state.Session, response, lookup)
+	if err != nil {
+		if resolvedUserID == "" {
+			// The assertion never resolved to an account, so there is no
+			// actor to audit; the caller learns nothing but failure.
+			return Authentication{}, ErrInvalidCredentials
+		}
+		reason := "invalid_credentials"
+		if errors.Is(err, ErrPasskeyCloneDetected) {
+			reason = "cloned_authenticator"
+		}
+		audit, auditErr := m.recordAuthenticationAudit(ctx, resolvedUserID, "auth.passkey", AuditFailed, reason)
+		if auditErr != nil {
+			return Authentication{}, auditErr
+		}
+		m.emitAuthenticationFailed(ctx, "auth.passkey.discoverable.finish", audit, MethodPasskey, resolvedUserID, reason)
+		return Authentication{}, ErrInvalidCredentials
+	}
+	if resolvedUserID == "" {
+		return Authentication{}, ErrInvalidCredentials
+	}
+	record, lookupErr := m.store.UserByID(ctx, resolvedUserID)
+	if lookupErr != nil || record.Disabled {
+		return Authentication{}, ErrInvalidCredentials
+	}
+	// SSO-006: the resolved account's primary address decides the policy, so
+	// a passkey registered before EnforceSSO was confirmed cannot bypass it
+	// through the usernameless flow.
+	if ssoErr := m.domainRequiresSSO(ctx, normalizeEmail(record.Email), "passkey.discoverable.finish"); ssoErr != nil {
+		return Authentication{}, ssoErr
+	}
+	return m.commitPasskeyAuthentication(ctx, "auth.passkey.discoverable.finish", state, resolvedUserID, credentialID, credentialJSON)
+}
+
+// discoverablePasskeys resolves the optional capabilities the usernameless
+// flow needs, failing with ErrNotSupported when either side lacks them.
+func (m *Manager) discoverablePasskeys() (DiscoverablePasskeyProvider, PasskeyCredentialStore, error) {
+	if err := m.requirePasskeyProvider(); err != nil {
+		return nil, nil, err
+	}
+	provider, ok := m.passkeys.(DiscoverablePasskeyProvider)
+	if !ok {
+		return nil, nil, fmt.Errorf("%w: passkey provider does not support discoverable authentication", ErrNotSupported)
+	}
+	credentialStore, ok := m.store.(PasskeyCredentialStore)
+	if !ok {
+		return nil, nil, fmt.Errorf("%w: store does not implement PasskeyCredentialStore", ErrNotSupported)
+	}
+	return provider, credentialStore, nil
 }
 
 // DeletePasskey removes one of the actor's passkeys, atomically with the

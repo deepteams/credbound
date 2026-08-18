@@ -653,6 +653,25 @@ func (q *Queries) GetPATByPrefix(ctx context.Context, prefix string) (CredboundP
 	return i, err
 }
 
+const getPasskeyByCredentialID = `-- name: GetPasskeyByCredentialID :one
+SELECT id, user_id, name, credential_id, credential_json, created_at, last_used_at FROM credbound.passkeys WHERE credential_id = $1
+`
+
+func (q *Queries) GetPasskeyByCredentialID(ctx context.Context, credentialID []byte) (CredboundPasskey, error) {
+	row := q.db.QueryRowContext(ctx, getPasskeyByCredentialID, credentialID)
+	var i CredboundPasskey
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.CredentialID,
+		&i.CredentialJson,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+	)
+	return i, err
+}
+
 const getPassword = `-- name: GetPassword :one
 SELECT user_id, hash, updated_at FROM credbound.password_credentials WHERE user_id = $1
 `

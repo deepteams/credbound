@@ -10,7 +10,8 @@ and open to everyone. It centralizes security invariants that would otherwise
 be reimplemented in every project:
 
 - local password authentication;
-- WebAuthn passkeys;
+- WebAuthn passkeys, including usernameless sign-in over discoverable
+  credentials;
 - TOTP second factor and recovery codes;
 - password reset, magic-link, and email OTP sign-in through single-use,
   expiring email proofs with enumeration-resistant initiation;

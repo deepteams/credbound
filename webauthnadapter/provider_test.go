@@ -264,6 +264,78 @@ func newProvider(t *testing.T, max int) *Provider {
 	return provider
 }
 
+func TestDiscoverableCeremonies(t *testing.T) {
+	ctx := context.Background()
+	credential := webauthn.Credential{ID: []byte("credential"), PublicKey: []byte("public-key")}
+	encoded, err := json.Marshal(credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := &fakeEngine{credential: &credential, handlerRawID: credential.ID}
+	provider := &Provider{
+		webAuthn: backend, userHandleKey: bytes(32), maxCredentials: 2,
+		parseAssertion: func([]byte) (*protocol.ParsedCredentialAssertionData, error) {
+			return &protocol.ParsedCredentialAssertionData{}, nil
+		},
+	}
+	input := userWith(credbound.Passkey{CredentialID: credential.ID, CredentialJSON: encoded})
+	converted, err := provider.convertUser(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend.handlerUserHandle = converted.id
+	lookup := func(_ context.Context, credentialID []byte) (credbound.PasskeyUser, error) {
+		if string(credentialID) != "credential" {
+			return credbound.PasskeyUser{}, credbound.ErrNotFound
+		}
+		return input, nil
+	}
+
+	if options, session, err := provider.BeginDiscoverableAuthentication(ctx); err != nil || len(options) == 0 || len(session) == 0 {
+		t.Fatalf("begin discoverable = %s, %s, %v", options, session, err)
+	}
+	credentialID, updated, err := provider.FinishDiscoverableAuthentication(ctx, []byte(`{}`), []byte(`{}`), lookup)
+	if err != nil || string(credentialID) != "credential" || len(updated) == 0 {
+		t.Fatalf("finish discoverable = %q, %s, %v", credentialID, updated, err)
+	}
+
+	// An asserted user handle that is not the HMAC of the resolved account's
+	// ID must fail: a tampered handle can never rebind the assertion.
+	backend.handlerUserHandle = []byte("tampered")
+	if _, _, err := provider.FinishDiscoverableAuthentication(ctx, []byte(`{}`), []byte(`{}`), lookup); err == nil {
+		t.Fatal("mismatched user handle accepted")
+	}
+	backend.handlerUserHandle = converted.id
+
+	// A lookup miss (unknown credential) propagates as a failure.
+	backend.handlerRawID = []byte("unknown")
+	if _, _, err := provider.FinishDiscoverableAuthentication(ctx, []byte(`{}`), []byte(`{}`), lookup); err == nil {
+		t.Fatal("unknown credential accepted")
+	}
+	backend.handlerRawID = credential.ID
+
+	// A clone-warned validation is rejected like the email-first flow.
+	cloned := credential
+	cloned.Authenticator.CloneWarning = true
+	backend.credential = &cloned
+	if _, _, err := provider.FinishDiscoverableAuthentication(ctx, []byte(`{}`), []byte(`{}`), lookup); !errors.Is(err, credbound.ErrPasskeyCloneDetected) {
+		t.Fatalf("clone warning = %v", err)
+	}
+	backend.credential = &credential
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := provider.BeginDiscoverableAuthentication(canceled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled begin = %v", err)
+	}
+	if _, _, err := provider.FinishDiscoverableAuthentication(canceled, nil, nil, lookup); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled finish = %v", err)
+	}
+	if _, _, err := provider.FinishDiscoverableAuthentication(ctx, []byte("bad"), []byte(`{}`), lookup); err == nil {
+		t.Fatal("malformed session accepted")
+	}
+}
+
 func emptyUser() credbound.PasskeyUser {
 	return credbound.PasskeyUser{
 		User:        credbound.User{ID: "0198b463-0000-7000-8000-000000000001", Email: "user@example.com", DisplayName: "User"},
@@ -280,8 +352,10 @@ func userWith(passkey credbound.Passkey) credbound.PasskeyUser {
 func bytes(size int) []byte { return []byte(strings.Repeat("k", size)) }
 
 type fakeEngine struct {
-	credential *webauthn.Credential
-	err        error
+	credential        *webauthn.Credential
+	err               error
+	handlerRawID      []byte
+	handlerUserHandle []byte
 }
 
 func (f *fakeEngine) BeginRegistration(webauthn.User, ...webauthn.RegistrationOption) (*protocol.CredentialCreation, *webauthn.SessionData, error) {
@@ -300,5 +374,26 @@ func (f *fakeEngine) BeginLogin(webauthn.User, ...webauthn.LoginOption) (*protoc
 	return &protocol.CredentialAssertion{}, &webauthn.SessionData{}, nil
 }
 func (f *fakeEngine) ValidateLogin(webauthn.User, webauthn.SessionData, *protocol.ParsedCredentialAssertionData) (*webauthn.Credential, error) {
+	return f.credential, f.err
+}
+func (f *fakeEngine) BeginDiscoverableLogin(...webauthn.LoginOption) (*protocol.CredentialAssertion, *webauthn.SessionData, error) {
+	if f.err != nil {
+		return nil, nil, f.err
+	}
+	return &protocol.CredentialAssertion{}, &webauthn.SessionData{}, nil
+}
+func (f *fakeEngine) ValidateDiscoverableLogin(handler webauthn.DiscoverableUserHandler, _ webauthn.SessionData, _ *protocol.ParsedCredentialAssertionData) (*webauthn.Credential, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.handlerRawID != nil {
+		user, err := handler(f.handlerRawID, f.handlerUserHandle)
+		if err != nil {
+			return nil, err
+		}
+		if user == nil {
+			return nil, errors.New("nil user")
+		}
+	}
 	return f.credential, f.err
 }

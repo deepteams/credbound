@@ -150,6 +150,8 @@ BeginPasskeyRegistration(ctx, authn, name) (PasskeyChallenge, error)
 FinishPasskeyRegistration(ctx, authn, continuation, response) (Passkey, error)
 BeginPasskeyAuthentication(ctx, email) (PasskeyChallenge, error)
 FinishPasskeyAuthentication(ctx, continuation, response) (Authentication, error)
+BeginDiscoverablePasskeyAuthentication(ctx) (PasskeyChallenge, error)
+FinishDiscoverablePasskeyAuthentication(ctx, continuation, response) (Authentication, error)
 DeletePasskey(ctx, authn, passkeyID) error
 Passkeys(ctx, authn, userID) iter.Seq2[Passkey, error]
 
@@ -447,10 +449,25 @@ OIDC issuer, and `ClientAssertions` for `private_key_jwt`. Setting
 with `ErrInvalidInput` — explicit intent never degrades silently; without
 `Config.OAuth` every OAuth operation returns `ErrNotSupported`.
 
-`SignupStore`, `SessionStore`, and `DomainStore` are optional store
-capabilities detected by type assertion exactly like `SCIMStore` and
-`OAuthStore`. The bundled in-memory, SQLite, and PostgreSQL stores implement
-all of them. Session tokens are digested with the derived HMAC key under the
+`SignupStore`, `SessionStore`, `DomainStore`, and `PasskeyCredentialStore`
+are optional store capabilities detected by type assertion exactly like
+`SCIMStore` and `OAuthStore`. The bundled in-memory, SQLite, and PostgreSQL
+stores implement all of them.
+
+`BeginDiscoverablePasskeyAuthentication` starts a usernameless WebAuthn
+ceremony: no address is asked and the challenge carries an empty
+`allowCredentials` list, so no per-address answer exists to probe — closing
+the residual enumeration signal of the email-first flow, whose per-address
+decoy always fabricates exactly one credential while a real account may show
+its count. `FinishDiscoverablePasskeyAuthentication` resolves the account
+from the asserted credential (the provider verifies the asserted user handle
+belongs to it), refuses disabled accounts and confirmed EnforceSSO domains —
+the domain policy checked by address at Begin in the email-first flow is
+enforced here against the resolved account's primary address — and consumes
+the single-use ceremony like the email-first flow. Both require a provider
+implementing `DiscoverablePasskeyProvider` (the bundled `webauthnadapter`
+does) and a `PasskeyCredentialStore`-capable store; otherwise they return
+`ErrNotSupported`. Session tokens are digested with the derived HMAC key under the
 `session:` domain; session records never expose the token after creation.
 
 `BeginOAuthAuthorization` validates the client, redirect URI, PKCE, resource,

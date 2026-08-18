@@ -207,7 +207,13 @@ func (m *Manager) decodeContinuation(raw, operation string) (ceremonyContinuatio
 		return ceremonyContinuation{}, ErrInvalidCredentials
 	}
 	var value ceremonyContinuation
-	if err := json.Unmarshal(payload, &value); err != nil || value.Operation != operation || value.UserID == "" {
+	if err := json.Unmarshal(payload, &value); err != nil || value.Operation != operation {
+		return ceremonyContinuation{}, ErrInvalidCredentials
+	}
+	// Only a discoverable ceremony is legitimately anonymous at Begin: the
+	// account is resolved from the assertion itself. Everywhere else an
+	// empty user id marks a decoy continuation, which must fail here.
+	if value.UserID == "" && operation != passkeyDiscoverable {
 		return ceremonyContinuation{}, ErrInvalidCredentials
 	}
 	if !m.now().Before(value.ExpiresAt) {
