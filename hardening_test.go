@@ -237,6 +237,37 @@ func TestPasswordLockout(t *testing.T) {
 	}
 }
 
+func TestChangePasswordLockout(t *testing.T) {
+	f := newLockoutFixture(t, 3, 15*time.Minute)
+	authn := f.bootstrap(t)
+	ctx := context.Background()
+	// Wrong current-password guesses count toward the same lockout as
+	// failed sign-ins, so a hijacked session cannot brute-force the
+	// knowledge factor through ChangePassword.
+	for range 3 {
+		if err := f.manager.ChangePassword(ctx, authn, "wrong password", "another strong password"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+			t.Fatalf("change failure error = %v", err)
+		}
+	}
+	// The actor is authenticated, so the locked account answers ErrLocked —
+	// no enumeration oracle here — and even the correct password is refused.
+	if err := f.manager.ChangePassword(ctx, authn, "correct horse battery", "another strong password"); !errors.Is(err, credbound.ErrLocked) {
+		t.Fatalf("locked change error = %v", err)
+	}
+	// The lockout is shared with sign-in, where it stays ErrInvalidCredentials.
+	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrInvalidCredentials) || errors.Is(err, credbound.ErrLocked) {
+		t.Fatalf("locked login error = %v", err)
+	}
+	f.now = f.now.Add(16 * time.Minute)
+	fresh, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery")
+	if err != nil {
+		t.Fatalf("post-lockout login = %v", err)
+	}
+	if err := f.manager.ChangePassword(ctx, fresh, "correct horse battery", "another strong password"); err != nil {
+		t.Fatalf("post-lockout change = %v", err)
+	}
+}
+
 func TestTOTPLockout(t *testing.T) {
 	f := newLockoutFixture(t, 3, 15*time.Minute)
 	authn := f.bootstrap(t)

@@ -301,8 +301,11 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 }
 
 // ChangePassword replaces the actor's password after re-verifying the
-// current one. It requires a recent interactive authentication (any AAL,
-// within the step-up window) and validates the new password against the
+// current one. A wrong current password counts toward the account lockout
+// exactly like a failed sign-in, and a locked account is refused with
+// ErrLocked before any verification. It requires a recent interactive
+// authentication (any AAL, within the step-up window) and validates the
+// new password against the
 // built-in rules and Config.PasswordPolicy. A wrong current password is
 // audited and returns ErrInvalidCredentials.
 //
@@ -321,6 +324,14 @@ func (m *Manager) ChangePassword(ctx context.Context, actor Authentication, curr
 	if err := m.requireRecentInteractive(ctx, actor); err != nil {
 		return err
 	}
+	// The current-password check is an online guessing surface like any
+	// other: a locked account refuses the attempt and a wrong guess counts
+	// toward the lockout, so a hijacked session cannot brute-force the
+	// knowledge factor. The actor is authenticated, so ErrLocked is no
+	// existence oracle here.
+	if err := m.requireUnlocked(ctx, actor.UserID, "password.change"); err != nil {
+		return err
+	}
 	if err := m.validatePassword(ctx, newPassword); err != nil {
 		return err
 	}
@@ -333,9 +344,11 @@ func (m *Manager) ChangePassword(ctx context.Context, actor Authentication, curr
 		return fmt.Errorf("verify password: %w", err)
 	}
 	if !match {
-		if auditErr := m.appendAuthenticationAudit(ctx, actor.UserID, "password.change", AuditFailed, "invalid_credentials"); auditErr != nil {
+		failedAudit, auditErr := m.recordAuthenticationFailure(ctx, actor.UserID, "password.change", true)
+		if auditErr != nil {
 			return auditErr
 		}
+		m.emitAuthenticationFailed(ctx, "auth.password.change", failedAudit, MethodPassword, actor.UserID, "invalid_credentials")
 		return ErrInvalidCredentials
 	}
 	hash, err := m.passwords.Hash(newPassword)
