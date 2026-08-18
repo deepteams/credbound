@@ -28,7 +28,9 @@ metadata and the configured ACS URL. The NameID becomes the credbound
 subject, so its format must be persistent or unspecified; transient NameIDs
 cannot key a durable identity and are rejected unless the host opts in. The
 email attribute is read from the standard names, forwarded only when it
-parses as a valid address, and dropped — never fatal — otherwise. Validation
+parses as a valid address, and dropped — never fatal — otherwise. The
+asserted `AuthnContextClassRef` is forwarded as `SSOClaims.ACR` so a
+`Config.SSOAssurance` policy can verify the IdP's authentication strength. Validation
 errors never include assertion XML.
 
 The adapter is stateless like `ssoadapter`: the AuthnRequest id travels as

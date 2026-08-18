@@ -283,6 +283,8 @@ func (p *Provider) Finish(ctx context.Context, sessionBytes, response []byte) (c
 		Email         string       `json:"email"`
 		EmailVerified assertedBool `json:"email_verified"`
 		AuthTime      float64      `json:"auth_time"`
+		ACR           string       `json:"acr"`
+		AMR           []string     `json:"amr"`
 	}
 	if err := idToken.Claims(&extra); err != nil {
 		return credbound.SSOClaims{}, fmt.Errorf("ssoadapter: decode id token claims: %w", err)
@@ -297,6 +299,17 @@ func (p *Provider) Finish(ctx context.Context, sessionBytes, response []byte) (c
 		return credbound.SSOClaims{}, errors.New("ssoadapter: issuer or subject claim is empty or exceeds 500 characters")
 	}
 	claims := credbound.SSOClaims{Issuer: issuer, Subject: subject}
+	// The asserted authentication context is forwarded, bounded, so the
+	// host's Config.SSOAssurance policy can verify MFA instead of assuming
+	// it.
+	if acr := strings.TrimSpace(extra.ACR); acr != "" && len(acr) <= maxClaimLength {
+		claims.ACR = acr
+	}
+	for _, method := range extra.AMR {
+		if method = strings.TrimSpace(method); method != "" && len(method) <= maxClaimLength && len(claims.AMR) < 16 {
+			claims.AMR = append(claims.AMR, method)
+		}
+	}
 	// Only a verified email is forwarded: at many issuers the profile email
 	// is user-typed and unproven, so an unverified value would let a hostile
 	// account plant a victim's address in credbound's identity records.

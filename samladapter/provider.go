@@ -364,6 +364,17 @@ func (p *Provider) claims(assertion *saml.Assertion, requestID string) (credboun
 			claims.Email, claims.EmailVerified = email, true
 		}
 	}
+	// The asserted AuthnContextClassRef is forwarded, bounded, so the
+	// host's Config.SSOAssurance policy can verify the IdP's authentication
+	// strength instead of assuming it.
+	for _, statement := range assertion.AuthnStatements {
+		if ref := statement.AuthnContext.AuthnContextClassRef; ref != nil {
+			if value := strings.TrimSpace(ref.Value); value != "" && len(value) <= maxClaimLength {
+				claims.ACR = value
+				break
+			}
+		}
+	}
 	return claims, nil
 }
 

@@ -147,6 +147,20 @@ func (m *Manager) FinishSSO(ctx context.Context, continuation string, response [
 	if claims.Issuer == "" || claims.Subject == "" || len(claims.Issuer) > 500 || len(claims.Subject) > 500 {
 		return Authentication{}, ErrInvalidCredentials
 	}
+	if policy, constrained := m.ssoAssurance[state.ProviderConfigurationID]; constrained && !policy.satisfiedBy(claims) {
+		// The IdP authenticated the user without the assurance the host
+		// requires: AAL2 is verified here, never taken on the provider's
+		// word. ErrStepUpRequired lets the host send the user back to the
+		// IdP for its second factor.
+		if state.UserID != "" {
+			audit, auditErr := m.recordAuthenticationAudit(ctx, state.UserID, "auth.sso", AuditFailed, "assurance_policy")
+			if auditErr != nil {
+				return Authentication{}, auditErr
+			}
+			m.emitAuthenticationFailed(ctx, "auth.sso.finish", audit, MethodSSO, state.UserID, "assurance_policy")
+		}
+		return Authentication{}, ErrStepUpRequired
+	}
 	if claims.Email != "" {
 		normalizedEmail, emailErr := validEmail(claims.Email)
 		if emailErr != nil {

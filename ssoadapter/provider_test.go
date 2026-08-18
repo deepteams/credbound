@@ -490,3 +490,45 @@ func TestVerifyReauthentication(t *testing.T) {
 		t.Fatalf("zero issuance time must skip the staleness check: %v", err)
 	}
 }
+
+func TestFinishForwardsAssertedAuthenticationContext(t *testing.T) {
+	issuer := newTestIssuer(t)
+	provider := newTestProvider(t, issuer, nil)
+	issuer.setClaim("acr", " urn:example:mfa ")
+	issuer.setClaim("amr", []string{"pwd", " otp ", ""})
+	challenge, params := begin(t, issuer, provider, false)
+
+	claims, err := provider.Finish(context.Background(), challenge.Session, callbackURL(params["state"]))
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	if claims.ACR != "urn:example:mfa" {
+		t.Fatalf("ACR = %q", claims.ACR)
+	}
+	if len(claims.AMR) != 2 || claims.AMR[0] != "pwd" || claims.AMR[1] != "otp" {
+		t.Fatalf("AMR = %#v", claims.AMR)
+	}
+}
+
+func TestFinishBoundsAuthenticationContext(t *testing.T) {
+	issuer := newTestIssuer(t)
+	provider := newTestProvider(t, issuer, nil)
+	issuer.setClaim("acr", strings.Repeat("x", 501))
+	oversized := make([]string, 0, 20)
+	for range 20 {
+		oversized = append(oversized, "mfa")
+	}
+	issuer.setClaim("amr", oversized)
+	challenge, params := begin(t, issuer, provider, false)
+
+	claims, err := provider.Finish(context.Background(), challenge.Session, callbackURL(params["state"]))
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	if claims.ACR != "" {
+		t.Fatal("oversized acr must be dropped")
+	}
+	if len(claims.AMR) != 16 {
+		t.Fatalf("AMR must be capped at 16 entries, got %d", len(claims.AMR))
+	}
+}

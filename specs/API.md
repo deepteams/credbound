@@ -273,6 +273,14 @@ nothing: the actor proved possession of the current password, so a routine
 change is not a compromise response — hosts that want the cascade pair it with
 `RevokeUserSessions` or `RevokeUserCredentials`.
 
+`Config.SSOAssurance` registers, per SSO provider configuration, an
+`SSOAssurancePolicy` over the authentication context the provider asserts
+(`SSOClaims.ACR` — the OIDC `acr` claim or SAML `AuthnContextClassRef` — and
+`SSOClaims.AMR`). `FinishSSO` completes only when the policy is satisfied and
+fails with `ErrStepUpRequired` otherwise, so the AAL2 an SSO sign-in produces
+is verified against the IdP's own assertion instead of assumed. The bundled
+`ssoadapter` and `samladapter` forward the asserted context.
+
 `AuthorizePermission` is the canonical tenant authorization. For a scoped
 authentication (a PAT), the permission itself — or the `*` wildcard — must
 additionally appear among the scopes: scopes are the least privilege chosen at

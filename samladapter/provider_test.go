@@ -146,6 +146,9 @@ func TestFinishHappyPath(t *testing.T) {
 	if claims.Email != "user@example.com" || !claims.EmailVerified {
 		t.Fatalf("email must be forwarded as verified, got %+v", claims)
 	}
+	if claims.ACR != "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport" {
+		t.Fatalf("the asserted AuthnContextClassRef must be forwarded as ACR, got %q", claims.ACR)
+	}
 }
 
 func TestFinishAcceptsFormEncodedBody(t *testing.T) {

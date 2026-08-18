@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/deepteams/credbound"
+	"github.com/deepteams/credbound/memory"
 )
 
 func TestMultipleEmailLifecycleAndLastSeen(t *testing.T) {
@@ -420,4 +421,86 @@ func (f *fakeSSOProvider) Finish(_ context.Context, session, response []byte) (c
 		return credbound.SSOClaims{}, errors.New("invalid SSO response")
 	}
 	return f.claims, nil
+}
+
+func TestSSOAssurancePolicy(t *testing.T) {
+	provider := &fakeSSOProvider{
+		configurationID: "0198b463-0000-7000-8000-0000000000bb", kind: credbound.SSOProviderOIDC,
+		claims: credbound.SSOClaims{Issuer: "https://idp.example.com", Subject: "subject-2"},
+	}
+	store := memory.New()
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	manager, err := credbound.New(credbound.Config{
+		Store: store, Passwords: &fakePasswords{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		Clock: func() time.Time { return now }, Random: &counterReader{next: 0x51},
+		SSOProviders: []credbound.SSOProvider{provider},
+		SSOAssurance: map[string]credbound.SSOAssurancePolicy{
+			provider.configurationID: {AcceptedACR: []string{"urn:example:mfa"}, RequiredAMR: []string{"mfa"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	authn, _, err := manager.Bootstrap(ctx, credbound.BootstrapInput{
+		Email: "root@example.com", DisplayName: "Root", Password: "correct horse battery", WorkspaceName: "Main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Without the required assurance the ceremony fails before any link.
+	link, err := manager.BeginSSOLink(ctx, authn, provider.configurationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.FinishSSO(ctx, link.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("unasserted MFA error = %v", err)
+	}
+
+	// The full assurance satisfies the policy: link, then sign in.
+	provider.claims.ACR, provider.claims.AMR = "urn:example:mfa", []string{"pwd", "mfa"}
+	link, err = manager.BeginSSOLink(ctx, authn, provider.configurationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.FinishSSO(ctx, link.Continuation, []byte("valid")); err != nil {
+		t.Fatalf("asserted MFA link = %v", err)
+	}
+	login, err := manager.BeginSSO(ctx, provider.configurationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.FinishSSO(ctx, login.Continuation, []byte("valid")); err != nil {
+		t.Fatalf("asserted MFA login = %v", err)
+	}
+
+	// Losing a required AMR method fails again, and never at AAL2.
+	provider.claims.AMR = []string{"pwd"}
+	login, err = manager.BeginSSO(ctx, provider.configurationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.FinishSSO(ctx, login.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("downgraded AMR error = %v", err)
+	}
+
+	// Config validation: unknown configuration and empty policy are rejected.
+	if _, err := credbound.New(credbound.Config{
+		Store: store, Passwords: &fakePasswords{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		SSOProviders: []credbound.SSOProvider{provider},
+		SSOAssurance: map[string]credbound.SSOAssurancePolicy{"0198b463-0000-7000-8000-0000000000cc": {AcceptedACR: []string{"x"}}},
+	}); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("unregistered policy error = %v", err)
+	}
+	if _, err := credbound.New(credbound.Config{
+		Store: store, Passwords: &fakePasswords{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		SSOProviders: []credbound.SSOProvider{provider},
+		SSOAssurance: map[string]credbound.SSOAssurancePolicy{provider.configurationID: {}},
+	}); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("empty policy error = %v", err)
+	}
 }

@@ -809,6 +809,52 @@ type SSOClaims struct {
 	Subject       string
 	Email         string
 	EmailVerified bool
+	// ACR is the authentication context class the provider asserted — the
+	// OIDC acr claim or the SAML AuthnContextClassRef — or empty when the
+	// provider asserted none. Config.SSOAssurance can require it before
+	// the authentication is granted AAL2.
+	ACR string
+	// AMR lists the OIDC authentication method references (amr) the
+	// provider asserted, such as "mfa", "otp" or "hwk".
+	AMR []string
+}
+
+// SSOAssurancePolicy makes the AAL2 an SSO sign-in produces verifiable
+// instead of declared: FinishSSO completes only when the provider's
+// asserted authentication context satisfies the policy, and fails with
+// ErrStepUpRequired otherwise, so the host can send the user back to the
+// IdP for its second factor. A policy with AcceptedACR requires the
+// asserted ACR to be one of the listed values; RequiredAMR requires every
+// listed method among the asserted AMR values; both together must both
+// hold. Registered per provider configuration in Config.SSOAssurance.
+type SSOAssurancePolicy struct {
+	AcceptedACR []string
+	RequiredAMR []string
+}
+
+func (p SSOAssurancePolicy) empty() bool {
+	return len(p.AcceptedACR) == 0 && len(p.RequiredAMR) == 0
+}
+
+func (p SSOAssurancePolicy) satisfiedBy(claims SSOClaims) bool {
+	if len(p.AcceptedACR) > 0 && !stringInList(claims.ACR, p.AcceptedACR) {
+		return false
+	}
+	for _, required := range p.RequiredAMR {
+		if !stringInList(required, claims.AMR) {
+			return false
+		}
+	}
+	return true
+}
+
+func stringInList(value string, list []string) bool {
+	for _, candidate := range list {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
 }
 
 // SSOChallenge is a started SSO ceremony: the provider redirect URL for the

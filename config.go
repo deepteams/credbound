@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"maps"
 	"reflect"
 	"sync"
 	"time"
@@ -100,6 +101,11 @@ type Config struct {
 	// SSOProviders registers the identity providers the host enables. Each
 	// must expose a unique UUIDv7 configuration ID and a known kind.
 	SSOProviders []SSOProvider
+	// SSOAssurance optionally constrains, per provider configuration ID,
+	// the authentication context a provider must assert before FinishSSO
+	// grants AAL2; see SSOAssurancePolicy. Every key must name a
+	// registered provider and every policy must require something.
+	SSOAssurance map[string]SSOAssurancePolicy
 	// TransactionHooks run inside every mutation's store transaction, after
 	// the mutation and before the audit write. A hook error aborts the
 	// commit. More hooks can be added later with AddTransactionHook.
@@ -171,6 +177,7 @@ type Manager struct {
 	invitationTTL        time.Duration
 	sessionTTL           time.Duration
 	ssoProviders         map[string]SSOProvider
+	ssoAssurance         map[string]SSOAssurancePolicy
 	events               *eventRegistry
 	scimStore            SCIMStore
 	oauthStore           OAuthStore
@@ -262,6 +269,14 @@ func New(cfg Config) (*Manager, error) {
 		}
 		ssoProviders[provider.ConfigurationID()] = provider
 	}
+	for configurationID, policy := range cfg.SSOAssurance {
+		if _, registered := ssoProviders[configurationID]; !registered {
+			return nil, fmt.Errorf("%w: SSO assurance policy for unregistered provider configuration", ErrInvalidInput)
+		}
+		if policy.empty() {
+			return nil, fmt.Errorf("%w: an SSO assurance policy must require an ACR or AMR", ErrInvalidInput)
+		}
+	}
 	dummyHash, err := cfg.Passwords.Hash("credbound-dummy-password")
 	if err != nil {
 		return nil, fmt.Errorf("initialize dummy password: %w", err)
@@ -328,6 +343,7 @@ func New(cfg Config) (*Manager, error) {
 		invitationTTL:        cfg.InvitationTTL,
 		sessionTTL:           cfg.SessionTTL,
 		ssoProviders:         ssoProviders,
+		ssoAssurance:         maps.Clone(cfg.SSOAssurance),
 		events:               events,
 		scimStore:            scimStore,
 		oauthStore:           oauthStore,
