@@ -68,6 +68,14 @@ func buildAdminPermissions(overrides map[InstanceRole][]Permission) (map[Instanc
 // themselves, and a scope-narrowed or workspace-bound credential (a PAT or
 // OAuth token) is refused outright — instance administration is not a
 // delegable, workspace-scoped capability.
+//
+// Deliberate exception: a workspace-unbound PAT holding the "*" scope is an
+// unrestricted credential of its owner and passes this check, so when the
+// owner is an instance administrator such a PAT can perform administration
+// reads — listing every user and workspace, reading the instance audit log.
+// Mutations stay out of reach: RequireAdminMutation additionally demands an
+// interactive fresh AAL2 authentication (or a trusted local request), which
+// no PAT satisfies. Mint "*" PATs for automation deliberately.
 func (m *Manager) AuthorizeAdmin(ctx context.Context, actor Authentication, permission Permission) error {
 	if actor.UserID == "" {
 		return ErrUnauthorized

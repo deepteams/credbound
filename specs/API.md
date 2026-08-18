@@ -276,12 +276,16 @@ k-anonymity).
 carry the `RequestMetadata` supplied through `WithRequestMetadata`, so
 listeners can throttle or alert by client address without re-reading the audit
 log.
-`CompletePasswordReset` atomically installs the password, revokes the user's
-PATs and OAuth grants, and clears the lockout counter; host-owned sessions must
-be terminated by the host alongside it. `ChangePassword` deliberately revokes
-nothing: the actor proved possession of the current password, so a routine
-change is not a compromise response — hosts that want the cascade pair it with
-`RevokeUserSessions` or `RevokeUserCredentials`.
+`CompletePasswordReset` atomically installs the password — the account's
+first, for a passwordless member provisioned by SSO JIT or SCIM — revokes the
+user's PATs and OAuth grants, and clears the lockout counter; host-owned
+sessions must be terminated by the host alongside it (`SessionStore`-capable
+stores revoke server-side sessions in the same transaction). `ChangePassword`
+revokes the user's sessions in the transaction that installs the new password
+but deliberately leaves PATs and OAuth grants alone: the actor proved
+possession of the current password, so a routine change is not a compromise
+response — hosts that want the full cascade pair it with
+`RevokeUserCredentials`.
 
 `Config.SSOAssurance` registers, per SSO provider configuration, an
 `SSOAssurancePolicy` over the authentication context the provider asserts
@@ -389,7 +393,10 @@ the result per token for a short, bounded interval.
 Workspace domains require a `DomainStore`-capable store. `CreateWorkspaceDomain`
 returns a DNS challenge value; the host proves control of the domain (for
 example a TXT record) before calling `ConfirmWorkspaceDomain`. Only confirmed
-domains carry policy. `WorkspaceDomainPolicyInput` selects the auto-join role,
+domains carry policy. A claim left unconfirmed past `Config.DomainClaimTTL`
+(default 7 days) loses its globally unique name reservation to a new claim
+from any workspace, so an unverified claim can never permanently deny the
+domain's real owner; confirmed domains never expire. `WorkspaceDomainPolicyInput` selects the auto-join role,
 the SSO provider configuration used for JIT provisioning, and the SSO
 enforcement flag. When enforcement is on, `AuthenticatePassword`,
 `BeginEmailAuthentication`, `BeginEmailOTP`, `BeginPasswordReset`, and
