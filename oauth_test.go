@@ -1,6 +1,7 @@
 package credbound_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -1253,5 +1254,146 @@ func TestOAuthClientCredentials(t *testing.T) {
 	}
 	if _, err := f.manager.AuthenticateOAuthAccessToken(ctx, resource.Resource, tokens.AccessToken); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("disabled-client auth = %v", err)
+	}
+}
+
+// TestOAuthClientCredentialRotation covers the compromise runbook: the secret
+// of a confidential client and the inline JWKS of a private_key_jwt client
+// rotate in place — keeping the client_id — while CIMD sources, jwks_uri
+// publishers, and method mismatches are refused.
+func TestOAuthClientCredentialRotation(t *testing.T) {
+	f := newOAuthFixture(t)
+	ctx := context.Background()
+	actor, _ := f.bootstrap(t)
+	actor.Level, actor.Method = credbound.AAL2, credbound.MethodTOTP
+	local := credbound.TrustedRequest{Local: true}
+
+	issuer, err := f.manager.CreateOAuthIssuer(ctx, actor, local, credbound.CreateOAuthIssuerInput{
+		Issuer: "https://auth.example.com", CIMDMode: credbound.OAuthCIMDDisabled, DCRMode: credbound.OAuthDCRProtected,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	confidential, err := f.manager.PreRegisterOAuthClient(ctx, actor, local, issuer.ID, credbound.OAuthClientRegistrationInput{
+		Name: "Confidential", ApplicationType: credbound.OAuthApplicationWeb,
+		RedirectURIs: []string{"https://confidential.example.com/callback"}, Scopes: []string{"documents.read"},
+		TokenEndpointAuthMethod: credbound.OAuthAuthClientSecretBasic,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := f.store.OAuthClientByID(ctx, confidential.Client.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The runbook rotates while the client is disabled, so no window exists
+	// where the compromised secret is live.
+	if err := f.manager.DisableOAuthClient(ctx, actor, local, confidential.Client.ID); err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := f.manager.RotateOAuthClientSecret(ctx, actor, local, confidential.Client.ID)
+	if err != nil || !strings.HasPrefix(rotated.ClientSecret, "cbos_") || rotated.ClientSecret == confidential.ClientSecret {
+		t.Fatalf("rotated secret = %#v, %v", rotated, err)
+	}
+	if rotated.Client.ClientID != confidential.Client.ClientID || rotated.Client.SecretDigest != nil {
+		t.Fatalf("rotated client = %#v", rotated.Client)
+	}
+	if err := f.manager.EnableOAuthClient(ctx, actor, local, confidential.Client.ID); err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.store.OAuthClientByID(ctx, confidential.Client.ID)
+	if err != nil || bytes.Equal(after.SecretDigest, before.SecretDigest) {
+		t.Fatalf("secret digest unchanged: %v", err)
+	}
+	if !bytes.Equal(after.MetadataHash, before.MetadataHash) {
+		t.Fatal("secret rotation must not change the metadata hash")
+	}
+	// The old secret stops authenticating; the new one works.
+	if err := f.manager.RevokeOAuthToken(ctx, credbound.RevokeOAuthTokenInput{
+		Issuer: issuer.Issuer, ClientID: confidential.Client.ClientID, ClientSecret: confidential.ClientSecret, Token: "junk",
+	}); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("old secret after rotation = %v", err)
+	}
+	if err := f.manager.RevokeOAuthToken(ctx, credbound.RevokeOAuthTokenInput{
+		Issuer: issuer.Issuer, ClientID: confidential.Client.ClientID, ClientSecret: rotated.ClientSecret, Token: "junk",
+	}); err != nil {
+		t.Fatalf("new secret after rotation = %v", err)
+	}
+
+	private, err := f.manager.PreRegisterOAuthClient(ctx, actor, local, issuer.ID, credbound.OAuthClientRegistrationInput{
+		Name: "Private key", ApplicationType: credbound.OAuthApplicationWeb,
+		RedirectURIs: []string{"https://private.example.com/callback"}, Scopes: []string{"documents.read"},
+		TokenEndpointAuthMethod: credbound.OAuthAuthPrivateKeyJWT, JWKS: json.RawMessage(`{"keys":[]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateBefore, err := f.store.OAuthClientByID(ctx, private.Client.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := []byte(`{"keys":[{"kty":"OKP","crv":"Ed25519"}]}`)
+	if err := f.manager.ReplaceOAuthClientJWKS(ctx, actor, local, private.Client.ID, replacement); err != nil {
+		t.Fatal(err)
+	}
+	privateAfter, err := f.store.OAuthClientByID(ctx, private.Client.ID)
+	if err != nil || !bytes.Equal(privateAfter.JWKS, replacement) {
+		t.Fatalf("replaced JWKS = %s, %v", privateAfter.JWKS, err)
+	}
+	if bytes.Equal(privateAfter.MetadataHash, privateBefore.MetadataHash) {
+		t.Fatal("JWKS replacement must refresh the metadata hash")
+	}
+
+	// Method mismatches and malformed inputs are refused.
+	if _, err := f.manager.RotateOAuthClientSecret(ctx, actor, local, private.Client.ID); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("secret rotation on private_key_jwt client = %v", err)
+	}
+	if err := f.manager.ReplaceOAuthClientJWKS(ctx, actor, local, confidential.Client.ID, replacement); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("JWKS replacement on secret client = %v", err)
+	}
+	if err := f.manager.ReplaceOAuthClientJWKS(ctx, actor, local, private.Client.ID, []byte("not json")); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("malformed JWKS = %v", err)
+	}
+	if _, err := f.manager.RotateOAuthClientSecret(ctx, actor, local, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("invalid client id = %v", err)
+	}
+	if _, err := f.manager.RotateOAuthClientSecret(ctx, actor, local, "0198b463-0000-7000-8000-0000000000aa"); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("unknown client id = %v", err)
+	}
+
+	// A jwks_uri publisher rotates out of band, never in place.
+	remote, err := f.manager.PreRegisterOAuthClient(ctx, actor, local, issuer.ID, credbound.OAuthClientRegistrationInput{
+		Name: "Remote keys", ApplicationType: credbound.OAuthApplicationWeb,
+		RedirectURIs: []string{"https://remote.example.com/callback"}, Scopes: []string{"documents.read"},
+		TokenEndpointAuthMethod: credbound.OAuthAuthPrivateKeyJWT, JWKSURI: "https://remote.example.com/jwks.json",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.ReplaceOAuthClientJWKS(ctx, actor, local, remote.Client.ID, replacement); !errors.Is(err, credbound.ErrConflict) {
+		t.Fatalf("JWKS replacement on jwks_uri client = %v", err)
+	}
+
+	// Rotation carries the same authorization gates as disable/enable.
+	if _, err := f.manager.RotateOAuthClientSecret(ctx, credbound.Authentication{}, local, confidential.Client.ID); !errors.Is(err, credbound.ErrUnauthorized) {
+		t.Fatalf("unauthorized secret rotation = %v", err)
+	}
+	if err := f.manager.ReplaceOAuthClientJWKS(ctx, credbound.Authentication{}, local, private.Client.ID, replacement); !errors.Is(err, credbound.ErrUnauthorized) {
+		t.Fatalf("unauthorized JWKS replacement = %v", err)
+	}
+	stale := actor
+	stale.AuthenticatedAt = f.now.Add(-time.Hour)
+	if _, err := f.manager.RotateOAuthClientSecret(ctx, stale, credbound.TrustedRequest{}, confidential.Client.ID); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("stale secret rotation = %v", err)
+	}
+	if err := f.manager.ReplaceOAuthClientJWKS(ctx, stale, credbound.TrustedRequest{}, private.Client.ID, replacement); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("stale JWKS replacement = %v", err)
+	}
+	if err := f.manager.ReplaceOAuthClientJWKS(ctx, actor, local, "not-a-uuid", replacement); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("invalid client id for JWKS = %v", err)
+	}
+	if err := f.manager.ReplaceOAuthClientJWKS(ctx, actor, local, "0198b463-0000-7000-8000-0000000000aa", replacement); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("unknown client id for JWKS = %v", err)
 	}
 }

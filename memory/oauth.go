@@ -334,6 +334,35 @@ func (s *Store) UpsertOAuthCIMDClient(ctx context.Context, client credbound.OAut
 }
 
 // SetOAuthClientDisabled enables or disables the client.
+// RotateOAuthClientCredentials replaces the client's secret digest and/or
+// inline JWKS (with its recomputed metadata hash) after an administrative
+// credential rotation.
+func (s *Store) RotateOAuthClientCredentials(ctx context.Context, clientID string, secretDigest, jwks, metadataHash []byte, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	client, ok := s.oauthClients[clientID]
+	if !ok {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	if secretDigest != nil {
+		client.SecretDigest = slices.Clone(secretDigest)
+	}
+	if jwks != nil {
+		client.JWKS = slices.Clone(jwks)
+		client.MetadataHash = slices.Clone(metadataHash)
+	}
+	client.UpdatedAt = at
+	s.oauthClients[clientID] = cloneOAuthClient(client)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
 func (s *Store) SetOAuthClientDisabled(ctx context.Context, clientID string, disabled bool, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err

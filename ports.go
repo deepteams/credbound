@@ -335,6 +335,11 @@ type OAuthStore interface {
 	CreateOAuthClient(context.Context, OAuthClient, string, time.Time, Commit) error
 	UpsertOAuthCIMDClient(context.Context, OAuthClient, Commit) error
 	SetOAuthClientDisabled(context.Context, string, bool, time.Time, Commit) error
+	// RotateOAuthClientCredentials atomically replaces the client's secret
+	// digest and/or inline JWKS (with its recomputed metadata hash) after an
+	// administrative credential rotation; a nil secretDigest keeps the
+	// current secret and a nil jwks keeps the current key set.
+	RotateOAuthClientCredentials(ctx context.Context, id string, secretDigest, jwks, metadataHash []byte, at time.Time, commit Commit) error
 	OAuthClientByID(context.Context, string) (OAuthClient, error)
 	OAuthClientByClientID(context.Context, string, string) (OAuthClient, error)
 	OAuthClients(context.Context, string, PageRequest) iter.Seq2[PageEvent[OAuthClient], error]

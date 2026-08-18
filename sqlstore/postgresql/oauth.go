@@ -236,6 +236,31 @@ func (s *Store) SetOAuthClientDisabled(ctx context.Context, id string, disabled 
 	})
 }
 
+// RotateOAuthClientCredentials replaces the client's secret digest and/or
+// inline JWKS (with its recomputed metadata hash) after an administrative
+// credential rotation.
+func (s *Store) RotateOAuthClientCredentials(ctx context.Context, id string, secretDigest, jwks, metadataHash []byte, at time.Time, commit credbound.Commit) error {
+	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
+		value, err := oauthDecodeQuery[credbound.OAuthClient](q.OAuthClientJSONByID(ctx, id))
+		if err != nil {
+			return err
+		}
+		if secretDigest != nil {
+			value.SecretDigest = secretDigest
+		}
+		if jwks != nil {
+			value.JWKS = jwks
+			value.MetadataHash = metadataHash
+		}
+		value.UpdatedAt = at
+		data, err := oauthParam(value)
+		if err != nil {
+			return err
+		}
+		return affected(q.OAuthUpdateClientJSON(ctx, db.OAuthUpdateClientJSONParams{ID: id, DataJson: data}))
+	})
+}
+
 // OAuthClientByID returns the client with the given record ID.
 func (s *Store) OAuthClientByID(ctx context.Context, id string) (credbound.OAuthClient, error) {
 	return oauthDecodeQuery[credbound.OAuthClient](s.queries.OAuthClientJSONByID(ctx, id))

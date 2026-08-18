@@ -2,8 +2,11 @@ package credbound
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"iter"
+	"slices"
 )
 
 // DisableOAuthIssuer disables an issuer so all its discovery, authorization
@@ -171,6 +174,123 @@ func (m *Manager) setOAuthClientDisabled(ctx context.Context, actor Authenticati
 	}
 	if err := store.SetOAuthClientDisabled(ctx, clientID, disabled, m.now(), commit); err != nil {
 		return m.mapStoreError(ctx, operation, err)
+	}
+	m.emitOAuthChange(ctx, change)
+	return nil
+}
+
+// RotateOAuthClientSecret replaces the secret of a pre-registered or DCR
+// client that authenticates with client_secret_basic and returns the new
+// secret exactly once; the previous secret stops authenticating immediately.
+// The client keeps its client_id, so deployed configurations only change the
+// secret, and rotation works on a disabled client, so the compromise runbook
+// — disable, rotate, re-enable — has no window where the old secret is live.
+// The actor needs admin settings write and an admin mutation (fresh AAL2, or
+// a trusted local request). A CIMD client fails with ErrConflict (its
+// credentials follow its published metadata) and a client without
+// client_secret_basic with ErrInvalidInput. Returns ErrNotSupported without
+// the OAuth capability.
+func (m *Manager) RotateOAuthClientSecret(ctx context.Context, actor Authentication, request TrustedRequest, clientID string) (_ IssuedOAuthClient, err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "oauth.client.rotate_secret", started, err) }()
+	store, _, err := m.requireOAuth()
+	if err != nil {
+		return IssuedOAuthClient{}, err
+	}
+	if err := m.AuthorizeAdmin(ctx, actor, PermissionSettingsWrite); err != nil {
+		return IssuedOAuthClient{}, err
+	}
+	if err := m.requireAdminMutation(ctx, actor, request, "oauth.client.rotate_secret"); err != nil {
+		return IssuedOAuthClient{}, err
+	}
+	if !validUUIDv7(clientID) {
+		return IssuedOAuthClient{}, fmt.Errorf("%w: invalid OAuth client id", ErrInvalidInput)
+	}
+	client, err := store.OAuthClientByID(ctx, clientID)
+	if err != nil {
+		return IssuedOAuthClient{}, err
+	}
+	if client.Source == OAuthClientCIMD {
+		return IssuedOAuthClient{}, fmt.Errorf("%w: a CIMD client's credentials follow its published metadata", ErrConflict)
+	}
+	if client.TokenEndpointAuthMethod != OAuthAuthClientSecretBasic {
+		return IssuedOAuthClient{}, fmt.Errorf("%w: client does not authenticate with client_secret_basic", ErrInvalidInput)
+	}
+	secret, err := randomBytes(m.random, 32)
+	if err != nil {
+		return IssuedOAuthClient{}, err
+	}
+	rawSecret := "cbos_" + base64.RawURLEncoding.EncodeToString(secret)
+	secretDigest := m.oauthDigest("client-secret", rawSecret)
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.client.rotate_secret", "oauth_client", clientID, "", AuditSucceeded, "")
+	if err != nil {
+		return IssuedOAuthClient{}, err
+	}
+	change, commit, err := m.newOAuthChange(EventOAuthClientSecretRotated, "oauth.client.rotate_secret", audit, client, "", "", "", "", client.Scopes)
+	if err != nil {
+		return IssuedOAuthClient{}, err
+	}
+	now := m.now()
+	if err := store.RotateOAuthClientCredentials(ctx, clientID, secretDigest, nil, nil, now, commit); err != nil {
+		return IssuedOAuthClient{}, m.mapStoreError(ctx, "oauth.client.rotate_secret", err)
+	}
+	m.emitOAuthChange(ctx, change)
+	client.SecretDigest = secretDigest
+	client.UpdatedAt = now
+	return IssuedOAuthClient{Client: publicOAuthClient(client), ClientSecret: rawSecret}, nil
+}
+
+// ReplaceOAuthClientJWKS atomically replaces the inline JWKS of a
+// pre-registered or DCR private_key_jwt client, so a compromised signing key
+// rotates without re-registering the client. A client publishing a jwks_uri
+// rotates by republishing its own document instead and fails here with
+// ErrConflict, like a CIMD client, whose keys follow its published metadata.
+// Same authorization and capability requirements as RotateOAuthClientSecret.
+func (m *Manager) ReplaceOAuthClientJWKS(ctx context.Context, actor Authentication, request TrustedRequest, clientID string, jwks []byte) (err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "oauth.client.replace_jwks", started, err) }()
+	store, _, err := m.requireOAuth()
+	if err != nil {
+		return err
+	}
+	if err := m.AuthorizeAdmin(ctx, actor, PermissionSettingsWrite); err != nil {
+		return err
+	}
+	if err := m.requireAdminMutation(ctx, actor, request, "oauth.client.replace_jwks"); err != nil {
+		return err
+	}
+	if !validUUIDv7(clientID) {
+		return fmt.Errorf("%w: invalid OAuth client id", ErrInvalidInput)
+	}
+	if len(jwks) == 0 || len(jwks) > 32*1024 || !json.Valid(jwks) {
+		return fmt.Errorf("%w: invalid jwks", ErrInvalidInput)
+	}
+	client, err := store.OAuthClientByID(ctx, clientID)
+	if err != nil {
+		return err
+	}
+	if client.Source == OAuthClientCIMD {
+		return fmt.Errorf("%w: a CIMD client's credentials follow its published metadata", ErrConflict)
+	}
+	if client.TokenEndpointAuthMethod != OAuthAuthPrivateKeyJWT {
+		return fmt.Errorf("%w: client does not authenticate with private_key_jwt", ErrInvalidInput)
+	}
+	if len(client.JWKS) == 0 {
+		return fmt.Errorf("%w: client publishes a jwks_uri and rotates keys there", ErrConflict)
+	}
+	updated := client
+	updated.JWKS = slices.Clone(jwks)
+	metadataHash := oauthClientMetadataHash(updated)
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.client.replace_jwks", "oauth_client", clientID, "", AuditSucceeded, "")
+	if err != nil {
+		return err
+	}
+	change, commit, err := m.newOAuthChange(EventOAuthClientJWKSReplaced, "oauth.client.replace_jwks", audit, client, "", "", "", "", client.Scopes)
+	if err != nil {
+		return err
+	}
+	if err := store.RotateOAuthClientCredentials(ctx, clientID, nil, updated.JWKS, metadataHash, m.now(), commit); err != nil {
+		return m.mapStoreError(ctx, "oauth.client.replace_jwks", err)
 	}
 	m.emitOAuthChange(ctx, change)
 	return nil

@@ -190,6 +190,16 @@ func TestOAuthStoreLifecycle(t *testing.T) {
 	if err := f.store.SetOAuthClientDisabled(ctx, client.ID, false, f.now, f.event(user.ID, "oauth.client.enable", client.ID, "")); err != nil {
 		t.Fatal(err)
 	}
+	rotatedAt := f.now.Add(time.Minute)
+	if err := f.store.RotateOAuthClientCredentials(ctx, client.ID, []byte("new-digest"), []byte(`{"keys":[]}`), []byte("new-hash"), rotatedAt, f.event(user.ID, "oauth.client.rotate_secret", client.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := f.store.OAuthClientByID(ctx, client.ID); err != nil || string(got.SecretDigest) != "new-digest" || string(got.JWKS) != `{"keys":[]}` || string(got.MetadataHash) != "new-hash" || !got.UpdatedAt.Equal(rotatedAt) {
+		t.Fatalf("rotated client = %#v, %v", got, err)
+	}
+	if err := f.store.RotateOAuthClientCredentials(ctx, "0198b463-0000-7000-8000-0000000000aa", []byte("x"), nil, nil, f.now, f.event(user.ID, "oauth.client.rotate_secret", client.ID, "")); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("rotation of unknown client = %v", err)
+	}
 	if err := f.store.SetOAuthProtectedResourceDisabled(ctx, resource.ID, true, f.now, f.event(user.ID, "oauth.resource.disable", resource.ID, workspace.ID)); err != nil {
 		t.Fatal(err)
 	}

@@ -137,6 +137,8 @@ const (
 	EventOAuthClientRegistered        EventName = "oauth.client.registered"
 	EventOAuthClientDisabled          EventName = "oauth.client.disabled"
 	EventOAuthClientEnabled           EventName = "oauth.client.enabled"
+	EventOAuthClientSecretRotated     EventName = "oauth.client.secret_rotated"
+	EventOAuthClientJWKSReplaced      EventName = "oauth.client.jwks_replaced"
 	EventOAuthIssuerDisabled          EventName = "oauth.issuer.disabled"
 	EventOAuthIssuerEnabled           EventName = "oauth.issuer.enabled"
 	EventOAuthResourceDisabled        EventName = "oauth.resource.disabled"

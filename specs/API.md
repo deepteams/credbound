@@ -205,6 +205,8 @@ EnableOAuthProtectedResource(ctx, authn, workspaceID, resourceID) error
 PreRegisterOAuthClient(ctx, authn, TrustedRequest, issuerID, OAuthClientRegistrationInput) (IssuedOAuthClient, error)
 DisableOAuthClient(ctx, authn, TrustedRequest, clientID) error
 EnableOAuthClient(ctx, authn, TrustedRequest, clientID) error
+RotateOAuthClientSecret(ctx, authn, TrustedRequest, clientID) (IssuedOAuthClient, error)
+ReplaceOAuthClientJWKS(ctx, authn, TrustedRequest, clientID, jwks) error
 CreateOAuthInitialAccessToken(ctx, authn, TrustedRequest, issuerID, CreateOAuthInitialAccessTokenInput) (IssuedOAuthInitialAccessToken, error)
 RevokeOAuthInitialAccessToken(ctx, authn, TrustedRequest, tokenID) error
 RegisterOAuthClient(ctx, issuer, initialAccessToken, OAuthClientRegistrationInput) (IssuedOAuthClient, error)

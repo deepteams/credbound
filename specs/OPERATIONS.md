@@ -103,8 +103,11 @@ routine verification stays cheap as the log grows; run the full
 - Compromised workspace: disable the workspace, then review memberships, SCIM
   credentials, OAuth grants, hooks, and application sessions.
 - Compromised PAT or OAuth grant: revoke the individual PAT, token, or grant.
-- Compromised OAuth client: disable the client and rotate any client key or
-  secret before re-enabling it.
+- Compromised OAuth client: disable the client, rotate its credentials with
+  `RotateOAuthClientSecret` (client_secret_basic) or `ReplaceOAuthClientJWKS`
+  (private_key_jwt with an inline JWKS), then re-enable it; the `client_id`
+  is preserved. A client publishing a `jwks_uri` rotates by republishing its
+  own document, and a CIMD client through its metadata.
 - Compromised issuer signing key: activate a new key immediately. Retain the old
   public key only when doing so is safe; otherwise remove it and accept that
   outstanding ID Tokens will fail validation.
