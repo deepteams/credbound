@@ -7,6 +7,14 @@ breaking changes may land in any release and are called out explicitly.
 
 ## Unreleased
 
+### Fixed
+
+- SCIM list responses are now assembled in memory (the page is bounded at
+  100 resources) before the status line is written, so a store read or
+  serialization failure mid-page answers with a real SCIM error document
+  instead of truncated JSON under a 200 the provisioning client would
+  trust.
+
 ### Security
 
 - The anonymous email-issuance throttle can no longer be used to grow

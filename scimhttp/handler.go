@@ -18,7 +18,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"iter"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -759,43 +758,45 @@ func writeGroupList(w http.ResponseWriter, sequence func(func(credbound.PageEven
 }
 
 func writeList[T any](w http.ResponseWriter, sequence func(func(credbound.PageEvent[T], error) bool), resource func(T) any) {
-	next, stop := iter.Pull2(iter.Seq2[credbound.PageEvent[T], error](sequence))
-	defer stop()
-	event, sequenceErr, ok := next()
-	if sequenceErr != nil {
-		writeError(w, sequenceErr)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, `{"schemas":["`+listSchema+`"],"Resources":[`)
-	first, count := true, 0
+	// The page is bounded (count caps at 100), so the whole list response is
+	// assembled in memory before the status line goes out: a read or
+	// serialization failure mid-page becomes a real SCIM error response
+	// instead of truncated JSON under a 200 the client would trust.
+	resources := make([]json.RawMessage, 0, defaultPageLimit)
 	var end credbound.PageEnd
-	for ok {
+	for event, sequenceErr := range sequence {
+		if sequenceErr != nil {
+			writeError(w, sequenceErr)
+			return
+		}
 		if event.Data != nil {
-			if !first {
-				_, _ = io.WriteString(w, ",")
-			}
 			payload, marshalErr := json.Marshal(resource(*event.Data))
 			if marshalErr != nil {
+				writeError(w, marshalErr)
 				return
 			}
-			_, _ = w.Write(payload)
-			first, count = false, count+1
+			resources = append(resources, payload)
 		}
 		if event.End != nil {
 			end = *event.End
 		}
-		event, sequenceErr, ok = next()
-		if sequenceErr != nil {
-			return
-		}
 	}
-	_, _ = io.WriteString(w, `],"itemsPerPage":`+strconv.Itoa(count))
+	var body strings.Builder
+	body.WriteString(`{"schemas":["` + listSchema + `"],"Resources":[`)
+	for index, payload := range resources {
+		if index > 0 {
+			body.WriteString(",")
+		}
+		body.Write(payload)
+	}
+	body.WriteString(`],"itemsPerPage":` + strconv.Itoa(len(resources)))
 	if end.NextCursor != "" {
 		cursor, _ := json.Marshal(end.NextCursor)
-		_, _ = io.WriteString(w, `,"nextCursor":`+string(cursor))
+		body.WriteString(`,"nextCursor":` + string(cursor))
 	}
-	_, _ = io.WriteString(w, "}")
+	body.WriteString("}")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, body.String())
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, target any) error {

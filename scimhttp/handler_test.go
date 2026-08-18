@@ -416,12 +416,25 @@ func TestStreamingListBranches(t *testing.T) {
 	if response.Code != http.StatusInternalServerError || !json.Valid(response.Body.Bytes()) {
 		t.Fatalf("stream error status = %d", response.Code)
 	}
+	// A serialization failure surfaces as a real SCIM error, never a
+	// truncated 200 the client would trust.
 	response = httptest.NewRecorder()
 	writeList[int](response, func(yield func(credbound.PageEvent[int], error) bool) {
 		yield(credbound.ItemEvent(1), nil)
 	}, func(int) any { return make(chan int) })
-	if response.Code != http.StatusOK {
-		t.Fatalf("marshal error status = %d", response.Code)
+	if response.Code != http.StatusInternalServerError || !json.Valid(response.Body.Bytes()) {
+		t.Fatalf("marshal error = %d %s", response.Code, response.Body.String())
+	}
+	// So does a read failure in the middle of the page.
+	response = httptest.NewRecorder()
+	writeList[int](response, func(yield func(credbound.PageEvent[int], error) bool) {
+		if !yield(credbound.ItemEvent(1), nil) {
+			return
+		}
+		yield(credbound.PageEvent[int]{}, errors.New("stream failed mid-page"))
+	}, func(value int) any { return value })
+	if response.Code != http.StatusInternalServerError || !json.Valid(response.Body.Bytes()) {
+		t.Fatalf("mid-page error = %d %s", response.Code, response.Body.String())
 	}
 	response = httptest.NewRecorder()
 	writeList[int](response, func(yield func(credbound.PageEvent[int], error) bool) {
