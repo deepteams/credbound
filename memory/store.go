@@ -353,6 +353,30 @@ func (s *Store) SetUserDisabled(ctx context.Context, userID string, disabled boo
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// UpdateUser persists the user's mutable profile fields. The identity,
+// lifecycle and last-seen fields are copied from the stored record so the
+// caller cannot accidentally rewrite them through a profile update.
+func (s *Store) UpdateUser(ctx context.Context, user credbound.User, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.users[user.ID]
+	if !ok {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	user.CreatedAt = current.CreatedAt
+	user.Disabled = current.Disabled
+	user.LastSeenAt = cloneTime(current.LastSeenAt)
+	s.users[user.ID] = cloneUser(user)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
 // Users streams all users, newest first, as one cursor page.
 func (s *Store) Users(ctx context.Context, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.User], error] {
 	return func(yield func(credbound.PageEvent[credbound.User], error) bool) {

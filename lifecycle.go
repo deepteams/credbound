@@ -269,6 +269,69 @@ func (m *Manager) setUserDisabled(ctx context.Context, actor Authentication, req
 	return nil
 }
 
+// UpdateUser changes the actor's own display name. It requires a recent
+// interactive authentication (any assurance level within the step-up window),
+// mirroring ChangePassword. Updating another account is an administrative
+// mutation, see AdminUpdateUser. It returns the updated user.
+func (m *Manager) UpdateUser(ctx context.Context, actor Authentication, input UpdateUserInput) (user User, err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "auth.user.profile.update", started, err) }()
+	if err := m.requireRecentInteractive(ctx, actor); err != nil {
+		return User{}, err
+	}
+	return m.updateUserProfile(ctx, actor, actor.UserID, input, "user.profile.update")
+}
+
+// AdminUpdateUser changes any account's display name. The actor needs admin
+// users write and an admin mutation (fresh AAL2, or a trusted local
+// request), like every other administrative user lifecycle operation. It
+// returns the updated user.
+func (m *Manager) AdminUpdateUser(ctx context.Context, actor Authentication, request TrustedRequest, userID string, input UpdateUserInput) (user User, err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "admin.user.profile.update", started, err) }()
+	if err := m.AuthorizeAdmin(ctx, actor, PermissionUsersWrite); err != nil {
+		return User{}, err
+	}
+	if err := m.requireAdminMutation(ctx, actor, request, "admin.user.profile.update"); err != nil {
+		return User{}, err
+	}
+	return m.updateUserProfile(ctx, actor, userID, input, "admin.user.profile.update")
+}
+
+func (m *Manager) updateUserProfile(ctx context.Context, actor Authentication, userID string, input UpdateUserInput, operation string) (User, error) {
+	if !validUUIDv7(userID) {
+		return User{}, fmt.Errorf("%w: invalid user id", ErrInvalidInput)
+	}
+	displayName := strings.TrimSpace(input.DisplayName)
+	if displayName == "" || len(displayName) > 200 {
+		return User{}, &ValidationError{Field: "display_name", Rule: "length", Message: "display name must contain between 1 and 200 characters"}
+	}
+	user, err := m.store.UserByID(ctx, userID)
+	if err != nil {
+		return User{}, err
+	}
+	previousProfile := user.DisplayName
+	user.DisplayName = displayName
+	user.UpdatedAt = m.now()
+	audit, err := m.newAudit(ctx, actor.UserID, operation, "user", userID, "", AuditSucceeded, "")
+	if err != nil {
+		return User{}, err
+	}
+	meta, err := m.newEventMeta(EventUserProfileUpdated, operation, actor.UserID, "", audit)
+	if err != nil {
+		return User{}, err
+	}
+	change := UserProfileChange{EventMeta: meta, User: user, PreviousProfile: previousProfile}
+	commit := m.transactionalCommit(audit, operation, func(ctx context.Context, tx Tx, hook TransactionHook) error {
+		return hook.ApplyUserProfileChange(ctx, tx, change)
+	})
+	if err := m.store.UpdateUser(ctx, user, commit); err != nil {
+		return User{}, m.mapStoreError(ctx, operation, err)
+	}
+	m.emitUserProfileChange(ctx, change)
+	return user, nil
+}
+
 // AddMembership adds an existing user to the workspace with the given role,
 // atomically with the audit event. The actor needs a fresh AAL2 step-up plus
 // workspace users write and RBAC write. An existing membership — local or
@@ -495,6 +558,11 @@ func (m *Manager) authorizeWorkspaceMutation(ctx context.Context, actor Authenti
 func (m *Manager) emitWorkspaceChange(ctx context.Context, name EventName, change WorkspaceChange) {
 	event := WorkspaceChangedEvent{EventMeta: change.EventMeta, Workspace: change.Workspace, Previous: change.Previous}
 	m.events.emit(ctx, name, func(listener EventListener) error { return listener.OnWorkspaceChanged(ctx, event) })
+}
+
+func (m *Manager) emitUserProfileChange(ctx context.Context, change UserProfileChange) {
+	event := UserProfileUpdatedEvent{EventMeta: change.EventMeta, UserID: change.User.ID, DisplayName: change.User.DisplayName, PreviousProfile: change.PreviousProfile}
+	m.events.emit(ctx, EventUserProfileUpdated, func(listener EventListener) error { return listener.OnUserProfileUpdated(ctx, event) })
 }
 
 func (m *Manager) emitMembershipChange(ctx context.Context, name EventName, change MembershipChange) {

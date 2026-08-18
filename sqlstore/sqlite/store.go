@@ -259,6 +259,14 @@ func (s *Store) SetUserDisabled(ctx context.Context, userID string, disabled boo
 	})
 }
 
+// UpdateUser persists the user's mutable profile fields.
+func (s *Store) UpdateUser(ctx context.Context, user credbound.User, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		count, err := q.UpdateUser(ctx, db.UpdateUserParams{ID: user.ID, DisplayName: user.DisplayName, UpdatedAt: user.UpdatedAt})
+		return affected(count, err)
+	})
+}
+
 // Users streams all users, newest first, as one cursor page.
 func (s *Store) Users(ctx context.Context, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.User], error] {
 	return func(yield func(credbound.PageEvent[credbound.User], error) bool) {

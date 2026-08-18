@@ -88,8 +88,10 @@ AdminUpdateWorkspace(ctx, authn, TrustedRequest, workspaceID, UpdateWorkspaceInp
 AdminDisableWorkspace(ctx, authn, TrustedRequest, workspaceID) error
 AdminEnableWorkspace(ctx, authn, TrustedRequest, workspaceID) error
 CreateUser(ctx, authn, workspaceID, CreateUserInput) (User, error)
+UpdateUser(ctx, authn, UpdateUserInput) (User, error)
 DisableUser(ctx, authn, TrustedRequest, userID) error
 EnableUser(ctx, authn, TrustedRequest, userID) error
+AdminUpdateUser(ctx, authn, TrustedRequest, userID, UpdateUserInput) (User, error)
 AddMembership(ctx, authn, workspaceID, userID, role) (Membership, error)
 SetMembershipStatus(ctx, authn, workspaceID, userID, status) (Membership, error)
 RemoveMembership(ctx, authn, workspaceID, userID) error
@@ -446,6 +448,7 @@ type TransactionHook interface {
     ApplyInstanceRoleRemoval(context.Context, Tx, InstanceRoleRemoval) error
     ApplyClientAudit(context.Context, Tx, ClientAuditRecord) error
     ApplyUserStatusChange(context.Context, Tx, UserStatusChange) error
+    ApplyUserProfileChange(context.Context, Tx, UserProfileChange) error
     ApplyWorkspaceChange(context.Context, Tx, WorkspaceChange) error
     ApplyMembershipChange(context.Context, Tx, MembershipChange) error
     ApplyWorkspaceInvitationChange(context.Context, Tx, WorkspaceInvitationChange) error
@@ -484,6 +487,7 @@ other listeners.
 Events cover:
 
 - bootstrap, self-service signup, and user and workspace creation;
+- user profile updates (`user.profile_updated`);
 - workspace lifecycle, memberships, and invitations;
 - passwords and authentication (email OTP reuses the email-authentication
   and generic authentication events, distinguishable by their `Operation`);

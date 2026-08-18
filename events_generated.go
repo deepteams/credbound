@@ -22,6 +22,10 @@ func (UnimplementedTransactionHook) ApplyUserStatusChange(context.Context, Tx, U
 	return nil
 }
 
+func (UnimplementedTransactionHook) ApplyUserProfileChange(context.Context, Tx, UserProfileChange) error {
+	return nil
+}
+
 func (UnimplementedTransactionHook) ApplyWorkspaceChange(context.Context, Tx, WorkspaceChange) error {
 	return nil
 }
@@ -169,6 +173,10 @@ func (UnimplementedEventListener) OnWorkspaceCreated(context.Context, WorkspaceC
 }
 
 func (UnimplementedEventListener) OnUserStatusChanged(context.Context, UserStatusEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnUserProfileUpdated(context.Context, UserProfileUpdatedEvent) error {
 	return nil
 }
 

@@ -683,6 +683,21 @@ func TestLifecycleStoreContract(t *testing.T) {
 	if err := f.store.SetUserDisabled(ctx, user.ID, false, f.now, f.event(root.ID, "user.enable", user.ID, "")); err != nil {
 		t.Fatal(err)
 	}
+	renamed := user
+	renamed.DisplayName = "Renamed"
+	renamed.UpdatedAt = f.now
+	if err := f.store.UpdateUser(ctx, renamed, f.event(root.ID, "user.profile.update", user.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := f.store.UserByID(ctx, user.ID)
+	if err != nil || stored.DisplayName != "Renamed" {
+		t.Fatalf("renamed user = %#v, %v", stored, err)
+	}
+	unknown := user
+	unknown.ID = f.id()
+	if err := f.store.UpdateUser(ctx, unknown, f.event(root.ID, "user.profile.update.missing", unknown.ID, "")); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("update of unknown user = %v", err)
+	}
 }
 
 func TestLifecycleStoreStreamFailures(t *testing.T) {

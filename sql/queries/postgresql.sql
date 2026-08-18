@@ -20,6 +20,9 @@ WHERE u.id = $1;
 -- name: SetUserDisabled :execrows
 UPDATE credbound.users SET disabled = $2, updated_at = $3 WHERE id = $1;
 
+-- name: UpdateUser :execrows
+UPDATE credbound.users SET display_name = $2, updated_at = $3 WHERE id = $1;
+
 -- name: CountEnabledRootAdministrators :one
 SELECT count(*) FROM credbound.instance_administrators a
 JOIN credbound.users u ON u.id = a.user_id

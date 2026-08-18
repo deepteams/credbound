@@ -13,6 +13,9 @@ type Store interface {
 	Bootstrap(context.Context, User, EmailAddress, PasswordCredential, Workspace, Membership, InstanceAdministrator, Commit) error
 	CreateUser(context.Context, User, EmailAddress, PasswordCredential, Membership, Commit) error
 	SetUserDisabled(context.Context, string, bool, time.Time, Commit) error
+	// UpdateUser persists the user's mutable profile fields. It returns
+	// ErrNotFound for an unknown identifier.
+	UpdateUser(context.Context, User, Commit) error
 	UserByEmail(context.Context, string) (User, error)
 	UserByID(context.Context, string) (User, error)
 	Users(context.Context, PageRequest) iter.Seq2[PageEvent[User], error]

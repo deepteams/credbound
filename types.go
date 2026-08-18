@@ -939,6 +939,15 @@ type UpdateWorkspaceInput struct {
 	RequireMFA *bool
 }
 
+// UpdateUserInput describes a user profile update. Emails are managed by the
+// dedicated add/primary/remove operations and the disabled flag by the
+// administrative lifecycle, so the only mutable profile field is the display
+// name.
+type UpdateUserInput struct {
+	// DisplayName is the new 1-200 character profile name, trimmed.
+	DisplayName string
+}
+
 // TOTPEnrollment is a started TOTP enrollment. URI is the otpauth:// URI the
 // host renders as a QR code; it contains the secret and must not be
 // persisted or logged.

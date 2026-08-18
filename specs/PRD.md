@@ -50,6 +50,7 @@ Credbound provides a reusable, testable, transport-independent core.
 | RBAC-002 | Permission changes | Only a workspace administrator with a valid step-up may grant or modify a role. |
 | RBAC-003 | Permission-based authorization | The canonical check uses a workspace permission. Inheritance is validated without cycles, `admin` receives all registered permissions, and an unknown role fails closed. |
 | USER-002 | Administrative lifecycle | An instance administrator can disable or re-enable a global user. A disabled user cannot authenticate or authorize, and the last enabled root administrator is protected. |
+| USER-003 | Profile | A user can change their own display name with a recent interactive authentication; an instance administrator with users write and an admin mutation can change any account's display name. Both operations are atomic with their audit and emit a `user.profile_updated` event exposing the replaced value. |
 | ADMIN-001 | Instance administration | Instance administration is separate from workspace RBAC and provides `root`, `developer`, `support`, `marketing`, and `sales`. |
 | ADMIN-002 | First administrator | The first account created by `Bootstrap` atomically receives the instance-level `root` role. |
 | ADMIN-003 | Permissions | Each instance role maps to explicit permissions; services authorize an action by permission rather than through ad hoc role-name comparisons. |

@@ -3,7 +3,9 @@ package credbound_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/deepteams/credbound"
 )
@@ -243,4 +245,114 @@ func assertLifecycleError[T any](t *testing.T, sequence func(func(credbound.Page
 		return
 	}
 	t.Fatal("stream did not yield an error")
+}
+
+type userProfileRecorder struct {
+	credbound.UnimplementedEventListener
+	t     *testing.T
+	calls []credbound.UserProfileUpdatedEvent
+}
+
+func (r *userProfileRecorder) OnUserProfileUpdated(_ context.Context, event credbound.UserProfileUpdatedEvent) error {
+	r.t.Helper()
+	if event.UserID == "" || event.DisplayName == "" {
+		r.t.Fatalf("profile event carries no identity: %#v", event)
+	}
+	r.calls = append(r.calls, event)
+	return nil
+}
+
+func TestUpdateUserProfile(t *testing.T) {
+	f := newFixture(t)
+	recorder := &userProfileRecorder{t: t}
+	f.manager.AddEventListener(recorder)
+	ctx := context.Background()
+	authn, workspace := f.bootstrap(t)
+	root := aal2(authn.UserID, f.now)
+
+	member, err := f.manager.CreateUser(ctx, root, workspace.ID, credbound.CreateUserInput{
+		Email: "member@example.com", DisplayName: "Member", Password: "correct horse battery", Role: credbound.RoleMember,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberInteractive := credbound.Authentication{UserID: member.ID, Method: credbound.MethodPassword, Level: credbound.AAL1, AuthenticatedAt: f.now}
+
+	if _, err := f.manager.UpdateUser(ctx, credbound.Authentication{}, credbound.UpdateUserInput{DisplayName: "Nobody"}); !errors.Is(err, credbound.ErrUnauthorized) {
+		t.Fatalf("anonymous profile update = %v", err)
+	}
+	pat := credbound.Authentication{UserID: member.ID, Method: credbound.MethodPAT, WorkspaceID: "", AuthenticatedAt: f.now}
+	if _, err := f.manager.UpdateUser(ctx, pat, credbound.UpdateUserInput{DisplayName: "Nobody"}); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("PAT profile update = %v", err)
+	}
+	if _, err := f.manager.UpdateUser(ctx, aal2(member.ID, f.now.Add(-time.Hour)), credbound.UpdateUserInput{DisplayName: "Stale"}); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("stale profile update = %v", err)
+	}
+	if _, err := f.manager.UpdateUser(ctx, memberInteractive, credbound.UpdateUserInput{DisplayName: " "}); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("blank display name = %v", err)
+	}
+	if _, err := f.manager.UpdateUser(ctx, memberInteractive, credbound.UpdateUserInput{DisplayName: strings.Repeat("x", 201)}); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("overlong display name = %v", err)
+	}
+
+	t0 := f.now
+	updated, err := f.manager.UpdateUser(ctx, memberInteractive, credbound.UpdateUserInput{DisplayName: "  New Member "})
+	if err != nil || updated.DisplayName != "New Member" || updated.ID != member.ID {
+		t.Fatalf("self profile update = %#v, %v", updated, err)
+	}
+	if !updated.UpdatedAt.Equal(t0) {
+		t.Fatalf("updated timestamp = %v, want clock value %v", updated.UpdatedAt, t0)
+	}
+	if stored, err := f.store.UserByID(ctx, member.ID); err != nil || stored.DisplayName != "New Member" {
+		t.Fatalf("stored profile = %#v, %v", stored, err)
+	}
+	if got := len(recorder.calls); got != 1 || recorder.calls[0].DisplayName != "New Member" || recorder.calls[0].PreviousProfile != "Member" {
+		t.Fatalf("profile events = %#v", recorder.calls)
+	}
+
+	// The member must not be able to rename any other account.
+	if _, err := f.manager.AdminUpdateUser(ctx, memberInteractive, credbound.TrustedRequest{Local: true}, authn.UserID, credbound.UpdateUserInput{DisplayName: "Hijack"}); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("non-admin administrative profile update = %v", err)
+	}
+	if _, err := f.manager.AdminUpdateUser(ctx, aal2(member.ID, f.now), credbound.TrustedRequest{}, authn.UserID, credbound.UpdateUserInput{DisplayName: "Hijack"}); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("untrusted non-admin profile update = %v", err)
+	}
+
+	// The trusted-local exception (ADMIN-006) admits the AAL1 root without a
+	// fresh step-up, mirroring the administrative lifecycle contract.
+	adminUpdated, err := f.manager.AdminUpdateUser(ctx, aal1(authn.UserID, t0), credbound.TrustedRequest{Local: true}, authn.UserID, credbound.UpdateUserInput{DisplayName: "Instance Root"})
+	if err != nil || adminUpdated.DisplayName != "Instance Root" {
+		t.Fatalf("administrative profile update = %#v, %v", adminUpdated, err)
+	}
+	// Without the trusted-local exception the same AAL1 root still demands a
+	// fresh AAL2 step-up (ADMIN-005).
+	if _, err := f.manager.AdminUpdateUser(ctx, aal1(authn.UserID, f.now), credbound.TrustedRequest{}, authn.UserID, credbound.UpdateUserInput{DisplayName: "Step-up"}); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("untrusted AAL1 administrative profile update = %v", err)
+	}
+	if _, err := f.manager.AdminUpdateUser(ctx, root, credbound.TrustedRequest{Local: true}, "bad-id", credbound.UpdateUserInput{DisplayName: "X"}); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("invalid target identifier = %v", err)
+	}
+	if _, err := f.manager.AdminUpdateUser(ctx, root, credbound.TrustedRequest{Local: true}, "0198b463-0000-7000-8000-00000000babe", credbound.UpdateUserInput{DisplayName: "Missing"}); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("missing target = %v", err)
+	}
+
+	// Both mutations are auditable: the self update by the member, the
+	// administrative one by the root actor.
+	audit := collectAuditPage(t, f.manager.InstanceAuditEvents(ctx, root, credbound.PageRequest{}))
+	var foundSelf, foundAdmin bool
+	for _, item := range audit.items {
+		if item.Action == "user.profile.update" && item.ActorID == member.ID && item.ResourceID == member.ID && item.Outcome == credbound.AuditSucceeded {
+			foundSelf = true
+		}
+		if item.Action == "admin.user.profile.update" && item.ActorID == authn.UserID && item.ResourceID == authn.UserID && item.Outcome == credbound.AuditSucceeded {
+			foundAdmin = true
+		}
+	}
+	if !foundSelf || !foundAdmin {
+		t.Fatalf("profile audit trail missing: self=%v admin=%v", foundSelf, foundAdmin)
+	}
+}
+
+func aal1(userID string, at time.Time) credbound.Authentication {
+	return credbound.Authentication{UserID: userID, Method: credbound.MethodPassword, Level: credbound.AAL1, AuthenticatedAt: at}
 }

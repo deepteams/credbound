@@ -16,7 +16,9 @@ be reimplemented in every project:
   expiring email proofs with enumeration-resistant initiation;
 - an optional password policy port for breached-password (HIBP) vetting;
 - built-in account lockout after consecutive password or TOTP failures;
-- multiple verified email addresses per user, with one primary address;
+- multiple verified email addresses per user, with one primary address, plus an
+  updatable display name (self-service with a recent sign-in, any account by an
+  instance administrator);
 - transactional tracking of the latest authentication (`last_seen_at`);
 - optional SSO per SaaS application (Google, GitHub, Microsoft, OIDC, and SAML);
 - freshness checks for step-up operations;

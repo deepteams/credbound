@@ -2899,6 +2899,24 @@ func (q *Queries) UpdateSCIMUser(ctx context.Context, arg UpdateSCIMUserParams) 
 	return result.RowsAffected()
 }
 
+const updateUser = `-- name: UpdateUser :execrows
+UPDATE credbound.users SET display_name = $2, updated_at = $3 WHERE id = $1
+`
+
+type UpdateUserParams struct {
+	ID          string    `json:"id"`
+	DisplayName string    `json:"display_name"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateUser, arg.ID, arg.DisplayName, arg.UpdatedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const updateWorkspace = `-- name: UpdateWorkspace :execrows
 UPDATE credbound.workspaces SET name = $2, updated_at = $3, require_mfa = $4 WHERE id = $1
 `

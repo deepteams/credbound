@@ -423,3 +423,44 @@ func assertSequenceError[T any](t *testing.T, sequence func(func(T, error) bool)
 		t.Fatal("sequence did not yield an error")
 	}
 }
+
+// TestUpdateUserStore verifies that the memory UpdateUser mutates only the
+// profile fields and leaves identity / lifecycle untouched, and that
+// updating an unknown identifier fails with ErrNotFound.
+func TestUpdateUserStore(t *testing.T) {
+	f := newStoreFixture(t)
+	ctx := context.Background()
+	before := f.user
+	updated := before
+	updated.DisplayName = "Renamed"
+	updated.UpdatedAt = f.now.Add(time.Second)
+	// Attempt to spoof a lifecycle field: it must not be honored.
+	updated.Disabled = true
+	updated.LastSeenAt = &f.now
+
+	if err := f.store.UpdateUser(ctx, updated, f.event("user.profile.update")); err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.store.UserByID(ctx, f.user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.DisplayName != "Renamed" {
+		t.Fatalf("display name = %q", after.DisplayName)
+	}
+	if after.Disabled != before.Disabled {
+		t.Fatalf("disabled flag rewritten to %v", after.Disabled)
+	}
+	if !after.UpdatedAt.Equal(updated.UpdatedAt) {
+		t.Fatalf("updated_at = %v, want %v", after.UpdatedAt, updated.UpdatedAt)
+	}
+	if after.CreatedAt != before.CreatedAt {
+		t.Fatalf("created_at rewritten")
+	}
+
+	unknown := updated
+	unknown.ID = f.id()
+	if err := f.store.UpdateUser(ctx, unknown, f.event("user.profile.update")); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("update of unknown user = %v", err)
+	}
+}

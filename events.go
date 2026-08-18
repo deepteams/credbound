@@ -88,6 +88,7 @@ const (
 	EventPasskeyAuthenticated         EventName = "passkey.authenticated"
 	EventUserCredentialsRevoked       EventName = "user.credentials_revoked"
 	EventUserLocked                   EventName = "user.locked"
+	EventUserProfileUpdated           EventName = "user.profile_updated"
 	EventSessionCreated               EventName = "session.created"
 	EventSessionRevoked               EventName = "session.revoked"
 	EventUserSessionsRevoked          EventName = "session.user_revoked"
@@ -172,6 +173,14 @@ type UserStatusChange struct {
 	EventMeta
 	UserID   string
 	Disabled bool
+}
+
+// UserProfileChange carries a profile display-name update and the value it
+// replaced.
+type UserProfileChange struct {
+	EventMeta
+	User            User
+	PreviousProfile string
 }
 
 // WorkspaceChange carries a workspace update, disable or enable together
@@ -738,6 +747,14 @@ type UserStatusEvent struct {
 	Disabled bool
 }
 
+// UserProfileUpdatedEvent reports a profile display-name update.
+type UserProfileUpdatedEvent struct {
+	EventMeta
+	UserID          string
+	DisplayName     string
+	PreviousProfile string
+}
+
 // WorkspaceChangedEvent reports a workspace update, disable or enable
 // together with the state it replaced.
 type WorkspaceChangedEvent struct {
@@ -774,6 +791,7 @@ type TransactionHook interface {
 	ApplyUserCreate(context.Context, Tx, UserCreateChange) error
 	ApplyWorkspaceCreate(context.Context, Tx, WorkspaceCreateChange) error
 	ApplyUserStatusChange(context.Context, Tx, UserStatusChange) error
+	ApplyUserProfileChange(context.Context, Tx, UserProfileChange) error
 	ApplyWorkspaceChange(context.Context, Tx, WorkspaceChange) error
 	ApplyMembershipChange(context.Context, Tx, MembershipChange) error
 	ApplyWorkspaceInvitationChange(context.Context, Tx, WorkspaceInvitationChange) error
@@ -824,6 +842,7 @@ type EventListener interface {
 	OnUserCreated(context.Context, UserCreatedEvent) error
 	OnWorkspaceCreated(context.Context, WorkspaceCreatedEvent) error
 	OnUserStatusChanged(context.Context, UserStatusEvent) error
+	OnUserProfileUpdated(context.Context, UserProfileUpdatedEvent) error
 	OnWorkspaceChanged(context.Context, WorkspaceChangedEvent) error
 	OnMembershipChanged(context.Context, MembershipChangedEvent) error
 	OnWorkspaceInvitationCreated(context.Context, WorkspaceInvitationEvent) error
