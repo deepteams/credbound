@@ -9,7 +9,38 @@ import (
 
 // Store persists every mutation together with its transaction hooks and audit.
 // Implementations must commit all three stages or none of them.
+//
+// Store is the required persistence port. It is composed of the capability
+// groups below purely for navigability — the method set is unchanged and a
+// Store implements all of them; the optional capabilities (SignupStore,
+// SessionStore, EmailThrottleStore, DomainStore, SCIMStore, PrivacyStore,
+// OAuthStore, PasskeyCredentialStore) remain separate interfaces.
+//
+// Compatibility contract: the required method set may grow in minor releases
+// as features ship, so implementing Store from scratch means tracking every
+// release. External stores that want to stay compile-compatible across
+// upgrades should embed one of the shipped implementations (sqlstore/sqlite,
+// sqlstore/postgresql, memory) in a struct and override only the methods
+// they need.
 type Store interface {
+	IdentityStore
+	PasswordResetStore
+	EmailAuthenticationStore
+	EmailStore
+	TOTPStore
+	PasskeyStore
+	PATStore
+	RevocationStore
+	InvitationStore
+	WorkspaceStore
+	SSOLinkStore
+	AuditStore
+}
+
+// IdentityStore is the account backbone of the required Store: user
+// records, the password credential with its currency guards, and the
+// login throttle.
+type IdentityStore interface {
 	Bootstrap(context.Context, User, EmailAddress, PasswordCredential, Workspace, Membership, InstanceAdministrator, Commit) error
 	CreateUser(context.Context, User, EmailAddress, PasswordCredential, Membership, Commit) error
 	SetUserDisabled(context.Context, string, bool, time.Time, Commit) error
@@ -50,7 +81,11 @@ type Store interface {
 	// the counter reaches the threshold, persists the lockout deadline. It
 	// returns the updated throttle.
 	RecordLoginFailure(ctx context.Context, userID string, at time.Time, threshold int64, lockedUntil time.Time, commit Commit) (LoginThrottle, error)
+}
 
+// PasswordResetStore persists the single-use password-reset credentials
+// and the atomic reset completion with its revocation sweep.
+type PasswordResetStore interface {
 	CreatePasswordReset(context.Context, PasswordResetCredential, Commit) error
 	PasswordResetByID(context.Context, string) (PasswordResetCredential, error)
 	// CompletePasswordReset atomically consumes the single-use reset,
@@ -61,7 +96,11 @@ type Store interface {
 	// sessions), and clears the login throttle. It returns ErrConflict when
 	// the reset was already consumed.
 	CompletePasswordReset(ctx context.Context, resetID string, password PasswordCredential, at time.Time, commit Commit) error
+}
 
+// EmailAuthenticationStore persists the single-use magic-link and email
+// OTP credentials.
+type EmailAuthenticationStore interface {
 	CreateEmailAuthentication(context.Context, EmailAuthenticationCredential, Commit) error
 	EmailAuthenticationByID(context.Context, string) (EmailAuthenticationCredential, error)
 	// ConsumeEmailAuthentication atomically marks the single-use magic-link
@@ -71,7 +110,11 @@ type Store interface {
 	// factor clears them on success. It returns ErrConflict when the token
 	// was already consumed.
 	ConsumeEmailAuthentication(ctx context.Context, tokenID, userID string, at time.Time, completesLogin bool, commit Commit) error
+}
 
+// EmailStore persists a user's email addresses and their verification
+// credentials.
+type EmailStore interface {
 	SaveEmail(context.Context, EmailAddress, EmailVerificationCredential, Commit) error
 	EmailVerificationByID(context.Context, string) (EmailAddress, EmailVerificationCredential, error)
 	// EmailByAddress resolves an address to its record without the verification
@@ -86,7 +129,11 @@ type Store interface {
 	SetPrimaryEmail(context.Context, string, string, Commit) error
 	RemoveEmail(context.Context, string, string, Commit) error
 	Emails(context.Context, string, PageRequest) iter.Seq2[PageEvent[EmailAddress], error]
+}
 
+// TOTPStore persists the TOTP factor, its recovery codes, and the atomic
+// second-factor reset.
+type TOTPStore interface {
 	TOTPByUserID(context.Context, string) (TOTPFactor, error)
 	SaveTOTPEnrollment(context.Context, TOTPFactor, Commit) error
 	ActivateTOTP(context.Context, TOTPFactor, []RecoveryCode, Commit) error
@@ -104,7 +151,11 @@ type Store interface {
 	// succeeds even when the user has no second factor; an unknown user
 	// reports ErrNotFound.
 	ResetSecondFactor(ctx context.Context, userID string, at time.Time, commit Commit) error
+}
 
+// PasskeyStore persists WebAuthn credentials. The optional
+// PasskeyCredentialStore capability extends it for the usernameless flow.
+type PasskeyStore interface {
 	Passkeys(context.Context, string) iter.Seq2[Passkey, error]
 	SavePasskey(context.Context, Passkey, Commit) error
 	// TouchPasskey persists the credential's updated JSON and last-used time
@@ -112,12 +163,20 @@ type Store interface {
 	// completed (AUTH-009) — clears the login throttle.
 	TouchPasskey(context.Context, string, []byte, []byte, time.Time, Commit) error
 	DeletePasskey(context.Context, string, string, Commit) error
+}
 
+// PATStore persists personal access tokens.
+type PATStore interface {
 	CreatePAT(context.Context, PAT, Commit) error
 	PATByPrefix(context.Context, string) (PAT, error)
 	TouchPAT(context.Context, string, time.Time, Commit) error
 	RevokePAT(context.Context, string, string, time.Time, Commit) error
 	PATs(context.Context, string, PageRequest) iter.Seq2[PageEvent[PAT], error]
+}
+
+// RevocationStore holds the cross-credential compromise-response and
+// privacy operations.
+type RevocationStore interface {
 	// RevokeUserCredentials atomically revokes every active PAT of the user
 	// and, when the store has the OAuth capability, every OAuth grant and its
 	// tokens. A SessionStore-capable store also revokes the user's sessions
@@ -137,7 +196,11 @@ type Store interface {
 	// sole admin of a workspace, mirroring SetUserDisabled, and ErrNotFound for
 	// an unknown user.
 	AnonymizeUser(ctx context.Context, userID string, at time.Time, commit Commit) error
+}
 
+// InvitationStore persists workspace invitations and their atomic
+// acceptance paths.
+type InvitationStore interface {
 	CreateWorkspaceInvitation(context.Context, WorkspaceInvitation, Commit) error
 	WorkspaceInvitationByID(context.Context, string) (WorkspaceInvitation, error)
 	PendingWorkspaceInvitation(ctx context.Context, workspaceID, email string) (WorkspaceInvitation, error)
@@ -152,7 +215,11 @@ type Store interface {
 	RegisterInvitedUser(ctx context.Context, invitationID string, user User, email EmailAddress, password PasswordCredential, membership Membership, at time.Time, commit Commit) error
 	RevokeWorkspaceInvitation(ctx context.Context, workspaceID, invitationID string, at time.Time, commit Commit) error
 	WorkspaceInvitations(context.Context, string, PageRequest) iter.Seq2[PageEvent[WorkspaceInvitation], error]
+}
 
+// WorkspaceStore persists workspaces, memberships and instance role
+// assignments.
+type WorkspaceStore interface {
 	CreateWorkspace(context.Context, Workspace, Membership, Commit) error
 	WorkspaceByID(context.Context, string) (Workspace, error)
 	UpdateWorkspace(context.Context, Workspace, Commit) error
@@ -170,7 +237,11 @@ type Store interface {
 	InstanceAdministrators(context.Context) iter.Seq2[InstanceAdministrator, error]
 	SetInstanceRole(context.Context, InstanceAdministrator, Commit) error
 	RemoveInstanceRole(context.Context, string, Commit) error
+}
 
+// SSOLinkStore persists the links between accounts and external SSO
+// identities.
+type SSOLinkStore interface {
 	SSOIdentity(context.Context, string, string, string) (SSOIdentity, error)
 	// LinkSSO stores a new SSO identity link; an identity already linked to
 	// any user reports ErrConflict. A link carrying LastUsedAt records a
@@ -187,7 +258,10 @@ type Store interface {
 	// passwordless member must not be able to lock themselves out.
 	UnlinkSSO(context.Context, string, string, Commit) error
 	SSOIdentities(context.Context, string, PageRequest) iter.Seq2[PageEvent[SSOIdentity], error]
+}
 
+// AuditStore persists the append-only audit trail and its hash chain.
+type AuditStore interface {
 	AppendAudit(context.Context, Commit) error
 	AuditEvents(context.Context, string, PageRequest) iter.Seq2[PageEvent[AuditEvent], error]
 	InstanceAuditEvents(context.Context, PageRequest) iter.Seq2[PageEvent[AuditEvent], error]
