@@ -262,7 +262,10 @@ listeners can throttle or alert by client address without re-reading the audit
 log.
 `CompletePasswordReset` atomically installs the password, revokes the user's
 PATs and OAuth grants, and clears the lockout counter; host-owned sessions must
-be terminated by the host alongside it.
+be terminated by the host alongside it. `ChangePassword` deliberately revokes
+nothing: the actor proved possession of the current password, so a routine
+change is not a compromise response — hosts that want the cascade pair it with
+`RevokeUserSessions` or `RevokeUserCredentials`.
 
 `WithRequestMetadata(ctx, RequestMetadata)` attaches the client network context
 that every audit event recorded while serving the request will carry. The host

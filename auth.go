@@ -272,6 +272,13 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 // within the step-up window) and validates the new password against the
 // built-in rules and Config.PasswordPolicy. A wrong current password is
 // audited and returns ErrInvalidCredentials.
+//
+// Unlike CompletePasswordReset, a change deliberately revokes nothing: the
+// actor proved possession of the current password, so existing sessions,
+// PATs and OAuth grants are not evidence of compromise. A reset flows from
+// a lost or suspected password and therefore cascades; a host that treats
+// a routine change as a compromise response should call RevokeUserSessions
+// or RevokeUserCredentials alongside it.
 func (m *Manager) ChangePassword(ctx context.Context, actor Authentication, currentPassword, newPassword string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.password.change", started, err) }()
