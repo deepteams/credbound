@@ -304,10 +304,11 @@ type DomainStore interface {
 // the challenge token minted at creation; any non-nil error refuses the
 // confirmation with ErrDomainVerification. A typical implementation resolves
 // the domain's TXT records and checks the challenge is published. Without a
-// verifier, confirmation trusts the actor's out-of-band check — a self-serve
-// deployment that exposes ConfirmWorkspaceDomain directly should register one,
-// because a confirmed domain governs SSO enforcement and JIT provisioning for
-// every address on it, instance-wide.
+// verifier, ConfirmWorkspaceDomain refuses with ErrNotSupported unless
+// Config.TrustActorDomainVerification explicitly opts into trusting the
+// actor's out-of-band check — a dangerous setting wherever the operation is
+// reachable from self-serve actors, because a confirmed domain governs SSO
+// enforcement and JIT provisioning for every address on it, instance-wide.
 type DomainVerifier interface {
 	VerifyDomain(ctx context.Context, domain, challenge string) error
 }

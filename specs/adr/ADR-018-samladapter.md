@@ -57,8 +57,10 @@ SSO-001's SAML claim becomes real: hosts register `samladapter.New` output in
 `github.com/crewjam/saml` (with its `goxmldsig`, `etree`, and
 `xml-roundtrip-validator` graph) as dependencies of the `samladapter` package
 only; the core packages import none of them. Metadata rotation is a host
-redeploy with fresh `MetadataXML`, or — when `MetadataURL` is used — a
-provider restart, since a fetched document is cached for the provider's
-lifetime. Hosts needing IdP-initiated SSO, transient-only IdPs beyond the
+redeploy with fresh `MetadataXML`, or — when `MetadataURL` is used —
+automatic: the fetched document is cached and re-fetched once the provider's
+metadata TTL elapses, so a rotated or revoked IdP signing certificate is
+picked up without a redeploy, and a failed refresh keeps serving the last
+good document. Hosts needing IdP-initiated SSO, transient-only IdPs beyond the
 explicit override, artifact binding, or single logout continue to implement
 `SSOProvider` themselves.

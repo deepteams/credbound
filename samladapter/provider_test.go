@@ -508,7 +508,7 @@ func TestMetadataURLFetchedLazilyOnceAndRetried(t *testing.T) {
 		t.Fatalf("Begin after recovery: %v", err)
 	}
 
-	// A successful fetch is cached for the provider's lifetime.
+	// A successful fetch is cached until the metadata TTL elapses.
 	before := fetches.Load()
 	if _, err := provider.Begin(context.Background(), credbound.SSORequest{}); err != nil {
 		t.Fatalf("Begin from cache: %v", err)

@@ -42,8 +42,11 @@
 //	})
 //
 // MetadataURL exists for IdPs that rotate signing certificates too often to
-// redeploy: it is fetched lazily, once, over HTTPS with a 10-second timeout,
-// and cached for the provider's lifetime.
+// redeploy: it is fetched lazily over HTTPS with a 10-second timeout, cached,
+// and re-fetched once the metadata TTL elapses (Config.MetadataRefreshInterval,
+// 12 hours by default), so a
+// rotated or revoked IdP signing certificate is picked up without a redeploy;
+// a failed refresh keeps serving the last good document.
 //
 // # Callback handling
 //
