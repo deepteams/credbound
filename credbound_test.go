@@ -427,6 +427,35 @@ func aal2(userID string, at time.Time) credbound.Authentication {
 	return credbound.Authentication{UserID: userID, Method: credbound.MethodTOTP, Level: credbound.AAL2, AuthenticatedAt: at}
 }
 
+// TestVerifyTOTPRejectsDisabledUser guards the second-factor promotion against
+// an account disabled after the first factor: VerifyTOTP must not mint AAL2 for
+// a disabled user.
+func TestVerifyTOTPRejectsDisabledUser(t *testing.T) {
+	f := newFixture(t)
+	authn, workspace := f.bootstrap(t)
+	ctx := context.Background()
+	root := aal2(authn.UserID, f.now)
+	member, err := f.manager.CreateUser(ctx, root, workspace.ID, credbound.CreateUserInput{
+		Email: "member@example.com", DisplayName: "Member", Password: "another strong password", Role: credbound.RoleMember,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberAuthn := aal2(member.ID, f.now)
+	if _, err := f.manager.BeginTOTPEnrollment(ctx, memberAuthn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.ConfirmTOTPEnrollment(ctx, memberAuthn, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.DisableUser(ctx, root, credbound.TrustedRequest{Local: true}, member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.VerifyTOTP(ctx, memberAuthn, "123456"); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("disabled user TOTP promotion = %v, want ErrForbidden", err)
+	}
+}
+
 type fakePasswords struct {
 	verifyCalls int
 	rehash      bool

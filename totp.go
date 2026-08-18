@@ -131,6 +131,11 @@ func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code str
 	if err := m.requireUnlocked(ctx, actor.UserID, "auth.totp"); err != nil {
 		return Authentication{}, err
 	}
+	// Refuse to promote a disabled account to AAL2, even though the actor
+	// proved a first factor before it was disabled.
+	if err := m.requireActiveUser(ctx, actor.UserID); err != nil {
+		return Authentication{}, err
+	}
 	factor, err := m.store.TOTPByUserID(ctx, actor.UserID)
 	if err != nil || !factor.Active {
 		return Authentication{}, ErrInvalidCredentials

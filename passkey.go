@@ -221,6 +221,13 @@ func (m *Manager) FinishPasskeyAuthentication(ctx context.Context, continuation 
 	if err != nil {
 		return Authentication{}, ErrInvalidCredentials
 	}
+	// The account can be disabled between Begin (which serves a decoy for a
+	// disabled user) and Finish. Re-check here so the ceremony cannot mint an
+	// AAL2 authentication for a disabled account, mirroring AuthenticatePassword
+	// and FinishSSO.
+	if record, lookupErr := m.store.UserByID(ctx, state.UserID); lookupErr != nil || record.Disabled {
+		return Authentication{}, ErrInvalidCredentials
+	}
 	credentialID, credentialJSON, err := m.passkeys.FinishAuthentication(ctx, user, state.Session, response)
 	if err != nil {
 		reason := "invalid_credentials"
