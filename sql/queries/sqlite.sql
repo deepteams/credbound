@@ -38,6 +38,20 @@ UPDATE credbound_personal_access_tokens SET name = '' WHERE user_id = ?1;
 -- name: ScrubUserSessions :exec
 UPDATE credbound_sessions SET user_agent = '', ip_address = '' WHERE user_id = ?1;
 
+-- name: ScrubUserSCIMLinks :exec
+UPDATE credbound_scim_users SET external_id = NULL, normalized_user_name = 'anonymized-' || id, display_name = '', emails_json = '[]', profile_json = '{}', active = 0, updated_at = ?2, deprovisioned_at = COALESCE(deprovisioned_at, ?2) WHERE user_id = ?1;
+
+-- name: ScrubUserAcceptedInvitations :exec
+UPDATE credbound_workspace_invitations SET email = 'anonymized-' || id || '@invalid' WHERE accepted_user_id = ?1;
+
+-- name: ListSCIMUsersForUser :many
+SELECT id, configuration_id, user_id, external_id, normalized_user_name, display_name, emails_json, profile_json, active, created_at, updated_at, deprovisioned_at
+FROM credbound_scim_users WHERE user_id = ?1 ORDER BY created_at, id;
+
+-- name: ListAcceptedInvitationsForUser :many
+SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
+FROM credbound_workspace_invitations WHERE accepted_user_id = ?1 ORDER BY created_at, id;
+
 -- name: CountEnabledRootAdministrators :one
 SELECT count(*) FROM credbound_instance_administrators a
 JOIN credbound_users u ON u.id = a.user_id

@@ -244,6 +244,7 @@ type Manager struct {
 	ssoAssurance          map[string]SSOAssurancePolicy
 	events                *eventRegistry
 	scimStore             SCIMStore
+	privacyStore          PrivacyStore
 	oauthStore            OAuthStore
 	oauth                 *OAuthConfig
 	signupStore           SignupStore
@@ -416,6 +417,7 @@ func New(cfg Config) (*Manager, error) {
 		return nil, err
 	}
 	scimStore, _ := cfg.Store.(SCIMStore)
+	privacyStore, _ := cfg.Store.(PrivacyStore)
 	signupStore, _ := cfg.Store.(SignupStore)
 	sessionStore, _ := cfg.Store.(SessionStore)
 	emailThrottle, _ := cfg.Store.(EmailThrottleStore)
@@ -489,6 +491,7 @@ func New(cfg Config) (*Manager, error) {
 		ssoAssurance:          ssoAssurance,
 		events:                events,
 		scimStore:             scimStore,
+		privacyStore:          privacyStore,
 		oauthStore:            oauthStore,
 		oauth:                 oauthConfig,
 		signupStore:           signupStore,

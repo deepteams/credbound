@@ -1676,6 +1676,87 @@ func (q *Queries) InsertWorkspaceInvitation(ctx context.Context, arg InsertWorks
 	return err
 }
 
+const listAcceptedInvitationsForUser = `-- name: ListAcceptedInvitationsForUser :many
+SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
+FROM credbound_workspace_invitations WHERE accepted_user_id = ?1 ORDER BY created_at, id
+`
+
+func (q *Queries) ListAcceptedInvitationsForUser(ctx context.Context, acceptedUserID sql.NullString) ([]CredboundWorkspaceInvitation, error) {
+	rows, err := q.db.QueryContext(ctx, listAcceptedInvitationsForUser, acceptedUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CredboundWorkspaceInvitation
+	for rows.Next() {
+		var i CredboundWorkspaceInvitation
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Email,
+			&i.Role,
+			&i.InvitedBy,
+			&i.Digest,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.AcceptedAt,
+			&i.AcceptedUserID,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSCIMUsersForUser = `-- name: ListSCIMUsersForUser :many
+SELECT id, configuration_id, user_id, external_id, normalized_user_name, display_name, emails_json, profile_json, active, created_at, updated_at, deprovisioned_at
+FROM credbound_scim_users WHERE user_id = ?1 ORDER BY created_at, id
+`
+
+func (q *Queries) ListSCIMUsersForUser(ctx context.Context, userID string) ([]CredboundScimUser, error) {
+	rows, err := q.db.QueryContext(ctx, listSCIMUsersForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CredboundScimUser
+	for rows.Next() {
+		var i CredboundScimUser
+		if err := rows.Scan(
+			&i.ID,
+			&i.ConfigurationID,
+			&i.UserID,
+			&i.ExternalID,
+			&i.NormalizedUserName,
+			&i.DisplayName,
+			&i.EmailsJson,
+			&i.ProfileJson,
+			&i.Active,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeprovisionedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockLoginThrottle = `-- name: LockLoginThrottle :execrows
 UPDATE credbound_login_throttles SET locked_until = ?2 WHERE user_id = ?1
 `
@@ -2908,6 +2989,15 @@ func (q *Queries) SaveTOTPEnrollment(ctx context.Context, arg SaveTOTPEnrollment
 	return result.RowsAffected()
 }
 
+const scrubUserAcceptedInvitations = `-- name: ScrubUserAcceptedInvitations :exec
+UPDATE credbound_workspace_invitations SET email = 'anonymized-' || id || '@invalid' WHERE accepted_user_id = ?1
+`
+
+func (q *Queries) ScrubUserAcceptedInvitations(ctx context.Context, acceptedUserID sql.NullString) error {
+	_, err := q.db.ExecContext(ctx, scrubUserAcceptedInvitations, acceptedUserID)
+	return err
+}
+
 const scrubUserEmails = `-- name: ScrubUserEmails :exec
 UPDATE credbound_user_emails SET address = 'anonymized-' || id || '@invalid', updated_at = ?2 WHERE user_id = ?1
 `
@@ -2946,6 +3036,20 @@ func (q *Queries) ScrubUserProfile(ctx context.Context, arg ScrubUserProfilePara
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const scrubUserSCIMLinks = `-- name: ScrubUserSCIMLinks :exec
+UPDATE credbound_scim_users SET external_id = NULL, normalized_user_name = 'anonymized-' || id, display_name = '', emails_json = '[]', profile_json = '{}', active = 0, updated_at = ?2, deprovisioned_at = COALESCE(deprovisioned_at, ?2) WHERE user_id = ?1
+`
+
+type ScrubUserSCIMLinksParams struct {
+	UserID    string    `json:"user_id"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (q *Queries) ScrubUserSCIMLinks(ctx context.Context, arg ScrubUserSCIMLinksParams) error {
+	_, err := q.db.ExecContext(ctx, scrubUserSCIMLinks, arg.UserID, arg.UpdatedAt)
+	return err
 }
 
 const scrubUserSSOEmails = `-- name: ScrubUserSSOEmails :exec

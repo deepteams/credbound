@@ -246,3 +246,89 @@ func firstStoreError[T any](sequence func(func(credbound.PageEvent[T], error) bo
 	}
 	return nil
 }
+
+// TestAnonymizeUserScrubsSCIMAndInvitations pins the privacy reach of the
+// erasure primitive beyond the core account: the personal attributes of the
+// user's SCIM profiles are scrubbed and the profile deprovisioned, and the
+// address on invitations the user accepted is tombstoned, while another
+// user's records stay untouched. The PrivacyStore reads expose both record
+// families for the DSAR export.
+func TestAnonymizeUserScrubsSCIMAndInvitations(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	root := credbound.User{ID: f.id(), Email: "root@example.com", DisplayName: "Root", CreatedAt: f.now, UpdatedAt: f.now}
+	workspace := credbound.Workspace{ID: f.id(), Name: "Main", CreatedAt: f.now, UpdatedAt: f.now}
+	rootMembership := credbound.Membership{WorkspaceID: workspace.ID, UserID: root.ID, Role: credbound.RoleAdmin, Status: credbound.MembershipActive, CreatedAt: f.now, UpdatedAt: f.now}
+	admin := credbound.InstanceAdministrator{UserID: root.ID, Role: credbound.InstanceRoleRoot, CreatedAt: f.now, UpdatedAt: f.now}
+	if err := f.store.Bootstrap(ctx, root, f.email(root), credbound.PasswordCredential{UserID: root.ID, Hash: "hash", UpdatedAt: f.now}, workspace, rootMembership, admin, f.event(root.ID, "bootstrap", workspace.ID, workspace.ID)); err != nil {
+		t.Fatal(err)
+	}
+	configuration := credbound.SCIMConfiguration{ID: f.id(), WorkspaceID: workspace.ID, Enabled: true, DefaultRole: credbound.RoleMember, CreatedAt: f.now, UpdatedAt: f.now}
+	credential := credbound.SCIMCredential{ID: f.id(), ConfigurationID: configuration.ID, Prefix: "abcdef012345", Digest: []byte("digest"), CreatedAt: f.now}
+	if err := f.store.CreateSCIMConfiguration(ctx, configuration, credential, f.event(root.ID, "scim.configuration.create", configuration.ID, workspace.ID)); err != nil {
+		t.Fatal(err)
+	}
+	user := credbound.User{ID: f.id(), Email: "worker@example.com", DisplayName: "Worker", CreatedAt: f.now, UpdatedAt: f.now}
+	membership := credbound.Membership{WorkspaceID: workspace.ID, UserID: user.ID, Role: credbound.RoleMember, Status: credbound.MembershipActive, ProvisioningSource: configuration.ID, CreatedAt: f.now, UpdatedAt: f.now}
+	link := credbound.SCIMUser{
+		ID: f.id(), ConfigurationID: configuration.ID, UserID: user.ID, ExternalID: "worker", UserName: "worker@example.com", DisplayName: "Worker",
+		Emails:     []credbound.SCIMEmail{{Value: "worker@example.com", Primary: true}},
+		Attributes: map[string]json.RawMessage{"title": json.RawMessage(`"Engineer"`)}, Active: true, CreatedAt: f.now, UpdatedAt: f.now,
+	}
+	if err := f.store.CreateSCIMUser(ctx, user, f.email(user), membership, link, f.event(credential.ID, "scim.user.provision", link.ID, workspace.ID)); err != nil {
+		t.Fatal(err)
+	}
+	invitation := credbound.WorkspaceInvitation{ID: f.id(), WorkspaceID: workspace.ID, Email: "worker@example.com", Role: credbound.RoleMember, InvitedBy: root.ID, Digest: []byte("digest"), CreatedAt: f.now, ExpiresAt: f.now.Add(time.Hour)}
+	if err := f.store.CreateWorkspaceInvitation(ctx, invitation, f.event(root.ID, "invite.create", invitation.ID, workspace.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.AcceptWorkspaceInvitation(ctx, invitation.ID, user.ID, f.now, membership, f.event(user.ID, "invite.accept", invitation.ID, workspace.ID)); err != nil {
+		t.Fatal(err)
+	}
+	pending := credbound.WorkspaceInvitation{ID: f.id(), WorkspaceID: workspace.ID, Email: "other@example.com", Role: credbound.RoleMember, InvitedBy: root.ID, Digest: []byte("digest"), CreatedAt: f.now, ExpiresAt: f.now.Add(time.Hour)}
+	if err := f.store.CreateWorkspaceInvitation(ctx, pending, f.event(root.ID, "invite.other", pending.ID, workspace.ID)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.store.AnonymizeUser(ctx, user.ID, f.now, f.event(root.ID, "user.anonymize", user.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	scrubbed, err := f.store.SCIMUser(ctx, configuration.ID, link.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scrubbed.UserName != "anonymized-"+link.ID || scrubbed.DisplayName != "" || scrubbed.ExternalID != "" ||
+		len(scrubbed.Emails) != 0 || len(scrubbed.Attributes) != 0 || scrubbed.Active || scrubbed.DeprovisionedAt == nil {
+		t.Fatalf("SCIM profile kept personal data: %#v", scrubbed)
+	}
+	links := 0
+	for value, err := range f.store.SCIMUsersByUser(ctx, user.ID) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value.ID != link.ID {
+			t.Fatalf("unexpected SCIM link: %#v", value)
+		}
+		links++
+	}
+	if links != 1 {
+		t.Fatalf("SCIM links = %d, want 1", links)
+	}
+	accepted := 0
+	for value, err := range f.store.AcceptedWorkspaceInvitations(ctx, user.ID) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value.ID != invitation.ID || value.Email != "anonymized-"+invitation.ID+"@invalid" {
+			t.Fatalf("accepted invitation kept its address: %#v", value)
+		}
+		accepted++
+	}
+	if accepted != 1 {
+		t.Fatalf("accepted invitations = %d, want 1", accepted)
+	}
+	untouched, err := f.store.WorkspaceInvitationByID(ctx, pending.ID)
+	if err != nil || untouched.Email != "other@example.com" {
+		t.Fatalf("unrelated invitation mutated: %#v, %v", untouched, err)
+	}
+}

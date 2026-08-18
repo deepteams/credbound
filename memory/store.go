@@ -1474,6 +1474,29 @@ func (s *Store) AnonymizeUser(ctx context.Context, userID string, at time.Time, 
 			s.sessions[id] = cloneSession(session)
 		}
 	}
+	for id, link := range s.scimUsers {
+		if link.UserID != userID {
+			continue
+		}
+		s.deleteSCIMUserIndexesLocked(link)
+		link.ExternalID = ""
+		link.UserName = "anonymized-" + id
+		link.DisplayName = ""
+		link.Schemas, link.Emails, link.Attributes = nil, nil, nil
+		link.Active = false
+		if link.DeprovisionedAt == nil {
+			deprovisioned := at
+			link.DeprovisionedAt = &deprovisioned
+		}
+		link.UpdatedAt = at
+		s.putSCIMUserLocked(link)
+	}
+	for id, invitation := range s.invitations {
+		if invitation.AcceptedUserID == userID {
+			invitation.Email = "anonymized-" + id + "@invalid"
+			s.invitations[id] = cloneInvitation(invitation)
+		}
+	}
 	delete(s.totp, userID)
 	delete(s.recovery, userID)
 	delete(s.passkeys, userID)
@@ -3218,10 +3241,65 @@ func normalizeMembership(value credbound.Membership) credbound.Membership {
 	return value
 }
 
+// SCIMUsersByUser streams every tenant-scoped SCIM profile linked to the
+// user across configurations, oldest first, for the PrivacyStore capability.
+func (s *Store) SCIMUsersByUser(ctx context.Context, userID string) iter.Seq2[credbound.SCIMUser, error] {
+	return func(yield func(credbound.SCIMUser, error) bool) {
+		if err := ctx.Err(); err != nil {
+			yield(credbound.SCIMUser{}, err)
+			return
+		}
+		s.mu.RLock()
+		values := make([]credbound.SCIMUser, 0)
+		for _, link := range s.scimUsers {
+			if link.UserID == userID {
+				values = append(values, cloneSCIMUser(link))
+			}
+		}
+		s.mu.RUnlock()
+		sort.Slice(values, func(i, j int) bool {
+			return newer(values[j].CreatedAt, values[j].ID, values[i].CreatedAt, values[i].ID)
+		})
+		for _, value := range values {
+			if !yield(value, nil) {
+				return
+			}
+		}
+	}
+}
+
+// AcceptedWorkspaceInvitations streams every invitation the user accepted,
+// oldest first, for the PrivacyStore capability.
+func (s *Store) AcceptedWorkspaceInvitations(ctx context.Context, userID string) iter.Seq2[credbound.WorkspaceInvitation, error] {
+	return func(yield func(credbound.WorkspaceInvitation, error) bool) {
+		if err := ctx.Err(); err != nil {
+			yield(credbound.WorkspaceInvitation{}, err)
+			return
+		}
+		s.mu.RLock()
+		values := make([]credbound.WorkspaceInvitation, 0)
+		for _, invitation := range s.invitations {
+			if invitation.AcceptedUserID == userID {
+				values = append(values, cloneInvitation(invitation))
+			}
+		}
+		s.mu.RUnlock()
+		sort.Slice(values, func(i, j int) bool {
+			return newer(values[j].CreatedAt, values[j].ID, values[i].CreatedAt, values[i].ID)
+		})
+		for _, value := range values {
+			if !yield(value, nil) {
+				return
+			}
+		}
+	}
+}
+
 var _ credbound.Store = (*Store)(nil)
 var _ credbound.SCIMStore = (*Store)(nil)
 var _ credbound.SignupStore = (*Store)(nil)
 var _ credbound.SessionStore = (*Store)(nil)
 var _ credbound.DomainStore = (*Store)(nil)
+var _ credbound.PrivacyStore = (*Store)(nil)
 
 var _ credbound.OAuthStore = (*Store)(nil)

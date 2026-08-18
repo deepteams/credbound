@@ -3,6 +3,7 @@ package postgresql_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -198,6 +199,72 @@ func TestPostgreSQLMigrationsAndStore(t *testing.T) {
 		}
 	default:
 		t.Fatalf("racing session creation = %v", createErr)
+	}
+
+	// Privacy contract: anonymization scrubs the personal attributes of the
+	// user's SCIM profiles (marking them deprovisioned) and tombstones the
+	// address on invitations the user accepted, and the PrivacyStore reads
+	// expose both record families for the DSAR export — the same behavior the
+	// memory and SQLite suites pin.
+	configuration := credbound.SCIMConfiguration{ID: pgID(24), WorkspaceID: workspace.ID, Enabled: true, DefaultRole: credbound.RoleMember, CreatedAt: now, UpdatedAt: now}
+	scimCredential := credbound.SCIMCredential{ID: pgID(25), ConfigurationID: configuration.ID, Prefix: "abcdef012345", Digest: []byte("digest"), CreatedAt: now}
+	if err := store.CreateSCIMConfiguration(ctx, configuration, scimCredential, pgCommit(now, pgID(26), user.ID, "scim.configuration.create", configuration.ID, workspace.ID)); err != nil {
+		t.Fatal(err)
+	}
+	worker := credbound.User{ID: pgID(27), Email: "worker@example.com", DisplayName: "Worker", CreatedAt: now, UpdatedAt: now}
+	workerMembership := credbound.Membership{WorkspaceID: workspace.ID, UserID: worker.ID, Role: credbound.RoleMember, Status: credbound.MembershipActive, ProvisioningSource: configuration.ID, CreatedAt: now, UpdatedAt: now}
+	link := credbound.SCIMUser{
+		ID: pgID(28), ConfigurationID: configuration.ID, UserID: worker.ID, ExternalID: "worker", UserName: "worker@example.com", DisplayName: "Worker",
+		Emails:     []credbound.SCIMEmail{{Value: "worker@example.com", Primary: true}},
+		Attributes: map[string]json.RawMessage{"title": json.RawMessage(`"Engineer"`)}, Active: true, CreatedAt: now, UpdatedAt: now,
+	}
+	workerEmail := credbound.EmailAddress{ID: pgID(29), UserID: worker.ID, Address: worker.Email, Primary: true, VerifiedAt: &now, CreatedAt: now, UpdatedAt: now}
+	if err := store.CreateSCIMUser(ctx, worker, workerEmail, workerMembership, link, pgCommit(now, pgID(30), scimCredential.ID, "scim.user.provision", link.ID, workspace.ID)); err != nil {
+		t.Fatal(err)
+	}
+	invitation := credbound.WorkspaceInvitation{ID: pgID(31), WorkspaceID: workspace.ID, Email: "worker@example.com", Role: credbound.RoleMember, InvitedBy: user.ID, Digest: []byte("digest"), CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+	if err := store.CreateWorkspaceInvitation(ctx, invitation, pgCommit(now, pgID(32), user.ID, "invite.create", invitation.ID, workspace.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AcceptWorkspaceInvitation(ctx, invitation.ID, worker.ID, now, workerMembership, pgCommit(now, pgID(33), worker.ID, "invite.accept", invitation.ID, workspace.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AnonymizeUser(ctx, worker.ID, now, pgCommit(now, pgID(34), user.ID, "user.anonymize", worker.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	scrubbed, err := store.SCIMUser(ctx, configuration.ID, link.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scrubbed.UserName != "anonymized-"+link.ID || scrubbed.DisplayName != "" || scrubbed.ExternalID != "" ||
+		len(scrubbed.Emails) != 0 || len(scrubbed.Attributes) != 0 || scrubbed.Active || scrubbed.DeprovisionedAt == nil {
+		t.Fatalf("SCIM profile kept personal data: %#v", scrubbed)
+	}
+	links := 0
+	for value, err := range store.SCIMUsersByUser(ctx, worker.ID) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value.ID != link.ID {
+			t.Fatalf("unexpected SCIM link: %#v", value)
+		}
+		links++
+	}
+	if links != 1 {
+		t.Fatalf("SCIM links = %d, want 1", links)
+	}
+	accepted := 0
+	for value, err := range store.AcceptedWorkspaceInvitations(ctx, worker.ID) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value.ID != invitation.ID || value.Email != "anonymized-"+invitation.ID+"@invalid" {
+			t.Fatalf("accepted invitation kept its address: %#v", value)
+		}
+		accepted++
+	}
+	if accepted != 1 {
+		t.Fatalf("accepted invitations = %d, want 1", accepted)
 	}
 }
 

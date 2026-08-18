@@ -128,6 +128,10 @@ type Store interface {
 	// mutable personal data (display name, email addresses, SSO and PAT names,
 	// session IP/User-Agent), disables the account, revokes its PATs, sessions
 	// and (with the OAuth capability) grants, and removes its second factors.
+	// A SCIMStore-capable store also scrubs the personal attributes of every
+	// SCIM profile linked to the user (user name, display name, emails,
+	// directory attributes) and marks it deprovisioned, and the email on
+	// workspace invitations the user accepted is replaced with a tombstone.
 	// The append-only audit chain is deliberately left intact. It reports
 	// ErrConflict when the target is the last enabled root administrator or the
 	// sole admin of a workspace, mirroring SetUserDisabled, and ErrNotFound for
@@ -338,6 +342,21 @@ type SCIMStore interface {
 	SCIMGroupByExternalID(context.Context, string, string) (SCIMGroup, error)
 	DeleteSCIMGroup(context.Context, SCIMGroup, []Membership, Commit) error
 	SCIMGroups(context.Context, string, SCIMFilter, PageRequest) iter.Seq2[PageEvent[SCIMGroup], error]
+}
+
+// PrivacyStore is an optional persistence capability that extends the
+// data-subject primitives beyond the core account records. ExportUserData
+// includes SCIM profiles and accepted workspace invitations only on a
+// PrivacyStore-capable store; the first-party stores all implement it.
+// Custom stores that skip it keep every other feature.
+type PrivacyStore interface {
+	// SCIMUsersByUser streams every tenant-scoped SCIM profile linked to
+	// the user, across configurations, oldest first.
+	SCIMUsersByUser(context.Context, string) iter.Seq2[SCIMUser, error]
+	// AcceptedWorkspaceInvitations streams every workspace invitation the
+	// user accepted, oldest first, with digests included; readers exporting
+	// them must scrub the Digest.
+	AcceptedWorkspaceInvitations(context.Context, string) iter.Seq2[WorkspaceInvitation, error]
 }
 
 // OAuthStore is an optional persistence capability. OAuth operations return

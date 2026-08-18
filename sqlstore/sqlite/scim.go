@@ -528,4 +528,27 @@ func sqlBool(value bool) int64 {
 	return 0
 }
 
+// SCIMUsersByUser streams every tenant-scoped SCIM profile linked to the
+// user across configurations, oldest first, for the PrivacyStore capability.
+func (s *Store) SCIMUsersByUser(ctx context.Context, userID string) iter.Seq2[credbound.SCIMUser, error] {
+	return func(yield func(credbound.SCIMUser, error) bool) {
+		rows, err := s.queries.ListSCIMUsersForUser(ctx, userID)
+		if err != nil {
+			yield(credbound.SCIMUser{}, mapError(err))
+			return
+		}
+		for _, row := range rows {
+			value, err := scimUserFromRow(row)
+			if err != nil {
+				yield(credbound.SCIMUser{}, err)
+				return
+			}
+			if !yield(value, nil) {
+				return
+			}
+		}
+	}
+}
+
 var _ credbound.SCIMStore = (*Store)(nil)
+var _ credbound.PrivacyStore = (*Store)(nil)

@@ -1100,6 +1100,12 @@ func (s *Store) AnonymizeUser(ctx context.Context, userID string, at time.Time, 
 		if err := q.ScrubUserSessions(ctx, userID); err != nil {
 			return mapError(err)
 		}
+		if err := q.ScrubUserSCIMLinks(ctx, db.ScrubUserSCIMLinksParams{UserID: userID, UpdatedAt: at}); err != nil {
+			return mapError(err)
+		}
+		if err := q.ScrubUserAcceptedInvitations(ctx, nullableString(userID)); err != nil {
+			return mapError(err)
+		}
 		if err := q.RevokeUserPATs(ctx, db.RevokeUserPATsParams{UserID: userID, RevokedAt: nullableTime(&at)}); err != nil {
 			return mapError(err)
 		}
@@ -1309,6 +1315,24 @@ func invitationFromRow(id, workspaceID, email, role, invitedBy string, digestVal
 		ID: id, WorkspaceID: workspaceID, Email: email, Role: credbound.Role(role), InvitedBy: invitedBy,
 		Digest: digestValue, CreatedAt: createdAt, ExpiresAt: expiresAt,
 		AcceptedAt: timePointer(acceptedAt), AcceptedUserID: acceptedUserID.String, RevokedAt: timePointer(revokedAt),
+	}
+}
+
+// AcceptedWorkspaceInvitations streams every invitation the user accepted,
+// oldest first, for the PrivacyStore capability.
+func (s *Store) AcceptedWorkspaceInvitations(ctx context.Context, userID string) iter.Seq2[credbound.WorkspaceInvitation, error] {
+	return func(yield func(credbound.WorkspaceInvitation, error) bool) {
+		rows, err := s.queries.ListAcceptedInvitationsForUser(ctx, nullableString(userID))
+		if err != nil {
+			yield(credbound.WorkspaceInvitation{}, mapError(err))
+			return
+		}
+		for _, row := range rows {
+			value := invitationFromRow(row.ID, row.WorkspaceID, row.Email, row.Role, row.InvitedBy, row.Digest, row.CreatedAt, row.ExpiresAt, row.AcceptedAt, row.AcceptedUserID, row.RevokedAt)
+			if !yield(value, nil) {
+				return
+			}
+		}
 	}
 }
 

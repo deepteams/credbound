@@ -102,9 +102,11 @@ func (m *Manager) AdminResetSecondFactor(ctx context.Context, actor Authenticati
 // AnonymizeUser is the right-to-erasure primitive: an instance administrator
 // pseudonymizes a user by scrubbing their mutable personal data — display
 // name, email addresses (replaced with unique tombstones), SSO and PAT names,
-// and session IP/User-Agent — while disabling the account, revoking its PATs,
-// sessions and OAuth grants, and removing its second factors, all in one
-// transaction. The append-only, hash-chained audit log is deliberately
+// session IP/User-Agent, the personal attributes of linked SCIM profiles
+// (which are also marked deprovisioned) and the address on workspace
+// invitations the user accepted — while disabling the account, revoking its
+// PATs, sessions and OAuth grants, and removing its second factors, all in
+// one transaction. The append-only, hash-chained audit log is deliberately
 // preserved: it retains a pseudonymous user id and the request IP/User-Agent
 // under the host's security-log retention basis, since scrubbing it would
 // break VerifyAuditChain. The actor needs admin users write and an admin

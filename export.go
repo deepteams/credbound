@@ -17,7 +17,9 @@ type WorkspaceMembership struct {
 // user, assembled for a data-subject access request (GDPR Article 15/20). It
 // deliberately omits secrets — token digests and sealed passkey material are
 // scrubbed — and the append-only audit log, which is retained under the host's
-// security-log policy and read separately through AuditEvents.
+// security-log policy and read separately through AuditEvents. Sessions need a
+// SessionStore-capable store, SCIMUsers and Invitations a PrivacyStore-capable
+// one, and OAuthGrants the OAuth capability; the sections are empty otherwise.
 type UserDataExport struct {
 	User          User
 	Emails        []EmailAddress
@@ -26,15 +28,25 @@ type UserDataExport struct {
 	Passkeys      []Passkey
 	PATs          []PAT
 	Sessions      []Session
+	// SCIMUsers are the tenant-scoped directory profiles provisioned for the
+	// user, with the directory's own attributes included.
+	SCIMUsers []SCIMUser
+	// Invitations are the workspace invitations the user accepted; they carry
+	// the address the user was invited under, which may predate a rename.
+	Invitations []WorkspaceInvitation
+	// OAuthGrants are the user's OAuth consents, revoked ones included.
+	OAuthGrants []OAuthGrant
 }
 
 // ExportUserData gathers every record Credbound holds about a user into one
 // document for a data-subject access request. An empty userID exports the
 // actor's own data and needs only a recent interactive authentication;
 // exporting another user requires a fresh AAL2 step-up and admin users read.
-// Sessions are included only on a SessionStore-capable store. Token digests,
-// sealed passkey credentials and the audit log are never included; the audit
-// log stays available through AuditEvents under its own retention policy.
+// Sessions are included only on a SessionStore-capable store, SCIM profiles
+// and accepted workspace invitations only on a PrivacyStore-capable one, and
+// OAuth grants only with the OAuth capability. Token digests, sealed passkey
+// credentials and the audit log are never included; the audit log stays
+// available through AuditEvents under its own retention policy.
 func (m *Manager) ExportUserData(ctx context.Context, actor Authentication, userID string) (_ UserDataExport, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "user.data.export", started, err) }()
@@ -117,6 +129,30 @@ func (m *Manager) ExportUserData(ctx context.Context, actor Authentication, user
 		}
 		for index := range export.Sessions {
 			export.Sessions[index].Digest = nil
+		}
+	}
+
+	if m.privacyStore != nil {
+		for link, linkErr := range m.privacyStore.SCIMUsersByUser(ctx, userID) {
+			if linkErr != nil {
+				return UserDataExport{}, linkErr
+			}
+			export.SCIMUsers = append(export.SCIMUsers, link)
+		}
+		for invitation, invitationErr := range m.privacyStore.AcceptedWorkspaceInvitations(ctx, userID) {
+			if invitationErr != nil {
+				return UserDataExport{}, invitationErr
+			}
+			invitation.Digest = nil
+			export.Invitations = append(export.Invitations, invitation)
+		}
+	}
+
+	if m.oauthStore != nil {
+		if export.OAuthGrants, err = drainPages(func(page PageRequest) iter.Seq2[PageEvent[OAuthGrant], error] {
+			return m.oauthStore.OAuthGrants(ctx, userID, "", page)
+		}); err != nil {
+			return UserDataExport{}, err
 		}
 	}
 

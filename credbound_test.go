@@ -763,4 +763,45 @@ func TestExportUserData(t *testing.T) {
 	if _, err := f.manager.ExportUserData(ctx, memberActor, authn.UserID); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("member cross-user export = %v", err)
 	}
+
+	// Privacy sections: a SCIM profile linked to the member and the invitation
+	// the member accepted appear in the export, with the invitation digest
+	// scrubbed (PRIV-002).
+	exportCommit := func(id, action string) credbound.Commit {
+		return credbound.Commit{Audit: credbound.AuditEvent{
+			ID: id, OccurredAt: f.now, ActorID: authn.UserID,
+			Action: action, ResourceType: "test", ResourceID: member.ID, WorkspaceID: workspace.ID, Outcome: credbound.AuditSucceeded,
+		}}
+	}
+	configuration := credbound.SCIMConfiguration{ID: "0198b463-0000-7000-8000-0000000e5c01", WorkspaceID: workspace.ID, Enabled: true, DefaultRole: credbound.RoleMember, CreatedAt: f.now, UpdatedAt: f.now}
+	credential := credbound.SCIMCredential{ID: "0198b463-0000-7000-8000-0000000e5c02", ConfigurationID: configuration.ID, Prefix: "abcdef012345", Digest: []byte("digest"), CreatedAt: f.now}
+	if err := f.store.CreateSCIMConfiguration(ctx, configuration, credential, exportCommit("0198b463-0000-7000-8000-0000000e5c03", "scim.configuration.create")); err != nil {
+		t.Fatal(err)
+	}
+	membership, err := f.store.Membership(ctx, workspace.ID, member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	membership.ProvisioningSource, membership.UpdatedAt = configuration.ID, f.now
+	link := credbound.SCIMUser{ID: "0198b463-0000-7000-8000-0000000e5c04", ConfigurationID: configuration.ID, UserID: member.ID, UserName: "member@example.com", DisplayName: "Member", Active: true, CreatedAt: f.now, UpdatedAt: f.now}
+	if err := f.store.AdoptSCIMUser(ctx, membership, link, exportCommit("0198b463-0000-7000-8000-0000000e5c05", "scim.user.adopt")); err != nil {
+		t.Fatal(err)
+	}
+	invitation := credbound.WorkspaceInvitation{ID: "0198b463-0000-7000-8000-0000000e5c06", WorkspaceID: workspace.ID, Email: "member@example.com", Role: credbound.RoleMember, InvitedBy: authn.UserID, Digest: []byte("digest"), CreatedAt: f.now, ExpiresAt: f.now.Add(time.Hour)}
+	if err := f.store.CreateWorkspaceInvitation(ctx, invitation, exportCommit("0198b463-0000-7000-8000-0000000e5c07", "invite.create")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.AcceptWorkspaceInvitation(ctx, invitation.ID, member.ID, f.now, membership, exportCommit("0198b463-0000-7000-8000-0000000e5c08", "invite.accept")); err != nil {
+		t.Fatal(err)
+	}
+	privacyExport, err := f.manager.ExportUserData(ctx, rootActor, member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(privacyExport.SCIMUsers) != 1 || privacyExport.SCIMUsers[0].ID != link.ID || privacyExport.SCIMUsers[0].UserName != "member@example.com" {
+		t.Fatalf("export SCIM profiles = %#v", privacyExport.SCIMUsers)
+	}
+	if len(privacyExport.Invitations) != 1 || privacyExport.Invitations[0].ID != invitation.ID || privacyExport.Invitations[0].Digest != nil {
+		t.Fatalf("export invitations = %#v", privacyExport.Invitations)
+	}
 }
