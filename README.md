@@ -38,7 +38,9 @@ be reimplemented in every project:
   (reset, magic-link, email OTP, verification resend) to blunt mail bombing;
 - optional verified workspace email domains (DNS-challenge capture) with
   per-domain SSO enforcement and just-in-time provisioning of passwordless
-  members from a trusted SSO provider;
+  members from a trusted SSO provider — a claim left unverified past
+  `Config.DomainClaimTTL` loses its name reservation, so a squatter cannot
+  permanently deny the domain's real owner;
 - atomic revocation of every PAT and OAuth grant of a user;
 - optional SCIM 2.0 provisioning per workspace (`Users`, `Groups`, `.search`);
 - optional OAuth 2.0/OIDC authorization-server capabilities for remote MCP
@@ -74,7 +76,16 @@ hooks, and append-only audit behavior against a real PostgreSQL service.
   verified.
 - An SSO identity is explicitly linked by `issuer` and `subject`; the IdP email
   address never triggers an automatic account merge.
-- A PAT can never satisfy an interactive step-up request.
+- SSO and WebAuthn ceremony continuations are single use: the success commit
+  consumes them, so a captured browser response can never be replayed —
+  passkey signature counters alone cannot guarantee that, since many
+  authenticators legitimately report a constant zero.
+- A PAT can never satisfy an interactive step-up request. Be aware that a
+  workspace-unbound PAT holding the `*` scope is an instance credential: when
+  its owner is an instance administrator it can perform the administration
+  *reads* (listing every user and workspace, reading the instance audit log),
+  though never the mutations, which stay interactive-only. Mint `*` PATs for
+  automation deliberately.
 - Completing a password reset atomically revokes the account's PATs and OAuth
   grants and clears its lockout; a locked account still performs the same
   password derivation and answers with the same public error as a wrong
@@ -195,9 +206,12 @@ migration application, first-run bootstrap, and a cookie-session HTTP layer
 following the sessions contract above — lives in
 [`examples/minimal`](examples/minimal/main.go).
 
-Each SSO provider has a UUIDv7 configuration identifier. The host service
-implements the `SSOProvider` port for the IdPs it enables and remains responsible
-for network exchanges, client secrets, and cryptographic callback validation.
+Each SSO provider has a UUIDv7 configuration identifier. The bundled
+`ssoadapter` (any spec-compliant OIDC issuer, including Google and Microsoft
+Entra ID), `githubadapter` (GitHub's OAuth 2.0 + REST flow), and `samladapter`
+(SAML 2.0) packages implement the `SSOProvider` port; the host service may
+also implement it for other IdPs and then remains responsible for network
+exchanges, client secrets, and cryptographic callback validation.
 Credbound handles sealed continuations, explicit linking, AAL2, step-up with
 forced IdP reauthentication, persistence, and auditing.
 

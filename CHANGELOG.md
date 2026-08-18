@@ -48,7 +48,9 @@ breaking changes may land in any release and are called out explicitly.
   against is still in place and reports `ErrConflict` otherwise, so an
   in-flight sign-in racing a password change or reset can no longer
   resurrect the old password.
-
+- `TouchSession` refuses a revoked session with `ErrConflict`, closing the
+  race where an authentication concurrent with a revocation still succeeded
+  and kept extending the idle window of a dead session.
 - **Breaking:** the OAuth `client_credentials` grant is now restricted to
   administratively pre-registered confidential clients (DCR and CIMD
   registrations are refused, including `private_key_jwt`) and requires both
@@ -79,6 +81,19 @@ breaking changes may land in any release and are called out explicitly.
 
 ### Added
 
+- Bundled `githubadapter` implementing `SSOProvider` for GitHub sign-in
+  (OAuth 2.0 + REST — GitHub is not an OIDC issuer, so `ssoadapter` cannot
+  serve it). The subject is the stable numeric account id, the primary
+  email carries GitHub's own verified flag, and the adapter is AAL1-only:
+  GitHub cannot force re-authentication, so `Begin` refuses step-up
+  ceremonies (`ErrStepUpUnsupported`) instead of pretending one happened.
+- `AnyEventListener`: an `EventListener` that also implements the single
+  `OnAnyEvent(ctx, name, event)` method receives every event through it —
+  analytics feeds, outbox relays, and webhook dispatchers no longer
+  implement 71 typed methods.
+- `HTTPStatus(err) int` maps every sentinel error to its conventional HTTP
+  status code, replacing the `errors.Is` ladder every host transport
+  re-wrote.
 - `User`, `Workspace`, and `Membership` by-ID getters with the established
   privilege scoping.
 - **Breaking:** `PATs` and `SSOIdentities` take a `userID` parameter
@@ -94,6 +109,8 @@ breaking changes may land in any release and are called out explicitly.
 - The generated PostgreSQL store no longer ships the SQLite package
   documentation or a dead `writeMu` field: the generator fails on unmatched
   replacements instead of silently skipping them.
+- The SQLite and PostgreSQL OAuth stores now propagate JSON marshalling
+  errors from record encoding instead of panicking the host process.
 - Documentation: SSO yields AAL2 only under a satisfied `SSOAssurance`
   policy (doc.go overstated it); the OpenAPI token request advertises
   `client_credentials`; ADR-010 documents the machine-to-machine model; the
