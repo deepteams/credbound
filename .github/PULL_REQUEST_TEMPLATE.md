@@ -7,7 +7,7 @@
 
 ## Checklist
 
-- [ ] `make verify` passes (gofmt, vet, race tests, coverage strictly above 90%)
+- [ ] `make verify` passes (gofmt, vet, race tests, coverage at or above the 89.5% floor)
 - [ ] `make generate` is reproducible (no hand edits to generated files)
 - [ ] `specs/` (PRD, API, ADRs) updated if the contract changed
 - [ ] New failure paths are tested, not only the happy path

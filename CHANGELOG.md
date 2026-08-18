@@ -9,6 +9,20 @@ breaking changes may land in any release and are called out explicitly.
 
 ### Security
 
+- `Authorize` and `AuthorizePermission` now reject a TOTP-pending context
+  (`Authentication.SecondFactorRequired`) with `ErrStepUpRequired` in every
+  workspace, so a first factor alone never authorizes workspace operations
+  even where `RequireMFA` is off. Deferring the pending context was
+  previously a host-side contract only.
+- A wrong current password in `ChangePassword` now counts toward the
+  account lockout exactly like a failed sign-in, and a locked account is
+  refused with `ErrLocked` before any verification, so a hijacked session
+  can no longer brute-force the knowledge factor online.
+- `SignUp` now marks its real verification issuance `Deliverable`, matching
+  the issued-email-proof contract every other flow follows; a host honoring
+  the send-only-when-`Deliverable` rule previously never delivered the
+  signup verification email, leaving the account unable to authenticate.
+
 - WebAuthn ceremonies are single use: passkey continuations now seal a
   ceremony id that the success commit consumes, so a captured
   `(continuation, response)` pair can never be replayed — signature

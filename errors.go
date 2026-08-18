@@ -4,7 +4,9 @@ import "errors"
 
 // Sentinel errors compared with errors.Is. An application HTTP adapter maps
 // them to its transport error contract (for example RFC 9457 problem
-// documents); the messages themselves are not part of the API.
+// documents) — HTTPStatus provides the canonical status-code table so the
+// adapter only owns the body; the messages themselves are not part of the
+// API.
 var (
 	ErrInvalidCredentials   = errors.New("credbound: invalid credentials")
 	ErrUnauthorized         = errors.New("credbound: authentication required")

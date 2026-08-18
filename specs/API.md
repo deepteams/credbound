@@ -245,10 +245,13 @@ an actor or backdate an entry.
 
 `BeginPasswordReset` and `BeginEmailAuthentication` perform the same
 cryptographic work whether or not the address exists, and both succeed with a
-zero-value result (empty `Token`) when the address does not belong to an
+decoy result (`Deliverable` false) when the address does not belong to an
 eligible account, so the host's error path never distinguishes the two cases.
-The host answers the end user identically, and delivers the returned token
-itself only when `Token` is non-empty. `AuthenticatePassword` treats an account
+The host answers the end user identically, and sends the email — carrying the
+returned token — only when `Deliverable` is true. Every issued email proof
+(`IssuedPasswordReset`, `IssuedEmailAuthentication`, `IssuedEmailOTP`,
+`IssuedEmailVerification`) carries the flag; an empty `Token` or `Code` is a
+consequence of a decoy, not the signal itself. `AuthenticatePassword` treats an account
 without a password credential exactly like a wrong password, and answers
 `ErrInvalidCredentials` for a locked account too: `ErrLocked` only exists for
 accounts that exist, so returning it from the unauthenticated entry point
@@ -260,7 +263,7 @@ still audited with reason `locked` and surfaces through `UserLockedEvent` and
 `BeginEmailOTP` issues an 8-digit single-use code bound to a sealed
 continuation that the host keeps on its side of the exchange and passes back
 to `CompleteEmailOTP` with the code the user typed. Ineligible addresses
-receive a well-formed decoy continuation with an empty `Code`. A wrong code
+receive a well-formed decoy continuation with `Deliverable` false. A wrong code
 counts toward the account lockout exactly like a wrong password; completion
 otherwise behaves like `CompleteEmailAuthentication` (AAL1, `MethodEmail`,
 second-factor reporting).
@@ -281,6 +284,9 @@ first, for a passwordless member provisioned by SSO JIT or SCIM — revokes the
 user's PATs and OAuth grants, and clears the lockout counter; host-owned
 sessions must be terminated by the host alongside it (`SessionStore`-capable
 stores revoke server-side sessions in the same transaction). `ChangePassword`
+refuses a locked account with `ErrLocked` (the actor is authenticated, so no
+existence oracle) and counts a wrong current password toward the account
+lockout exactly like a failed sign-in. It
 revokes the user's sessions in the transaction that installs the new password
 but deliberately leaves PATs and OAuth grants alone: the actor proved
 possession of the current password, so a routine change is not a compromise
@@ -295,13 +301,23 @@ fails with `ErrStepUpRequired` otherwise, so the AAL2 an SSO sign-in produces
 is verified against the IdP's own assertion instead of assumed. The bundled
 `ssoadapter` and `samladapter` forward the asserted context.
 
+Three `SSOProvider` implementations are bundled: `ssoadapter` (OIDC —
+Google, Microsoft, or any compliant issuer), `samladapter` (SAML 2.0), and
+`githubadapter` (GitHub's OAuth-without-OIDC flow). `githubadapter` asserts
+no authentication context, so its sign-ins stay AAL1 and a step-up request
+fails with its `ErrStepUpUnsupported` sentinel — pair GitHub sign-in with
+TOTP or passkeys for AAL2.
+
 `AuthorizePermission` is the canonical tenant authorization. For a scoped
 authentication (a PAT), the permission itself — or the `*` wildcard — must
 additionally appear among the scopes: scopes are the least privilege chosen at
 creation, and the membership role never widens them back. The coarse
 role-based `Authorize` accepts a scoped credential only with the `*` wildcard.
 A PAT scope is validated at creation as either `*` or a workspace permission
-string.
+string. Both entry points reject a TOTP-pending context
+(`Authentication.SecondFactorRequired`) with `ErrStepUpRequired` in every
+workspace: the first factor alone never authorizes anything, whether or not
+the workspace requires MFA.
 
 `RegenerateRecoveryCodes` replaces the actor's recovery codes with a fresh
 single-display set under a fresh interactive AAL2 authentication; the previous
@@ -426,9 +442,10 @@ and audit record are atomic.
 
 `Config.OAuth` enables the module. Its `Pepper` contains at least 32 bytes.
 `MetadataFetcher` is required for dynamic CIMD policies, `OIDCSigner` for an
-OIDC issuer, and `ClientAssertions` for `private_key_jwt`. A store that does not
-implement `OAuthStore` returns `ErrNotSupported` without affecting other
-capabilities.
+OIDC issuer, and `ClientAssertions` for `private_key_jwt`. Setting
+`Config.OAuth` on a store that does not implement `OAuthStore` fails `New`
+with `ErrInvalidInput` — explicit intent never degrades silently; without
+`Config.OAuth` every OAuth operation returns `ErrNotSupported`.
 
 `SignupStore`, `SessionStore`, and `DomainStore` are optional store
 capabilities detected by type assertion exactly like `SCIMStore` and
@@ -545,7 +562,11 @@ host-service credit or quota allocations.
 
 `EventListener` observes committed facts. Its `On...` methods return errors for
 observability only: the `Manager` never propagates them and they do not interrupt
-other listeners.
+other listeners. `AnyEventListener` is the catch-all companion: a listener that
+also implements it receives every event through
+`OnAnyEvent(ctx, name EventName, event any)` — invoked after its typed `On...`
+method, with the same typed event struct — so whole-stream consumers (outbox
+writers, webhook dispatchers) need one method instead of the full interface.
 
 Events cover:
 
@@ -603,13 +624,20 @@ Callers use `errors.Is` with the sentinel errors:
 - `ErrAuditCompromised`
 - `ErrTransactionRejected`
 
-Two further sentinels are contracts between a security provider and the manager,
-not manager-to-host results: `ErrNoPasskey` (the passkey provider reports the
-user has no passkey) and `ErrPasskeyCloneDetected` (the passkey provider rejects
-an assertion whose signature counter regressed; the caller still receives
-`ErrInvalidCredentials`).
+Three further sentinels are contracts between a security provider and the
+manager, not manager-to-host results: `ErrNoPasskey` (the passkey provider
+reports the user has no passkey), `ErrPasskeyCloneDetected` (the passkey
+provider rejects an assertion whose signature counter regressed; the caller
+still receives `ErrInvalidCredentials`), and `githubadapter.ErrStepUpUnsupported`
+(GitHub asserts no authentication context, so the adapter refuses step-up
+ceremonies).
 
 An application HTTP adapter must translate them to RFC 9457 with
 `Content-Type: application/problem+json` and at least `type`, `title`, `status`,
-and `detail`. `scimhttp` is the protocol-specific exception: it produces the
-SCIM error schema with `Content-Type: application/scim+json`.
+and `detail`. The package-level `HTTPStatus(error) int` maps every sentinel to
+its canonical status code (400, 401, 403, 404, 409, 422, 429, 501, 503; 500
+for `ErrAuditCompromised` and anything unrecognized) so adapters share one
+table instead of each maintaining an `errors.Is` ladder; the adapter still
+owns the problem-document body. `scimhttp` is the
+protocol-specific exception: it produces the SCIM error schema with
+`Content-Type: application/scim+json`.

@@ -136,7 +136,9 @@
 // ErrPasskeyCloneDetected (a passkey provider rejecting a cloned authenticator;
 // the caller still sees ErrInvalidCredentials). User-input validation failures additionally carry
 // a *ValidationError{Field, Rule, Message} retrievable with errors.As; every
-// ValidationError also satisfies errors.Is(err, ErrInvalidInput). Public
+// ValidationError also satisfies errors.Is(err, ErrInvalidInput). HTTPStatus
+// maps every sentinel to its canonical HTTP status code, so an HTTP adapter
+// shares one table instead of maintaining its own errors.Is ladder. Public
 // errors never contain secrets, and enumeration-sensitive flows
 // (AuthenticatePassword, BeginPasswordReset, BeginEmailAuthentication,
 // BeginEmailOTP) answer identically whether or not the account exists.

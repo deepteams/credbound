@@ -125,9 +125,11 @@ checks and per-workspace MFA enforcement. The host owns sessions and must:
 - never rebuild one from client-supplied fields and never upgrade `Level`
   itself — only `VerifyTOTP`, a passkey, or SSO reauthentication may
   produce AAL2;
-- treat `SecondFactorRequired: true` as a *pending* session: keep it out of
-  authorized paths, send the user to `VerifyTOTP`, and store the AAL2
-  `Authentication` that it returns;
+- treat `SecondFactorRequired: true` as a *pending* session: send the user
+  to `VerifyTOTP` and store the AAL2 `Authentication` that it returns —
+  `Authorize` and `AuthorizePermission` reject a pending context with
+  `ErrStepUpRequired` as a backstop, but keeping it out of the host's own
+  authorized paths remains the host's job;
 - terminate its own sessions for a user when `CompletePasswordReset`,
   `ChangePassword`, `DisableUser`, or `RevokeUserCredentials` fires — the
   library revokes PATs and OAuth grants but cannot see host sessions.
@@ -150,6 +152,14 @@ token's transport — cookies, CSRF, TLS — remains host-owned.
 ### Minimal setup
 
 ```go
+import (
+    "github.com/deepteams/credbound"
+    "github.com/deepteams/credbound/password"
+    "github.com/deepteams/credbound/sqlstore/sqlite" // driver: modernc.org/sqlite
+    "github.com/deepteams/credbound/totpadapter"
+    "github.com/deepteams/credbound/webauthnadapter"
+)
+
 store, err := sqlite.New(database)
 if err != nil {
     return err
@@ -199,6 +209,9 @@ auth, err := credbound.New(credbound.Config{
 
 The snippet assumes the embedded migrations have already been applied to
 `database` (see `migrations.SQLite()` and `migrations.PostgreSQL()` below).
+For a first experiment, `memory.New()` (package
+`github.com/deepteams/credbound/memory`) is a full-featured store that needs
+no database or migrations at all.
 Only `Store`, `Passwords`, and the three secrets are required: the `TOTP` and
 `Passkeys` providers are optional, and their flows return `ErrNotSupported`
 until the host wires them. A complete, runnable integration — SQLite,
