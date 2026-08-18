@@ -364,6 +364,11 @@ func TestDomainEnforcedSSO(t *testing.T) {
 	}); !errors.Is(err, credbound.ErrSSORequired) {
 		t.Fatalf("invitation register on SSO-enforced domain = %v", err)
 	}
+	// Resending an email verification for an SSO-enforced domain is refused up
+	// front, like signup and password reset.
+	if _, err := f.manager.ResendEmailVerification(ctx, "someone@example.com"); !errors.Is(err, credbound.ErrSSORequired) {
+		t.Fatalf("resend verification on SSO-enforced domain = %v", err)
+	}
 	// Removing the domain lifts enforcement immediately.
 	if err := f.manager.RemoveWorkspaceDomain(ctx, aal2(authn.UserID, f.now), issued.Domain.ID); err != nil {
 		t.Fatal(err)
