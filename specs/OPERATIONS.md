@@ -20,10 +20,13 @@ pass it on a command line, or emit it to logs and telemetry. Startup must fail
 when a required value is absent or malformed.
 
 Internally, the manager derives two HKDF-SHA256 subkeys from `SecretKey` — one
-for AEAD sealing, one for email-proof HMAC digests — so the two primitives never
-share key material. Data written before this separation (sealed TOTP secrets,
-passkey credentials, and outstanding email-proof digests) keeps verifying
-through a raw-key fallback; no migration is required, and rotation guidance for
+for AEAD sealing, one for HMAC digests — so the two primitives never share key
+material. Long-lived sealed material written before this separation (TOTP
+secrets and passkey credentials) keeps decrypting through a raw-key fallback
+until v1 ships a re-seal migration; new data always seals under the active
+derived key. Token digests written under the raw key are no longer accepted:
+every one guarded a single-use credential whose TTL expired long before that
+window closed. No migration is required today, and rotation guidance for
 `SecretKey` is unchanged.
 
 ## Rotation

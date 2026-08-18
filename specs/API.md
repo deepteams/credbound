@@ -428,8 +428,12 @@ enforcement flag. When enforcement is on, `AuthenticatePassword`,
 `BeginEmailAuthentication`, `BeginEmailOTP`, `BeginPasswordReset`, and
 `BeginPasskeyAuthentication` reject addresses at exactly that domain with
 `ErrSSORequired`, which reflects domain policy rather than account existence.
-Matching is exact and ASCII: subdomains require their own registration, and a
-Unicode-spelled domain falls outside the policy fail-safe. Non-interactive
+Matching targets the exact registered domain: subdomains require their own
+registration. Domains are stored in lowercase ASCII (punycode) form, and the
+address's domain is folded to the same form through IDNA before the lookup,
+so an address written with the Unicode spelling of an enforced domain is
+still caught; a domain that cannot be canonicalized matches nothing, which
+is the fail-safe outcome. Non-interactive
 PATs are exempt, like the workspace MFA policy. JIT provisioning inside
 `FinishSSO` creates a passwordless account only when no user owns the
 verified address (SSO-002 still forbids auto-linking existing accounts).

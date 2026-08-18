@@ -75,8 +75,8 @@ single transaction. After commit, it emits `user.created`, `workspace.created`,
 then `bootstrap.completed`.
 
 The workspace hook is therefore immediately usable for the initial workspace
-and will be reused unchanged by a future `Manager.CreateWorkspace`, which will
-have its own authorization specification.
+and is reused unchanged by `Manager.CreateWorkspace` (shipped with the
+lifecycle surface of ADR-011), which carries its own authorization rules.
 
 The host service retains ownership of credits, quotas, and subscriptions. It may
 insert its ledger write in `ApplyWorkspaceCreate`; Credbound has no knowledge of
