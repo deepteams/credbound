@@ -1627,3 +1627,78 @@ func TestSecretRotationWithRetiredKeys(t *testing.T) {
 		t.Fatalf("short retired pepper error = %v", err)
 	}
 }
+
+func TestAnonymizeUser(t *testing.T) {
+	f := newFixture(t)
+	authn, workspace := f.bootstrap(t)
+	ctx := context.Background()
+	root := aal2(authn.UserID, f.now)
+	recorder := &eventRecorder{}
+	f.manager.AddEventListener(recorder)
+
+	member, err := f.manager.CreateUser(ctx, root, workspace.ID, credbound.CreateUserInput{
+		Email: "member@example.com", DisplayName: "Member", Password: "another strong password", Role: credbound.RoleMember,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberAuthn := aal2(member.ID, f.now)
+	if _, err := f.manager.CreatePAT(ctx, memberAuthn, credbound.CreatePATInput{
+		Name: "member token", WorkspaceID: workspace.ID, Scopes: []string{"read"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Guards: invalid id, unknown target, and a non-admin actor are refused.
+	if err := f.manager.AnonymizeUser(ctx, root, credbound.TrustedRequest{Local: true}, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("invalid target = %v", err)
+	}
+	if err := f.manager.AnonymizeUser(ctx, memberAuthn, credbound.TrustedRequest{}, authn.UserID); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("non-admin actor = %v", err)
+	}
+	// The sole root cannot be anonymized, just as it cannot be disabled.
+	if err := f.manager.AnonymizeUser(ctx, root, credbound.TrustedRequest{Local: true}, authn.UserID); !errors.Is(err, credbound.ErrConflict) {
+		t.Fatalf("last-root anonymize = %v", err)
+	}
+
+	if err := f.manager.AnonymizeUser(ctx, root, credbound.TrustedRequest{Local: true}, member.ID); err != nil {
+		t.Fatalf("anonymize = %v", err)
+	}
+
+	// The mutable PII is scrubbed: display name empty, email replaced by a
+	// tombstone, PAT revoked with its name cleared, account disabled.
+	export, err := f.manager.ExportUserData(ctx, root, member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if export.User.DisplayName != "" || !export.User.Disabled {
+		t.Fatalf("profile not scrubbed: %#v", export.User)
+	}
+	if len(export.Emails) != 1 || export.Emails[0].Address == "member@example.com" ||
+		!strings.HasPrefix(export.Emails[0].Address, "anonymized-") {
+		t.Fatalf("email not tombstoned: %#v", export.Emails)
+	}
+	if len(export.PATs) != 1 || export.PATs[0].Name != "" || export.PATs[0].RevokedAt == nil {
+		t.Fatalf("PAT not scrubbed/revoked: %#v", export.PATs)
+	}
+
+	// The original address can no longer authenticate.
+	if _, err := f.manager.AuthenticatePassword(ctx, "member@example.com", "another strong password"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("anonymized login = %v", err)
+	}
+
+	// The append-only audit chain stays intact after the scrub.
+	if _, err := f.manager.VerifyAuditChain(ctx, root); err != nil {
+		t.Fatalf("audit chain after anonymize = %v", err)
+	}
+
+	anonymizedEvents := 0
+	for _, name := range recorder.names {
+		if name == credbound.EventUserAnonymized {
+			anonymizedEvents++
+		}
+	}
+	if anonymizedEvents != 1 {
+		t.Fatalf("anonymized events = %d, want 1", anonymizedEvents)
+	}
+}

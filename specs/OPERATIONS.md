@@ -120,11 +120,15 @@ delivery, abuse controls, and any identity proofing around them. Destructive
 account deletion is not a v0 endpoint: the host designs it, starting from the
 privacy procedure below.
 
-For a privacy request, disable the user first, export or erase application-owned
-business data according to the host retention policy, and review any proposed
-identity anonymization separately. Credbound audit facts remain append-only and
-must contain identifiers and outcomes rather than secrets or mutable profile
-snapshots.
+For a data-subject request, ExportUserData assembles everything Credbound holds
+about the user (profile, emails, memberships, SSO identities, passkey and PAT
+metadata, sessions) for the access/portability side, and AnonymizeUser serves
+erasure: it scrubs the mutable personal data and revokes every credential in one
+transaction. Credbound audit facts remain append-only — AnonymizeUser preserves
+the hash chain, which keeps a pseudonymous user id and the request IP/User-Agent
+under the security-log retention basis rather than deleting them. The host still
+exports or erases its own application-owned business data per its retention
+policy. Neither call touches host-managed records that reference the user.
 
 ## Observability
 

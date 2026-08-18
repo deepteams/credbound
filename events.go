@@ -103,6 +103,7 @@ const (
 	EventPasskeyAuthenticated         EventName = "passkey.authenticated"
 	EventUserCredentialsRevoked       EventName = "user.credentials_revoked"
 	EventSecondFactorReset            EventName = "user.second_factor_reset"
+	EventUserAnonymized               EventName = "user.anonymized"
 	EventUserLocked                   EventName = "user.locked"
 	EventUserProfileUpdated           EventName = "user.profile_updated"
 	EventSessionCreated               EventName = "session.created"
@@ -314,6 +315,14 @@ type UserCredentialRevocation struct {
 // factor of a user: the TOTP factor with its recovery codes and all
 // passkeys, with the user's sessions revoked in the same transaction.
 type SecondFactorReset struct {
+	EventMeta
+	UserID string
+}
+
+// UserAnonymization is the transactional-hook change for AnonymizeUser: the
+// user's mutable personal data is scrubbed and their credentials revoked in
+// the same transaction, while the append-only audit chain is preserved.
+type UserAnonymization struct {
 	EventMeta
 	UserID string
 }
@@ -593,6 +602,17 @@ type UserCredentialsRevokedEvent struct {
 	UserID string
 }
 
+// UserAnonymizedEvent reports that an instance administrator pseudonymized a
+// user: their mutable personal data (display name, email addresses, SSO and
+// credential names) was scrubbed and their credentials revoked, while the
+// append-only audit chain was preserved. It is the library's answer to a
+// right-to-erasure request; hosts erase their own application-owned data
+// separately.
+type UserAnonymizedEvent struct {
+	EventMeta
+	UserID string
+}
+
 // SecondFactorResetEvent reports that an instance administrator removed
 // every second factor of the user (TOTP, recovery codes, passkeys) and
 // revoked their sessions — the total-loss recovery path. Hosts should
@@ -859,6 +879,7 @@ type TransactionHook interface {
 	ApplyPATRevocation(context.Context, Tx, PATRevocation) error
 	ApplyUserCredentialRevocation(context.Context, Tx, UserCredentialRevocation) error
 	ApplySecondFactorReset(context.Context, Tx, SecondFactorReset) error
+	ApplyUserAnonymization(context.Context, Tx, UserAnonymization) error
 	ApplyRecoveryCodeRegeneration(context.Context, Tx, RecoveryCodeRegeneration) error
 	ApplySessionCreation(context.Context, Tx, SessionCreation) error
 	ApplySessionRevocation(context.Context, Tx, SessionRevocation) error
@@ -926,6 +947,7 @@ type EventListener interface {
 	OnPATRevoked(context.Context, PATRevokedEvent) error
 	OnUserCredentialsRevoked(context.Context, UserCredentialsRevokedEvent) error
 	OnSecondFactorReset(context.Context, SecondFactorResetEvent) error
+	OnUserAnonymized(context.Context, UserAnonymizedEvent) error
 	OnRecoveryCodesRegenerated(context.Context, RecoveryCodesRegeneratedEvent) error
 	OnSessionCreated(context.Context, SessionCreatedEvent) error
 	OnSessionRevoked(context.Context, SessionRevokedEvent) error

@@ -87,6 +87,15 @@ type Store interface {
 	// in the same transaction; sessions the host manages itself remain
 	// host-owned and unaffected.
 	RevokeUserCredentials(context.Context, string, time.Time, Commit) error
+	// AnonymizeUser pseudonymizes a user in one transaction: it scrubs the
+	// mutable personal data (display name, email addresses, SSO and PAT names,
+	// session IP/User-Agent), disables the account, revokes its PATs, sessions
+	// and (with the OAuth capability) grants, and removes its second factors.
+	// The append-only audit chain is deliberately left intact. It reports
+	// ErrConflict when the target is the last enabled root administrator or the
+	// sole admin of a workspace, mirroring SetUserDisabled, and ErrNotFound for
+	// an unknown user.
+	AnonymizeUser(ctx context.Context, userID string, at time.Time, commit Commit) error
 
 	CreateWorkspaceInvitation(context.Context, WorkspaceInvitation, Commit) error
 	WorkspaceInvitationByID(context.Context, string) (WorkspaceInvitation, error)

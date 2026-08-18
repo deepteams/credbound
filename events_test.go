@@ -59,6 +59,11 @@ func (l *eventRecorder) OnBootstrapCompleted(_ context.Context, event credbound.
 	return nil
 }
 
+func (l *eventRecorder) OnUserAnonymized(_ context.Context, event credbound.UserAnonymizedEvent) error {
+	l.record(event.EventMeta)
+	return nil
+}
+
 func (l *eventRecorder) OnPATCreated(_ context.Context, event credbound.PATCreatedEvent) error {
 	l.record(event.EventMeta)
 	return nil

@@ -1249,6 +1249,95 @@ func (s *Store) RevokeUserCredentials(ctx context.Context, userID string, at tim
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// AnonymizeUser pseudonymizes a user: it scrubs the mutable personal data,
+// disables the account, revokes every credential and removes the second
+// factors, all under the commit's snapshot, while the append-only audit chain
+// is preserved. Disabling the last enabled root or a sole workspace admin
+// reports ErrConflict, exactly like SetUserDisabled.
+func (s *Store) AnonymizeUser(ctx context.Context, userID string, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user, ok := s.users[userID]
+	if !ok {
+		return credbound.ErrNotFound
+	}
+	if admin, root := s.admins[userID]; root && admin.Role == credbound.InstanceRoleRoot {
+		enabledRoots := 0
+		for id, candidate := range s.admins {
+			if candidate.Role == credbound.InstanceRoleRoot && !s.users[id].Disabled {
+				enabledRoots++
+			}
+		}
+		if enabledRoots <= 1 {
+			return credbound.ErrConflict
+		}
+	}
+	for workspaceID, membership := range s.memberships {
+		candidate, ownsWorkspace := membership[userID]
+		if !ownsWorkspace || candidate.Role != credbound.RoleAdmin || candidate.Status != credbound.MembershipActive {
+			continue
+		}
+		hasOtherAdmin := false
+		for otherUserID, other := range s.memberships[workspaceID] {
+			if otherUserID != userID && other.Role == credbound.RoleAdmin && other.Status == credbound.MembershipActive && !s.users[otherUserID].Disabled {
+				hasOtherAdmin = true
+				break
+			}
+		}
+		if !hasOtherAdmin {
+			return credbound.ErrConflict
+		}
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	user.DisplayName = ""
+	user.Disabled = true
+	user.UpdatedAt = at
+	s.users[userID] = cloneUser(user)
+	for id, email := range s.emailAddresses {
+		if email.UserID != userID {
+			continue
+		}
+		tombstone := "anonymized-" + id + "@invalid"
+		delete(s.emails, email.Address)
+		delete(s.emailIDs, email.Address)
+		email.Address = tombstone
+		email.UpdatedAt = at
+		s.emailAddresses[id] = cloneEmail(email)
+		s.emails[tombstone] = userID
+		s.emailIDs[tombstone] = id
+	}
+	for id, identity := range s.ssoIdentities {
+		if identity.UserID == userID {
+			identity.Email = ""
+			s.ssoIdentities[id] = cloneSSOIdentity(identity)
+		}
+	}
+	for id, pat := range s.pats {
+		if pat.UserID == userID {
+			pat.Name = ""
+			s.pats[id] = clonePAT(pat)
+		}
+	}
+	for id, session := range s.sessions {
+		if session.UserID == userID {
+			session.UserAgent, session.IPAddress = "", ""
+			s.sessions[id] = cloneSession(session)
+		}
+	}
+	delete(s.totp, userID)
+	delete(s.recovery, userID)
+	delete(s.passkeys, userID)
+	s.revokeUserCredentialsLocked(userID, "", at)
+	s.revokeUserSessionsLocked(userID, at)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
 // PATs streams the user's tokens, newest first, as one cursor page with
 // digests omitted.
 func (s *Store) PATs(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.PAT], error] {

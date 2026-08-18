@@ -2608,6 +2608,64 @@ func (q *Queries) SaveTOTPEnrollment(ctx context.Context, arg SaveTOTPEnrollment
 	return result.RowsAffected()
 }
 
+const scrubUserEmails = `-- name: ScrubUserEmails :exec
+UPDATE credbound_user_emails SET address = 'anonymized-' || id || '@invalid', updated_at = ?2 WHERE user_id = ?1
+`
+
+type ScrubUserEmailsParams struct {
+	UserID    string    `json:"user_id"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (q *Queries) ScrubUserEmails(ctx context.Context, arg ScrubUserEmailsParams) error {
+	_, err := q.db.ExecContext(ctx, scrubUserEmails, arg.UserID, arg.UpdatedAt)
+	return err
+}
+
+const scrubUserPATNames = `-- name: ScrubUserPATNames :exec
+UPDATE credbound_personal_access_tokens SET name = '' WHERE user_id = ?1
+`
+
+func (q *Queries) ScrubUserPATNames(ctx context.Context, userID string) error {
+	_, err := q.db.ExecContext(ctx, scrubUserPATNames, userID)
+	return err
+}
+
+const scrubUserProfile = `-- name: ScrubUserProfile :execrows
+UPDATE credbound_users SET display_name = '', disabled = 1, updated_at = ?2 WHERE id = ?1
+`
+
+type ScrubUserProfileParams struct {
+	ID        string    `json:"id"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (q *Queries) ScrubUserProfile(ctx context.Context, arg ScrubUserProfileParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, scrubUserProfile, arg.ID, arg.UpdatedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const scrubUserSSOEmails = `-- name: ScrubUserSSOEmails :exec
+UPDATE credbound_sso_identities SET email = '' WHERE user_id = ?1
+`
+
+func (q *Queries) ScrubUserSSOEmails(ctx context.Context, userID string) error {
+	_, err := q.db.ExecContext(ctx, scrubUserSSOEmails, userID)
+	return err
+}
+
+const scrubUserSessions = `-- name: ScrubUserSessions :exec
+UPDATE credbound_sessions SET user_agent = '', ip_address = '' WHERE user_id = ?1
+`
+
+func (q *Queries) ScrubUserSessions(ctx context.Context, userID string) error {
+	_, err := q.db.ExecContext(ctx, scrubUserSessions, userID)
+	return err
+}
+
 const setPrimaryEmail = `-- name: SetPrimaryEmail :execrows
 UPDATE credbound_user_emails SET is_primary = 1, updated_at = ?3
 WHERE id = ?2 AND user_id = ?1 AND verified_at IS NOT NULL

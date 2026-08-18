@@ -941,6 +941,71 @@ func (s *Store) RevokeUserCredentials(ctx context.Context, userID string, at tim
 	})
 }
 
+// AnonymizeUser pseudonymizes a user: it scrubs the mutable personal data,
+// disables the account, revokes every credential and removes the second
+// factors, all in the audit commit's transaction, while the append-only audit
+// chain is preserved. Disabling the last enabled root or a sole workspace
+// admin reports ErrConflict, exactly like SetUserDisabled.
+func (s *Store) AnonymizeUser(ctx context.Context, userID string, at time.Time, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		if _, err := q.GetUserByID(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		admin, adminErr := q.GetInstanceAdministrator(ctx, userID)
+		if adminErr != nil && !errors.Is(adminErr, sql.ErrNoRows) {
+			return mapError(adminErr)
+		}
+		if adminErr == nil && admin.Role == string(credbound.InstanceRoleRoot) {
+			count, err := q.CountEnabledRootAdministrators(ctx)
+			if err != nil {
+				return mapError(err)
+			}
+			if count <= 1 {
+				return credbound.ErrConflict
+			}
+		}
+		orphaned, err := q.CountWorkspacesOrphanedByUserDisable(ctx, userID)
+		if err != nil {
+			return mapError(err)
+		}
+		if orphaned > 0 {
+			return credbound.ErrConflict
+		}
+		count, err := q.ScrubUserProfile(ctx, db.ScrubUserProfileParams{ID: userID, UpdatedAt: at})
+		if err := affected(count, err); err != nil {
+			return err
+		}
+		if err := q.ScrubUserEmails(ctx, db.ScrubUserEmailsParams{UserID: userID, UpdatedAt: at}); err != nil {
+			return mapError(err)
+		}
+		if err := q.ScrubUserSSOEmails(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		if err := q.ScrubUserPATNames(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		if err := q.ScrubUserSessions(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		if err := q.RevokeUserPATs(ctx, db.RevokeUserPATsParams{UserID: userID, RevokedAt: nullableTime(&at)}); err != nil {
+			return mapError(err)
+		}
+		if err := q.RevokeUserSessions(ctx, db.RevokeUserSessionsParams{UserID: userID, RevokedAt: nullableTime(&at)}); err != nil {
+			return mapError(err)
+		}
+		if _, err := q.DeleteTOTP(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		if err := q.DeleteRecoveryCodes(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		if err := q.DeleteUserPasskeys(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		return s.revokeOAuthGrants(ctx, q, at, func(grant credbound.OAuthGrant) bool { return grant.UserID == userID })
+	})
+}
+
 // PATs streams the user's tokens, newest first, as one cursor page with
 // digests omitted.
 func (s *Store) PATs(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.PAT], error] {

@@ -23,6 +23,21 @@ UPDATE credbound_users SET disabled = ?2, updated_at = ?3 WHERE id = ?1;
 -- name: UpdateUser :execrows
 UPDATE credbound_users SET display_name = ?2, updated_at = ?3 WHERE id = ?1;
 
+-- name: ScrubUserProfile :execrows
+UPDATE credbound_users SET display_name = '', disabled = 1, updated_at = ?2 WHERE id = ?1;
+
+-- name: ScrubUserEmails :exec
+UPDATE credbound_user_emails SET address = 'anonymized-' || id || '@invalid', updated_at = ?2 WHERE user_id = ?1;
+
+-- name: ScrubUserSSOEmails :exec
+UPDATE credbound_sso_identities SET email = '' WHERE user_id = ?1;
+
+-- name: ScrubUserPATNames :exec
+UPDATE credbound_personal_access_tokens SET name = '' WHERE user_id = ?1;
+
+-- name: ScrubUserSessions :exec
+UPDATE credbound_sessions SET user_agent = '', ip_address = '' WHERE user_id = ?1;
+
 -- name: CountEnabledRootAdministrators :one
 SELECT count(*) FROM credbound_instance_administrators a
 JOIN credbound_users u ON u.id = a.user_id

@@ -57,7 +57,7 @@
 //     Workspaces, UserWorkspaces, Memberships listings.
 //   - Invitations: InviteToWorkspace, AcceptInvitation,
 //     RegisterFromInvitation, RevokeInvitation, WorkspaceInvitations.
-//   - Privacy (data-subject requests): ExportUserData.
+//   - Privacy (data-subject requests): ExportUserData, AnonymizeUser.
 //   - Instance administration: AuthorizeAdmin, RequireAdminMutation,
 //     SetInstanceRole, RemoveInstanceRole, and the Admin* variants of user,
 //     workspace and profile mutations.

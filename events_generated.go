@@ -98,6 +98,10 @@ func (UnimplementedTransactionHook) ApplySecondFactorReset(context.Context, Tx, 
 	return nil
 }
 
+func (UnimplementedTransactionHook) ApplyUserAnonymization(context.Context, Tx, UserAnonymization) error {
+	return nil
+}
+
 func (UnimplementedTransactionHook) ApplyRecoveryCodeRegeneration(context.Context, Tx, RecoveryCodeRegeneration) error {
 	return nil
 }
@@ -307,6 +311,10 @@ func (UnimplementedEventListener) OnUserCredentialsRevoked(context.Context, User
 }
 
 func (UnimplementedEventListener) OnSecondFactorReset(context.Context, SecondFactorResetEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnUserAnonymized(context.Context, UserAnonymizedEvent) error {
 	return nil
 }
 

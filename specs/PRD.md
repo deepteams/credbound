@@ -116,9 +116,14 @@ Credbound provides a reusable, testable, transport-independent core.
 - Cookie or JWT issuance: the library returns an authenticated identity and,
   when the store supports it, optional server-side session records the host can
   bind to its transport; cookies, CSRF, and transport remain host-owned.
-- Physical deletion or automatic anonymization. Privacy erasure requires an
-  application-specific, separately reviewed retention policy; Credbound exposes
-  disablement and revocation primitives without deleting append-only audit facts.
+- Physical row deletion of a user. Credbound never deletes append-only audit
+  facts, so a hard delete would break the hash chain; erasure is served instead
+  by AnonymizeUser, which pseudonymizes the mutable personal data (display name,
+  email addresses, SSO and credential names, session IP/User-Agent) and revokes
+  every credential while preserving the audit chain, and by ExportUserData for
+  the access/portability side of a data-subject request. The host still applies
+  its own retention policy to application-owned business data and to the
+  security-log basis under which the audit trail is retained.
 
 ## 3. Functional flows
 

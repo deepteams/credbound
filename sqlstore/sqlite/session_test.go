@@ -3,6 +3,7 @@ package sqlite_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -269,5 +270,57 @@ func TestSessionCascadeOnDisableAndCredentialRevocation(t *testing.T) {
 	still, err := f.store.SessionByID(ctx, rootReplacement.ID)
 	if err != nil || still.RevokedAt != nil {
 		t.Fatalf("bulk revocation crossed users: %#v, %v", still, err)
+	}
+}
+
+func TestAnonymizeUserStore(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	users := f.bootstrapSessionUsers(t)
+	member := f.newSessionMember(t, users, "member@example.com")
+	pat := credbound.PAT{
+		ID: f.id(), UserID: member.ID, Name: "member token", Prefix: "aabbccddeeff",
+		Digest: []byte("digest"), WorkspaceID: users.workspace.ID, Scopes: []string{"read"}, CreatedAt: f.now,
+	}
+	if err := f.store.CreatePAT(ctx, pat, f.event(member.ID, "pat.create", pat.ID, users.workspace.ID)); err != nil {
+		t.Fatal(err)
+	}
+	session := f.newSession(t, member.ID)
+
+	if err := f.store.AnonymizeUser(ctx, member.ID, f.now, f.event(users.root.ID, "user.anonymize", member.ID, "")); err != nil {
+		t.Fatalf("anonymize = %v", err)
+	}
+
+	// Profile scrubbed and disabled.
+	got, err := f.store.UserByID(ctx, member.ID)
+	if err != nil || got.DisplayName != "" || !got.Disabled {
+		t.Fatalf("user after anonymize = %#v, %v", got, err)
+	}
+	// Email replaced by a unique tombstone.
+	var address string
+	for event, err := range f.store.Emails(ctx, member.ID, credbound.PageRequest{Limit: 10}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if event.Data != nil {
+			address = event.Data.Address
+		}
+	}
+	if address == "member@example.com" || !strings.HasPrefix(address, "anonymized-") {
+		t.Fatalf("email not tombstoned: %q", address)
+	}
+	// PAT name cleared and revoked.
+	for event, err := range f.store.PATs(ctx, member.ID, credbound.PageRequest{Limit: 10}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if event.Data != nil && (event.Data.Name != "" || event.Data.RevokedAt == nil) {
+			t.Fatalf("PAT not scrubbed/revoked: %#v", event.Data)
+		}
+	}
+	// Session IP/User-Agent scrubbed.
+	stored, err := f.store.SessionByID(ctx, session.ID)
+	if err != nil || stored.UserAgent != "" || stored.IPAddress != "" {
+		t.Fatalf("session not scrubbed: %#v, %v", stored, err)
 	}
 }
