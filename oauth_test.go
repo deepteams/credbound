@@ -154,6 +154,22 @@ func TestOAuthAuthorizationRefreshAndDCR(t *testing.T) {
 	if err != nil || consent.RequiresStepUp {
 		t.Fatalf("consent = %#v, %v", consent, err)
 	}
+	// A client max_age shorter than the actor's authentication age forces
+	// step-up, and completion refuses until the host re-authenticates.
+	staleActor := actor
+	staleActor.AuthenticatedAt = actor.AuthenticatedAt.Add(-time.Hour)
+	stale, err := f.manager.BeginOAuthAuthorization(ctx, staleActor, credbound.BeginOAuthAuthorizationInput{
+		Issuer: issuer.Issuer, ClientID: issuedClient.Client.ClientID,
+		RedirectURI: "https://client.example.com/callback", Resource: resource.Resource,
+		Scopes: []string{"documents.read", "offline_access", "openid", "email"}, State: "state", CodeChallenge: challenge, CodeChallengeMethod: "S256", Nonce: "nonce",
+		MaxAge: time.Minute,
+	})
+	if err != nil || !stale.RequiresStepUp {
+		t.Fatalf("max_age consent = %#v, %v", stale, err)
+	}
+	if _, err := f.manager.CompleteOAuthAuthorization(ctx, staleActor, stale.Continuation, true); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("max_age completion = %v", err)
+	}
 	authorized, err := f.manager.CompleteOAuthAuthorization(ctx, actor, consent.Continuation, true)
 	if err != nil || authorized.Code == "" || authorized.State != "state" {
 		t.Fatalf("authorization = %#v, %v", authorized, err)

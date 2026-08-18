@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/deepteams/credbound"
 )
@@ -169,10 +171,16 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthorizationError(w, redirectURI, state, "login_required", "interactive authentication is required")
 		return
 	}
+	maxAge, ok := parseMaxAge(query.Get("max_age"))
+	if !ok {
+		h.writeAuthorizationError(w, redirectURI, state, "invalid_request", "max_age must be a non-negative number of seconds")
+		return
+	}
 	consent, err := h.manager.BeginOAuthAuthorization(r.Context(), actor, credbound.BeginOAuthAuthorizationInput{
 		Issuer: h.config.Issuer, ClientID: query.Get("client_id"), RedirectURI: query.Get("redirect_uri"),
 		Resource: query.Get("resource"), Scopes: strings.Fields(query.Get("scope")), State: query.Get("state"),
 		CodeChallenge: query.Get("code_challenge"), CodeChallengeMethod: query.Get("code_challenge_method"), Nonce: query.Get("nonce"),
+		MaxAge: maxAge,
 	})
 	if err != nil {
 		code, description := authorizationError(err)
@@ -429,6 +437,25 @@ func bearerToken(r *http.Request) string {
 		return ""
 	}
 	return strings.TrimSpace(token)
+}
+
+// parseMaxAge reads the OIDC max_age request parameter, a non-negative number
+// of seconds. Absent is (0, true) — no constraint. max_age=0 maps to the
+// smallest positive duration so any prior authentication is stale, forcing
+// re-authentication as the spec requires. A malformed or negative value is
+// (0, false).
+func parseMaxAge(raw string) (time.Duration, bool) {
+	if raw == "" {
+		return 0, true
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds < 0 {
+		return 0, false
+	}
+	if seconds == 0 {
+		return time.Nanosecond, true
+	}
+	return time.Duration(seconds) * time.Second, true
 }
 
 func bearerChallenge(metadataURL, scope, problem string) string {

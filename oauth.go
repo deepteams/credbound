@@ -43,6 +43,7 @@ type oauthAuthorizationContinuation struct {
 	AuthTime       time.Time      `json:"auth_time"`
 	AuthMethod     AuthMethod     `json:"auth_method"`
 	AAL            AssuranceLevel `json:"aal"`
+	MaxAge         time.Duration  `json:"max_age,omitempty"`
 	ExpiresAt      time.Time      `json:"exp"`
 }
 
@@ -488,12 +489,17 @@ func (m *Manager) BeginOAuthAuthorization(ctx context.Context, actor Authenticat
 			requiresStepUp = true
 		}
 	}
+	// The client's OIDC max_age caps how old the end-user's authentication may
+	// be, on top of any per-scope server policy.
+	if input.MaxAge > 0 && !freshAuthentication(m.now(), actor.AuthenticatedAt, input.MaxAge) {
+		requiresStepUp = true
+	}
 	continuation := oauthAuthorizationContinuation{
 		UserID: actor.UserID, ClientRecordID: client.ID, ResourceID: resource.ID,
 		RedirectURI: input.RedirectURI, Scopes: scopes, State: input.State,
 		CodeChallenge: input.CodeChallenge, Nonce: input.Nonce,
 		MetadataHash: slices.Clone(client.MetadataHash), AuthTime: actor.AuthenticatedAt,
-		AuthMethod: actor.Method, AAL: actor.Level, ExpiresAt: m.now().Add(m.ceremonyTTL),
+		AuthMethod: actor.Method, AAL: actor.Level, MaxAge: input.MaxAge, ExpiresAt: m.now().Add(m.ceremonyTTL),
 	}
 	rawContinuation, err := m.encodeOAuthContinuation(continuation)
 	if err != nil {
@@ -562,6 +568,12 @@ func (m *Manager) CompleteOAuthAuthorization(ctx context.Context, actor Authenti
 		if definition.MinimumAAL > actor.Level || (definition.MaxAuthAge > 0 && !freshAuthentication(m.now(), actor.AuthenticatedAt, definition.MaxAuthAge)) {
 			return OAuthAuthorizationResult{}, ErrStepUpRequired
 		}
+	}
+	// Re-enforce the client's max_age against the (possibly re-authenticated)
+	// actor so a host that ignored RequiresStepUp cannot complete with a stale
+	// authentication.
+	if continuation.MaxAge > 0 && !freshAuthentication(m.now(), actor.AuthenticatedAt, continuation.MaxAge) {
+		return OAuthAuthorizationResult{}, ErrStepUpRequired
 	}
 	baseResult := OAuthAuthorizationResult{RedirectURI: continuation.RedirectURI, State: continuation.State, Issuer: issuer.Issuer}
 	if !approved {

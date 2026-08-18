@@ -431,6 +431,13 @@ type BeginOAuthAuthorizationInput struct {
 	CodeChallenge       string
 	CodeChallengeMethod string
 	Nonce               string
+	// MaxAge is the OIDC max_age request parameter: the maximum age the
+	// end-user's authentication may have. When positive and the actor's
+	// authentication is older, the consent reports RequiresStepUp and
+	// CompleteOAuthAuthorization refuses with ErrStepUpRequired until the host
+	// re-authenticates the user. Zero leaves the decision to the per-scope
+	// server policy alone.
+	MaxAge time.Duration
 }
 
 // OAuthConsentScope is one scope of a pending consent with its
