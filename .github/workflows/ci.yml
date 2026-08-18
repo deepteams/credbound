@@ -27,8 +27,11 @@ jobs:
     env:
       CREDBOUND_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/credbound?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v6
+      # Third-party actions are pinned to full commit SHAs so a hijacked or
+      # re-pointed tag cannot inject code into CI; bump by updating the SHA
+      # and the version comment together.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
           cache: true
@@ -47,6 +50,6 @@ jobs:
       - name: Coverage
         run: make coverage
       - name: Vulnerability scan
-        uses: golang/govulncheck-action@v1
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
         with:
           go-package: ./...
