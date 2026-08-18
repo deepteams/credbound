@@ -277,8 +277,20 @@ the administration API.
 
 The first version supports `authorization_code` with PKCE `S256`. PKCE is
 mandatory for every public and confidential client. Implicit and resource owner
-password grants are rejected. `client_credentials` cannot represent a user and
-remains outside the initial delegated MCP profile.
+password grants are rejected.
+
+`client_credentials` is supported for machine-to-machine access, and cannot
+represent a user: its tokens carry no user subject and no RBAC evaluation, so
+the grant is deliberately narrow. Only an administratively pre-registered
+confidential client may hold it — DCR and CIMD clients are refused, including
+`private_key_jwt` registrations — and registration requires both a non-empty
+registered scope list and an explicit allowlist of the protected resource URIs
+the client may target. Issuance and bearer validation both enforce the
+allowlist, an empty scope request grants the intersection of the registered
+and resource scopes (never everything), and the tokens are individually
+revocable through the RFC 7009 endpoint. This preserves the invariant above:
+resolving a client identity grants it no access — only an administrator's
+explicit allowlist does.
 
 An authorization request must contain:
 

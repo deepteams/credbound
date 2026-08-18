@@ -100,8 +100,11 @@
 //
 // A password or email login yields AAL1 and reports through
 // SecondFactorRequired whether an active TOTP factor still has to be
-// verified; VerifyTOTP upgrades the context to AAL2. Passkey and SSO
-// authentication produce AAL2 directly. Sensitive operations demand a fresh
+// verified; VerifyTOTP upgrades the context to AAL2. Passkey authentication
+// produces AAL2 directly. SSO yields AAL2 only when the provider carries a
+// Config.SSOAssurance policy the asserted context satisfies (or that trusts
+// the provider unverified); otherwise it is AAL1, because SSO never mints
+// AAL2 on the IdP's unverified word. Sensitive operations demand a fresh
 // interactive AAL2 context (RequireStepUp) and fail with ErrStepUpRequired
 // otherwise. Administrative mutations use RequireAdminMutation, which may
 // waive the step-up only for a TrustedRequest built from an actually

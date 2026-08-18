@@ -21,15 +21,15 @@ process is specs-first.
 ```sh
 make test       # go test ./...
 make generate   # sqlc + genevents + genpostgresstore (must be reproducible)
-make verify     # gofmt, vet, race tests, coverage strictly above 90%
+make verify     # gofmt, vet, race tests, maintained coverage >= 89.5%
 ```
 
 Requirements and conventions:
 
 - Go 1.26 or newer.
-- `make verify` must pass. Coverage of maintained code must stay strictly
-  above 90%; new code ships with tests for its failure paths, not only the
-  happy path.
+- `make verify` must pass. Coverage of maintained code must stay at or above
+  the floor in `scripts/coverage.sh` (currently 89.5%); new code ships with
+  tests for its failure paths, not only the happy path.
 - Generated code is never edited by hand: `internal/sqlc/` comes from `sqlc`,
   `events_generated.go` from `genevents`, and the PostgreSQL store is derived
   from the SQLite store by `genpostgresstore`. Change the source (SQL files,

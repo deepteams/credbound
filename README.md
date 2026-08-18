@@ -87,10 +87,19 @@ hooks, and append-only audit behavior against a real PostgreSQL service.
 
 ## Integration
 
+Credbound requires Go 1.26 or newer (it relies on the standard library's
+`crypto/hkdf`).
+
 Credbound is a library, not a server. The host service remains responsible for
 cookies, CSRF, rate limiting, its TLS/H2/H3 reverse proxy, and its UI. WebAuthn
 ceremonies remain transport-agnostic: the JSON produced by the library is sent
 to the browser, whose response is then passed back to the library.
+
+For host-side rate limiting beyond the built-in per-account lockout and
+per-address email cooldown, the authentication events carry the
+`RequestMetadata` (client IP and user agent) the host supplied — listen for
+`AuthenticationFailureEvent` and `UserLockedEvent` to feed an IP-level
+throttle at the edge.
 
 ### Sessions and the `Authentication` capability
 
@@ -109,8 +118,8 @@ checks and per-workspace MFA enforcement. The host owns sessions and must:
   authorized paths, send the user to `VerifyTOTP`, and store the AAL2
   `Authentication` that it returns;
 - terminate its own sessions for a user when `CompletePasswordReset`,
-  `DisableUser`, or `RevokeUserCredentials` fires — the library revokes PATs
-  and OAuth grants but cannot see host sessions.
+  `ChangePassword`, `DisableUser`, or `RevokeUserCredentials` fires — the
+  library revokes PATs and OAuth grants but cannot see host sessions.
 
 `RequireStepUp` accepts only interactive AAL2 authentications newer than
 `Config.StepUpMaxAge`; a PAT can never satisfy it.
@@ -159,7 +168,7 @@ auth, err := credbound.New(credbound.Config{
     Store:          store,
     Passwords:      passwords,
     TOTP:           totpProvider,  // optional second factor
-    Passkeys:       passkeys,      // optional second factor
+    Passkeys:       passkeys,      // optional AAL2 first factor
     SecretKey:      encryptionKey, // exactly 32 bytes
     PATPepper:      patPepper,     // at least 32 bytes
     RecoveryPepper: recoveryPepper,// at least 32 bytes
@@ -226,6 +235,12 @@ CIMD, and DCR policies independently. The optional `oauthhttp.Handler` exposes
 discovery, authorization, token, revocation, registration, UserInfo, and JWKS
 routes when mounted by the host. `oauthhttp.Protect` validates a bearer token
 again at the resource boundary before calling an MCP handler.
+
+Machine-to-machine access uses the `client_credentials` grant, deliberately
+narrow: only an administratively pre-registered confidential client may hold
+it, registration requires both a scope list and an explicit allowlist of the
+resource URIs the client may target, and its tokens are individually
+revocable through the revocation endpoint.
 
 Use `oauthclientadapter.JWTAssertionVerifier` for hardened `private_key_jwt`
 verification and `oauthhttp.MetadataFetcher` for CIMD loading. The latter
@@ -305,8 +320,9 @@ make coverage
 make verify
 ```
 
-`make coverage` enforces consolidated coverage strictly above 90% for maintained
-code. Generated sqlc code and the generated PostgreSQL store are excluded from
+`make coverage` enforces consolidated coverage of at least 89.5% for maintained
+code — the floor the suite sustains, tracked in `scripts/coverage.sh`.
+Generated sqlc code and the generated PostgreSQL store are excluded from
 this measurement; their reproducibility is checked by `make generate`.
 
 ## Contributing

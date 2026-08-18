@@ -270,7 +270,7 @@ components:
       properties:
         grant_type:
           type: string
-          enum: [authorization_code, refresh_token]
+          enum: [authorization_code, refresh_token, client_credentials]
         client_id: {type: string}
         client_secret: {type: string}
         client_assertion: {type: string}
