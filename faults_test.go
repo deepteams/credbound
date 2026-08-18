@@ -185,6 +185,11 @@ func TestMutationAndAuthorizationInfrastructureFailures(t *testing.T) {
 	}
 	fault.adminErr = nil
 
+	fault.loginThrottleErr = errors.New("throttle offline")
+	if err := manager.ChangePassword(ctx, authn, "correct horse battery", "another secure password"); err == nil || err.Error() != "throttle offline" {
+		t.Fatalf("change password throttle failure = %v", err)
+	}
+	fault.loginThrottleErr = nil
 	passwords.verifyErr = errors.New("verify offline")
 	if err := manager.ChangePassword(ctx, authn, "correct horse battery", "another secure password"); err == nil || !stringsContains(err.Error(), "verify password") {
 		t.Fatalf("change password verify failure = %v", err)
@@ -393,6 +398,7 @@ type faultStore struct {
 	userByEmailErr     error
 	userByIDErr        error
 	passwordErr        error
+	loginThrottleErr   error
 	totpErr            error
 	membershipErr      error
 	adminErr           error
@@ -492,6 +498,13 @@ func (s *faultStore) RehashPassword(ctx context.Context, password credbound.Pass
 		return s.replacePasswordErr
 	}
 	return s.Store.RehashPassword(ctx, password, previousHash, commit)
+}
+
+func (s *faultStore) LoginThrottleByUserID(ctx context.Context, userID string) (credbound.LoginThrottle, error) {
+	if s.loginThrottleErr != nil {
+		return credbound.LoginThrottle{}, s.loginThrottleErr
+	}
+	return s.Store.LoginThrottleByUserID(ctx, userID)
 }
 
 func (s *faultStore) ChangePassword(ctx context.Context, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {

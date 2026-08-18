@@ -40,6 +40,8 @@ jobs:
           git diff --exit-code
       - name: Vet
         run: go vet ./...
+      - name: Lint
+        run: make lint
       - name: Race tests with PostgreSQL
         run: go test -race ./...
       - name: Coverage
