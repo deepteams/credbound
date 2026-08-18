@@ -766,13 +766,20 @@ func (s *Store) EmailVerificationByID(ctx context.Context, emailID string) (cred
 
 // ClaimEmailIssuance atomically records an email issuance and reports whether
 // it was allowed: it claims only when no earlier issuance for (address,
-// purpose) is newer than notBefore.
+// purpose) is newer than notBefore. Entries older than notBefore no longer
+// throttle anything and are pruned on every claim, so anonymous traffic
+// cannot grow the map beyond the current cooldown window.
 func (s *Store) ClaimEmailIssuance(ctx context.Context, address, purpose string, at, notBefore time.Time) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for key, last := range s.emailIssuance {
+		if !last.After(notBefore) {
+			delete(s.emailIssuance, key)
+		}
+	}
 	key := address + "\x00" + purpose
 	if last, ok := s.emailIssuance[key]; ok && last.After(notBefore) {
 		return false, nil

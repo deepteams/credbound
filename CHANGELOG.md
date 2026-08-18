@@ -9,6 +9,14 @@ breaking changes may land in any release and are called out explicitly.
 
 ### Security
 
+- The anonymous email-issuance throttle can no longer be used to grow
+  storage without bound. The manager now keys `ClaimEmailIssuance` with a
+  fixed-size HMAC of the normalized address — hostile input of any length
+  costs one bounded, opaque row and a store dump reveals nothing about the
+  addresses tried — and the bundled stores prune entries older than the
+  cooldown on every claim, so the bookkeeping tracks the current window
+  instead of accumulating every address ever submitted.
+
 - The token and revocation endpoints now hold clients to their registered
   `token_endpoint_auth_method`. A client registered `client_secret_basic`
   is refused a correct secret delivered as a `client_secret` form field

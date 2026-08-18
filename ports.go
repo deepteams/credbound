@@ -251,9 +251,15 @@ type SessionStore interface {
 type EmailThrottleStore interface {
 	// ClaimEmailIssuance atomically records an issuance for (address, purpose)
 	// at time `at` and reports whether it was allowed: it claims only when no
-	// prior issuance for that pair is newer than notBefore. It is keyed by
-	// address regardless of account existence, so it opens no enumeration
-	// oracle, and it needs no audit commit — it is rate-limit bookkeeping.
+	// prior issuance for that pair is newer than notBefore. The address the
+	// manager passes is an opaque, fixed-size HMAC key derived from the
+	// normalized address — never the address itself — so rows stay bounded
+	// and the store learns nothing about the addresses tried. Entries with
+	// last_issued_at at or before notBefore no longer throttle anything, and
+	// implementations prune them on each claim so anonymous traffic cannot
+	// grow the bookkeeping beyond the current cooldown window. It is keyed
+	// regardless of account existence, so it opens no enumeration oracle,
+	// and it needs no audit commit — it is rate-limit bookkeeping.
 	ClaimEmailIssuance(ctx context.Context, address, purpose string, at, notBefore time.Time) (bool, error)
 }
 

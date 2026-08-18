@@ -316,7 +316,12 @@ func (m *Manager) userEmails(ctx context.Context, userID string) iter.Seq2[Email
 	}
 }
 
-// allowEmailIssuance enforces the per-address issuance cooldown. It returns
+// allowEmailIssuance enforces the per-address issuance cooldown. The store
+// key is a fixed-size HMAC of the (normalized) address, so anonymous hostile
+// input of any length or shape creates only one bounded, opaque row — the
+// store never learns which addresses were tried — and every claim prunes
+// entries older than the cooldown, so the bookkeeping tracks the current
+// window instead of growing with every address ever submitted. It returns
 // true when issuance is permitted — always so when the cooldown is disabled or
 // the store lacks the capability — and false when the address is still within
 // its cooldown window for that purpose. It is keyed by address alone, so it
@@ -325,8 +330,9 @@ func (m *Manager) allowEmailIssuance(ctx context.Context, address, purpose strin
 	if m.emailIssuanceCooldown <= 0 || m.emailThrottle == nil {
 		return true, nil
 	}
+	key := base64.RawURLEncoding.EncodeToString(m.tokenDigest("email-issuance:" + address))
 	now := m.now()
-	return m.emailThrottle.ClaimEmailIssuance(ctx, address, purpose, now, now.Add(-m.emailIssuanceCooldown))
+	return m.emailThrottle.ClaimEmailIssuance(ctx, key, purpose, now, now.Add(-m.emailIssuanceCooldown))
 }
 
 func parseEmailVerification(raw string) (string, bool) {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/deepteams/credbound"
+	"github.com/deepteams/credbound/memory"
 )
 
 func TestPasswordChangeAndInputValidation(t *testing.T) {
@@ -89,8 +90,9 @@ func TestEmailIssuanceCooldown(t *testing.T) {
 	f := newFixture(t)
 	f.bootstrap(t)
 	ctx := context.Background()
+	spy := &issuanceSpy{Store: f.store}
 	manager, err := credbound.New(credbound.Config{
-		Store: f.store, Passwords: f.passwords, TOTP: fakeTOTP{}, Passkeys: &fakePasskeys{},
+		Store: spy, Passwords: f.passwords, TOTP: fakeTOTP{}, Passkeys: &fakePasskeys{},
 		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
 		Clock: func() time.Time { return f.now }, Random: &counterReader{next: 0x77},
 		EmailIssuanceCooldown: time.Minute,
@@ -118,6 +120,31 @@ func TestEmailIssuanceCooldown(t *testing.T) {
 	if err != nil || third.Token == "" {
 		t.Fatalf("post-cooldown reset = %#v, %v", third, err)
 	}
+	// The throttle never sees an address — only a fixed-size opaque HMAC
+	// key — so a hostile arbitrary-length input costs the store exactly one
+	// bounded row and a dump reveals nothing about the addresses tried.
+	if _, err := manager.BeginPasswordReset(ctx, strings.Repeat("a", 100_000)+"@example.com"); err != nil {
+		t.Fatalf("oversized address reset = %v", err)
+	}
+	if len(spy.keys) == 0 {
+		t.Fatal("no issuance claims recorded")
+	}
+	for _, key := range spy.keys {
+		if len(key) != 43 || strings.Contains(key, "@") {
+			t.Fatalf("issuance key is not a bounded opaque digest: %q", key)
+		}
+	}
+}
+
+// issuanceSpy records the throttle keys the manager hands the store.
+type issuanceSpy struct {
+	*memory.Store
+	keys []string
+}
+
+func (s *issuanceSpy) ClaimEmailIssuance(ctx context.Context, address, purpose string, at, notBefore time.Time) (bool, error) {
+	s.keys = append(s.keys, address)
+	return s.Store.ClaimEmailIssuance(ctx, address, purpose, at, notBefore)
 }
 
 func TestStepUpAuthorizationAndRBACFailures(t *testing.T) {

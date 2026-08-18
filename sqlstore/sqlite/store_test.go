@@ -833,4 +833,17 @@ func TestClaimEmailIssuance(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("post-cooldown claim = %v, %v", ok, err)
 	}
+	// Expired rows no longer throttle anything and are pruned on each claim,
+	// so anonymous traffic cannot grow the table beyond the cooldown window.
+	much := base.Add(time.Hour)
+	if ok, err := f.store.ClaimEmailIssuance(ctx, "other@example.com", "password.reset", much, much.Add(-time.Minute)); err != nil || !ok {
+		t.Fatalf("fresh claim = %v, %v", ok, err)
+	}
+	var rows int
+	if err := f.db.QueryRow(`SELECT COUNT(*) FROM credbound_email_issuance`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Fatalf("expired issuance rows survived pruning: %d", rows)
+	}
 }

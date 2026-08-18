@@ -374,6 +374,8 @@ ORDER BY created_at DESC, user_id DESC LIMIT $6`+"`"+`, workspaceID, cursor.ID !
 	// upsert keyword to the PostgreSQL dialect.
 	code = mustReplace(code, "VALUES (?, ?, ?)\nON CONFLICT (address, purpose) DO UPDATE SET last_issued_at = excluded.last_issued_at WHERE credbound_email_issuance.last_issued_at <= ?",
 		"VALUES ($1, $2, $3)\nON CONFLICT (address, purpose) DO UPDATE SET last_issued_at = EXCLUDED.last_issued_at WHERE credbound_email_issuance.last_issued_at <= $4", 1)
+	code = mustReplace(code, "DELETE FROM credbound_email_issuance WHERE last_issued_at <= ?",
+		"DELETE FROM credbound_email_issuance WHERE last_issued_at <= $1", 1)
 
 	code = mustReplace(code, `func nullableString(value string) sql.NullString {`, `func nullableUUID(value string) any {
 	if value == "" {

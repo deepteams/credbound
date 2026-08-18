@@ -413,9 +413,15 @@ func (s *Store) LoginThrottleByUserID(ctx context.Context, userID string) (credb
 // ClaimEmailIssuance atomically records an email issuance for (address,
 // purpose) and reports whether it was allowed: it claims only when no earlier
 // issuance is newer than notBefore, so a caller gets at most one send per
-// cooldown window. It is rate-limit bookkeeping keyed by address regardless of
-// account existence, so it opens no audit transaction and leaks nothing.
+// cooldown window. Rows older than notBefore no longer throttle anything and
+// are pruned on every claim, so anonymous traffic cannot grow the table
+// beyond the current cooldown window. It is rate-limit bookkeeping keyed by
+// an opaque digest regardless of account existence, so it opens no audit
+// transaction and leaks nothing.
 func (s *Store) ClaimEmailIssuance(ctx context.Context, address, purpose string, at, notBefore time.Time) (bool, error) {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM credbound_email_issuance WHERE last_issued_at <= ?`, notBefore); err != nil {
+		return false, mapError(err)
+	}
 	result, err := s.db.ExecContext(ctx, `INSERT INTO credbound_email_issuance (address, purpose, last_issued_at) VALUES (?, ?, ?)
 ON CONFLICT (address, purpose) DO UPDATE SET last_issued_at = excluded.last_issued_at WHERE credbound_email_issuance.last_issued_at <= ?`,
 		address, purpose, at, notBefore)
