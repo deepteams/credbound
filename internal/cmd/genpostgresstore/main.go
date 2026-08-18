@@ -502,7 +502,13 @@ func generateOAuth() {
 	// chain head is taken FOR UPDATE and open DCR locks its issuer row — so
 	// OAuth mutations run concurrently.
 `, 1)
-	code = mustReplace(code, "func oauthParam(value any) string { return string(oauthJSON(value)) }", "func oauthParam(value any) []byte { return oauthJSON(value) }", 1)
+	code = mustReplace(code, `func oauthParam(value any) (string, error) {
+	raw, err := oauthJSON(value)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}`, `func oauthParam(value any) ([]byte, error) { return oauthJSON(value) }`, 1)
 	code = mustReplaceAll(code, "int64(token.RegistrationCount)", "int32(token.RegistrationCount)")
 	code = mustReplaceAll(code, "int64(previousCount)", "int32(previousCount)")
 	code = mustReplaceAll(code, "int64(value.RegistrationCount)", "int32(value.RegistrationCount)")

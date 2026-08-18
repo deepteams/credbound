@@ -20,7 +20,11 @@ import (
 // URL reports credbound.ErrConflict.
 func (s *Store) CreateOAuthIssuer(ctx context.Context, value credbound.OAuthIssuer, commit credbound.Commit) error {
 	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
-		return mapError(q.OAuthInsertIssuer(ctx, db.OAuthInsertIssuerParams{ID: value.ID, Issuer: value.Issuer, CreatedAt: value.CreatedAt, DataJson: oauthParam(value)}))
+		data, err := oauthParam(value)
+		if err != nil {
+			return err
+		}
+		return mapError(q.OAuthInsertIssuer(ctx, db.OAuthInsertIssuerParams{ID: value.ID, Issuer: value.Issuer, CreatedAt: value.CreatedAt, DataJson: data}))
 	})
 }
 
@@ -36,7 +40,11 @@ func (s *Store) SetOAuthIssuerDisabled(ctx context.Context, id string, disabled 
 			value.DisabledAt = &at
 		}
 		value.UpdatedAt = at
-		if err := affected(q.OAuthUpdateIssuerJSON(ctx, db.OAuthUpdateIssuerJSONParams{ID: id, DataJson: oauthParam(value)})); err != nil {
+		data, err := oauthParam(value)
+		if err != nil {
+			return err
+		}
+		if err := affected(q.OAuthUpdateIssuerJSON(ctx, db.OAuthUpdateIssuerJSONParams{ID: id, DataJson: data})); err != nil {
 			return err
 		}
 		if disabled {
@@ -49,7 +57,11 @@ func (s *Store) SetOAuthIssuerDisabled(ctx context.Context, id string, disabled 
 // UpdateOAuthIssuer persists the issuer's mutable attributes.
 func (s *Store) UpdateOAuthIssuer(ctx context.Context, value credbound.OAuthIssuer, commit credbound.Commit) error {
 	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
-		return affected(q.OAuthUpdateIssuer(ctx, db.OAuthUpdateIssuerParams{ID: value.ID, Issuer: value.Issuer, DataJson: oauthParam(value)}))
+		data, err := oauthParam(value)
+		if err != nil {
+			return err
+		}
+		return affected(q.OAuthUpdateIssuer(ctx, db.OAuthUpdateIssuerParams{ID: value.ID, Issuer: value.Issuer, DataJson: data}))
 	})
 }
 
@@ -74,7 +86,11 @@ ORDER BY created_at DESC, id DESC LIMIT ?`, nil, page, func(value credbound.OAut
 // or URI reports credbound.ErrConflict.
 func (s *Store) CreateOAuthProtectedResource(ctx context.Context, value credbound.OAuthProtectedResource, commit credbound.Commit) error {
 	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
-		return mapError(q.OAuthInsertResource(ctx, db.OAuthInsertResourceParams{ID: value.ID, IssuerID: value.IssuerID, WorkspaceID: value.WorkspaceID, Resource: value.Resource, CreatedAt: value.CreatedAt, DataJson: oauthParam(value)}))
+		data, err := oauthParam(value)
+		if err != nil {
+			return err
+		}
+		return mapError(q.OAuthInsertResource(ctx, db.OAuthInsertResourceParams{ID: value.ID, IssuerID: value.IssuerID, WorkspaceID: value.WorkspaceID, Resource: value.Resource, CreatedAt: value.CreatedAt, DataJson: data}))
 	})
 }
 
@@ -90,7 +106,11 @@ func (s *Store) SetOAuthProtectedResourceDisabled(ctx context.Context, id string
 			value.DisabledAt = &at
 		}
 		value.UpdatedAt = at
-		if err := affected(q.OAuthUpdateResourceJSON(ctx, db.OAuthUpdateResourceJSONParams{ID: id, DataJson: oauthParam(value)})); err != nil {
+		data, err := oauthParam(value)
+		if err != nil {
+			return err
+		}
+		if err := affected(q.OAuthUpdateResourceJSON(ctx, db.OAuthUpdateResourceJSONParams{ID: id, DataJson: data})); err != nil {
 			return err
 		}
 		if disabled {
@@ -159,14 +179,22 @@ func (s *Store) CreateOAuthClient(ctx context.Context, value credbound.OAuthClie
 			}
 			previousCount := token.RegistrationCount
 			token.RegistrationCount++
+			tokenData, err := oauthParam(token)
+			if err != nil {
+				return err
+			}
 			count, err := q.OAuthUseInitialAccessToken(ctx, db.OAuthUseInitialAccessTokenParams{
-				ID: token.ID, RegistrationCount: int32(token.RegistrationCount), DataJson: oauthParam(token), RegistrationCount_2: int32(previousCount), ExpiresAt: usedAt,
+				ID: token.ID, RegistrationCount: int32(token.RegistrationCount), DataJson: tokenData, RegistrationCount_2: int32(previousCount), ExpiresAt: usedAt,
 			})
 			if err != nil || count != 1 {
 				return credbound.ErrConflict
 			}
 		}
-		return mapError(q.OAuthInsertClient(ctx, db.OAuthInsertClientParams{ID: value.ID, IssuerID: value.IssuerID, ClientID: value.ClientID, CreatedAt: value.CreatedAt, DataJson: oauthParam(value)}))
+		data, err := oauthParam(value)
+		if err != nil {
+			return err
+		}
+		return mapError(q.OAuthInsertClient(ctx, db.OAuthInsertClientParams{ID: value.ID, IssuerID: value.IssuerID, ClientID: value.ClientID, CreatedAt: value.CreatedAt, DataJson: data}))
 	})
 }
 
@@ -174,7 +202,11 @@ func (s *Store) CreateOAuthClient(ctx context.Context, value credbound.OAuthClie
 // Client Identifier Metadata Document.
 func (s *Store) UpsertOAuthCIMDClient(ctx context.Context, value credbound.OAuthClient, commit credbound.Commit) error {
 	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
-		return mapError(q.OAuthUpsertCIMDClient(ctx, db.OAuthUpsertCIMDClientParams{ID: value.ID, IssuerID: value.IssuerID, ClientID: value.ClientID, CreatedAt: value.CreatedAt, DataJson: oauthParam(value)}))
+		data, err := oauthParam(value)
+		if err != nil {
+			return err
+		}
+		return mapError(q.OAuthUpsertCIMDClient(ctx, db.OAuthUpsertCIMDClientParams{ID: value.ID, IssuerID: value.IssuerID, ClientID: value.ClientID, CreatedAt: value.CreatedAt, DataJson: data}))
 	})
 }
 
@@ -190,7 +222,11 @@ func (s *Store) SetOAuthClientDisabled(ctx context.Context, id string, disabled 
 			value.DisabledAt = &at
 		}
 		value.UpdatedAt = at
-		if err := affected(q.OAuthUpdateClientJSON(ctx, db.OAuthUpdateClientJSONParams{ID: id, DataJson: oauthParam(value)})); err != nil {
+		data, err := oauthParam(value)
+		if err != nil {
+			return err
+		}
+		if err := affected(q.OAuthUpdateClientJSON(ctx, db.OAuthUpdateClientJSONParams{ID: id, DataJson: data})); err != nil {
 			return err
 		}
 		if disabled {
@@ -225,8 +261,12 @@ ORDER BY created_at DESC, id DESC LIMIT ?`, []any{issuerID}, page, func(value cr
 // dynamic client registration.
 func (s *Store) CreateOAuthInitialAccessToken(ctx context.Context, value credbound.OAuthInitialAccessToken, commit credbound.Commit) error {
 	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
+		data, err := oauthParam(value)
+		if err != nil {
+			return err
+		}
 		return mapError(q.OAuthInsertInitialAccessToken(ctx, db.OAuthInsertInitialAccessTokenParams{
-			ID: value.ID, IssuerID: value.IssuerID, Prefix: value.Prefix, RegistrationCount: int32(value.RegistrationCount), MaxRegistrations: int32(value.MaxRegistrations), ExpiresAt: value.ExpiresAt, RevokedAt: nullableTime(value.RevokedAt), DataJson: oauthParam(value),
+			ID: value.ID, IssuerID: value.IssuerID, Prefix: value.Prefix, RegistrationCount: int32(value.RegistrationCount), MaxRegistrations: int32(value.MaxRegistrations), ExpiresAt: value.ExpiresAt, RevokedAt: nullableTime(value.RevokedAt), DataJson: data,
 		}))
 	})
 }
@@ -245,7 +285,11 @@ func (s *Store) RevokeOAuthInitialAccessToken(ctx context.Context, id string, at
 			return err
 		}
 		value.RevokedAt = &at
-		return affected(q.OAuthRevokeInitialAccessToken(ctx, db.OAuthRevokeInitialAccessTokenParams{ID: id, RevokedAt: nullableTime(&at), DataJson: oauthParam(value)}))
+		data, err := oauthParam(value)
+		if err != nil {
+			return err
+		}
+		return affected(q.OAuthRevokeInitialAccessToken(ctx, db.OAuthRevokeInitialAccessTokenParams{ID: id, RevokedAt: nullableTime(&at), DataJson: data}))
 	})
 }
 
@@ -253,10 +297,18 @@ func (s *Store) RevokeOAuthInitialAccessToken(ctx context.Context, id string, at
 // authorization code.
 func (s *Store) CreateOAuthGrantAndCode(ctx context.Context, grant credbound.OAuthGrant, code credbound.OAuthAuthorizationCode, commit credbound.Commit) error {
 	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
-		if err := q.OAuthInsertGrant(ctx, db.OAuthInsertGrantParams{ID: grant.ID, ClientRecordID: grant.ClientRecordID, ResourceID: grant.ResourceID, UserID: grant.UserID, WorkspaceID: grant.WorkspaceID, CreatedAt: grant.CreatedAt, DataJson: oauthParam(grant)}); err != nil {
+		grantData, err := oauthParam(grant)
+		if err != nil {
+			return err
+		}
+		if err := q.OAuthInsertGrant(ctx, db.OAuthInsertGrantParams{ID: grant.ID, ClientRecordID: grant.ClientRecordID, ResourceID: grant.ResourceID, UserID: grant.UserID, WorkspaceID: grant.WorkspaceID, CreatedAt: grant.CreatedAt, DataJson: grantData}); err != nil {
 			return mapError(err)
 		}
-		return mapError(q.OAuthInsertAuthorizationCode(ctx, db.OAuthInsertAuthorizationCodeParams{ID: code.ID, Prefix: code.Prefix, GrantID: code.GrantID, UsedAt: nullableTime(code.UsedAt), ExpiresAt: code.ExpiresAt, DataJson: oauthParam(code)}))
+		codeData, err := oauthParam(code)
+		if err != nil {
+			return err
+		}
+		return mapError(q.OAuthInsertAuthorizationCode(ctx, db.OAuthInsertAuthorizationCodeParams{ID: code.ID, Prefix: code.Prefix, GrantID: code.GrantID, UsedAt: nullableTime(code.UsedAt), ExpiresAt: code.ExpiresAt, DataJson: codeData}))
 	})
 }
 
@@ -296,7 +348,11 @@ func (s *Store) ConsumeOAuthAuthorizationCode(ctx context.Context, codeID string
 			return err
 		}
 		code.UsedAt = &usedAt
-		count, err := q.OAuthConsumeAuthorizationCode(ctx, db.OAuthConsumeAuthorizationCodeParams{ID: codeID, UsedAt: nullableTime(&usedAt), DataJson: oauthParam(code), ExpiresAt: usedAt})
+		data, err := oauthParam(code)
+		if err != nil {
+			return err
+		}
+		count, err := q.OAuthConsumeAuthorizationCode(ctx, db.OAuthConsumeAuthorizationCodeParams{ID: codeID, UsedAt: nullableTime(&usedAt), DataJson: data, ExpiresAt: usedAt})
 		if err != nil || count != 1 {
 			return credbound.ErrConflict
 		}
@@ -319,7 +375,11 @@ func (s *Store) OAuthAccessTokenByPrefix(ctx context.Context, prefix string) (cr
 // CreateOAuthClientAccessToken stores a client-credentials access token.
 func (s *Store) CreateOAuthClientAccessToken(ctx context.Context, value credbound.OAuthClientAccessToken, commit credbound.Commit) error {
 	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
-		return mapError(q.OAuthInsertClientAccessToken(ctx, db.OAuthInsertClientAccessTokenParams{ID: value.ID, Prefix: value.Prefix, ClientRecordID: value.ClientRecordID, DataJson: oauthParam(value)}))
+		data, err := oauthParam(value)
+		if err != nil {
+			return err
+		}
+		return mapError(q.OAuthInsertClientAccessToken(ctx, db.OAuthInsertClientAccessTokenParams{ID: value.ID, Prefix: value.Prefix, ClientRecordID: value.ClientRecordID, DataJson: data}))
 	})
 }
 
@@ -338,7 +398,11 @@ func (s *Store) RevokeOAuthClientAccessToken(ctx context.Context, id string, at 
 			return err
 		}
 		value.RevokedAt = &at
-		return affected(q.OAuthUpdateClientAccessTokenJSON(ctx, db.OAuthUpdateClientAccessTokenJSONParams{ID: id, DataJson: oauthParam(value)}))
+		data, err := oauthParam(value)
+		if err != nil {
+			return err
+		}
+		return affected(q.OAuthUpdateClientAccessTokenJSON(ctx, db.OAuthUpdateClientAccessTokenJSONParams{ID: id, DataJson: data}))
 	})
 }
 
@@ -374,7 +438,11 @@ func (s *Store) RotateOAuthRefreshToken(ctx context.Context, previousID string, 
 			return credbound.ErrConflict
 		}
 		previous.UsedAt, previous.ReplacedByID = &usedAt, refresh.ID
-		count, err := q.OAuthConsumeRefreshToken(ctx, db.OAuthConsumeRefreshTokenParams{ID: previousID, UsedAt: nullableTime(&usedAt), DataJson: oauthParam(previous), ExpiresAt: usedAt})
+		data, err := oauthParam(previous)
+		if err != nil {
+			return err
+		}
+		count, err := q.OAuthConsumeRefreshToken(ctx, db.OAuthConsumeRefreshTokenParams{ID: previousID, UsedAt: nullableTime(&usedAt), DataJson: data, ExpiresAt: usedAt})
 		if err != nil || count != 1 {
 			return credbound.ErrConflict
 		}
@@ -393,7 +461,11 @@ func (s *Store) RevokeOAuthAccessToken(ctx context.Context, id string, at time.T
 			return err
 		}
 		value.RevokedAt = &at
-		return affected(q.OAuthUpdateAccessTokenJSON(ctx, db.OAuthUpdateAccessTokenJSONParams{ID: id, DataJson: oauthParam(value)}))
+		data, err := oauthParam(value)
+		if err != nil {
+			return err
+		}
+		return affected(q.OAuthUpdateAccessTokenJSON(ctx, db.OAuthUpdateAccessTokenJSONParams{ID: id, DataJson: data}))
 	})
 }
 
@@ -486,7 +558,11 @@ func (s *Store) revokeOAuthGrant(ctx context.Context, q *db.Queries, id string, 
 		return err
 	}
 	grant.RevokedAt, grant.UpdatedAt = &at, at
-	if err := affected(q.OAuthUpdateGrantJSON(ctx, db.OAuthUpdateGrantJSONParams{ID: id, DataJson: oauthParam(grant)})); err != nil {
+	data, err := oauthParam(grant)
+	if err != nil {
+		return err
+	}
+	if err := affected(q.OAuthUpdateGrantJSON(ctx, db.OAuthUpdateGrantJSONParams{ID: id, DataJson: data})); err != nil {
 		return err
 	}
 	if err := s.revokeOAuthAccessTokens(ctx, q, id, at); err != nil {
@@ -502,7 +578,11 @@ func (s *Store) revokeOAuthGrant(ctx context.Context, q *db.Queries, id string, 
 			return err
 		}
 		value.RevokedAt = &at
-		if err := affected(q.OAuthRevokeRefreshToken(ctx, db.OAuthRevokeRefreshTokenParams{ID: record.ID, RevokedAt: nullableTime(&at), DataJson: oauthParam(value)})); err != nil {
+		data, err := oauthParam(value)
+		if err != nil {
+			return err
+		}
+		if err := affected(q.OAuthRevokeRefreshToken(ctx, db.OAuthRevokeRefreshTokenParams{ID: record.ID, RevokedAt: nullableTime(&at), DataJson: data})); err != nil {
 			return err
 		}
 	}
@@ -523,7 +603,11 @@ func (s *Store) revokeOAuthAccessTokens(ctx context.Context, q *db.Queries, gran
 			continue
 		}
 		value.RevokedAt = &at
-		if err := affected(q.OAuthUpdateAccessTokenJSON(ctx, db.OAuthUpdateAccessTokenJSONParams{ID: record.ID, DataJson: oauthParam(value)})); err != nil {
+		data, err := oauthParam(value)
+		if err != nil {
+			return err
+		}
+		if err := affected(q.OAuthUpdateAccessTokenJSON(ctx, db.OAuthUpdateAccessTokenJSONParams{ID: record.ID, DataJson: data})); err != nil {
 			return err
 		}
 	}
@@ -640,24 +724,32 @@ func oauthDecode[T any](raw any) (T, error) {
 }
 
 func insertOAuthAccessToken(ctx context.Context, q *db.Queries, value credbound.OAuthAccessToken) error {
-	return mapError(q.OAuthInsertAccessToken(ctx, db.OAuthInsertAccessTokenParams{ID: value.ID, Prefix: value.Prefix, GrantID: value.GrantID, DataJson: oauthParam(value)}))
+	data, err := oauthParam(value)
+	if err != nil {
+		return err
+	}
+	return mapError(q.OAuthInsertAccessToken(ctx, db.OAuthInsertAccessTokenParams{ID: value.ID, Prefix: value.Prefix, GrantID: value.GrantID, DataJson: data}))
 }
 
 func insertOAuthRefreshToken(ctx context.Context, q *db.Queries, value credbound.OAuthRefreshToken) error {
+	data, err := oauthParam(value)
+	if err != nil {
+		return err
+	}
 	return mapError(q.OAuthInsertRefreshToken(ctx, db.OAuthInsertRefreshTokenParams{
-		ID: value.ID, FamilyID: value.FamilyID, Prefix: value.Prefix, GrantID: value.GrantID, UsedAt: nullableTime(value.UsedAt), RevokedAt: nullableTime(value.RevokedAt), ExpiresAt: value.ExpiresAt, DataJson: oauthParam(value),
+		ID: value.ID, FamilyID: value.FamilyID, Prefix: value.Prefix, GrantID: value.GrantID, UsedAt: nullableTime(value.UsedAt), RevokedAt: nullableTime(value.RevokedAt), ExpiresAt: value.ExpiresAt, DataJson: data,
 	}))
 }
 
-func oauthJSON(value any) []byte {
+func oauthJSON(value any) ([]byte, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("marshal oauth record: %w", err)
 	}
-	return raw
+	return raw, nil
 }
 
-func oauthParam(value any) []byte { return oauthJSON(value) }
+func oauthParam(value any) ([]byte, error) { return oauthJSON(value) }
 
 func oauthQuery(query string) string {
 	var result strings.Builder
