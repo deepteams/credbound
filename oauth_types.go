@@ -253,7 +253,8 @@ type OAuthAccessToken struct {
 // OAuthClientAccessToken is the persisted metadata of a client-credentials
 // access token: a machine-to-machine bearer with no user subject, bound to a
 // client, resource and workspace. It has no refresh token (RFC 6749 §4.4.3);
-// revocation is implicit when the client, resource or issuer is disabled.
+// the owning client revokes it individually through RevokeOAuthToken, and
+// disabling the client, resource or issuer retires it implicitly.
 type OAuthClientAccessToken struct {
 	ID             string
 	Prefix         string
@@ -265,6 +266,7 @@ type OAuthClientAccessToken struct {
 	Scopes         []string
 	CreatedAt      time.Time
 	ExpiresAt      time.Time
+	RevokedAt      *time.Time
 }
 
 // OAuthRefreshToken is the persisted metadata of a rotating refresh token.

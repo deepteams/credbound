@@ -329,6 +329,19 @@ func (s *Store) OAuthClientAccessTokenByPrefix(ctx context.Context, prefix strin
 	return oauthDecodeQuery[credbound.OAuthClientAccessToken](s.queries.OAuthClientAccessTokenJSONByPrefix(ctx, prefix))
 }
 
+// RevokeOAuthClientAccessToken marks the client-credentials access token
+// revoked.
+func (s *Store) RevokeOAuthClientAccessToken(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
+	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
+		value, err := oauthDecodeQuery[credbound.OAuthClientAccessToken](q.OAuthClientAccessTokenJSONByID(ctx, id))
+		if err != nil {
+			return err
+		}
+		value.RevokedAt = &at
+		return affected(q.OAuthUpdateClientAccessTokenJSON(ctx, db.OAuthUpdateClientAccessTokenJSONParams{ID: id, DataJson: oauthParam(value)}))
+	})
+}
+
 // OAuthRefreshTokenByPrefix returns the refresh token record addressed by
 // its lookup prefix.
 func (s *Store) OAuthRefreshTokenByPrefix(ctx context.Context, prefix string) (credbound.OAuthRefreshToken, error) {

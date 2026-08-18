@@ -520,6 +520,12 @@ INSERT INTO credbound.oauth_client_access_tokens (id, prefix, client_record_id, 
 -- name: OAuthClientAccessTokenJSONByPrefix :one
 SELECT data_json FROM credbound.oauth_client_access_tokens WHERE prefix = $1;
 
+-- name: OAuthClientAccessTokenJSONByID :one
+SELECT data_json FROM credbound.oauth_client_access_tokens WHERE id = $1;
+
+-- name: OAuthUpdateClientAccessTokenJSON :execrows
+UPDATE credbound.oauth_client_access_tokens SET data_json = $2 WHERE id = $1;
+
 -- name: OAuthInsertAccessToken :exec
 INSERT INTO credbound.oauth_access_tokens (id, prefix, grant_id, data_json) VALUES ($1, $2, $3, $4);
 

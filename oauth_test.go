@@ -1051,6 +1051,36 @@ func TestOAuthClientCredentials(t *testing.T) {
 	if _, err := f.manager.AuthenticateOAuthAccessToken(ctx, "https://other.example.com/x", tokens.AccessToken); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("wrong-resource auth = %v", err)
 	}
+	// The owning client revokes its own token individually; a foreign or
+	// unknown token still answers success without revoking anything.
+	if err := f.manager.RevokeOAuthToken(ctx, credbound.RevokeOAuthTokenInput{
+		Issuer: issuer.Issuer, ClientID: client.Client.ClientID, ClientSecret: client.ClientSecret, Token: "cba_000000000000_unknown",
+	}); err != nil {
+		t.Fatalf("unknown token revocation = %v", err)
+	}
+	if _, err := f.manager.AuthenticateOAuthAccessToken(ctx, resource.Resource, tokens.AccessToken); err != nil {
+		t.Fatalf("token dead after foreign revocation = %v", err)
+	}
+	if err := f.manager.RevokeOAuthToken(ctx, credbound.RevokeOAuthTokenInput{
+		Issuer: issuer.Issuer, ClientID: client.Client.ClientID, ClientSecret: client.ClientSecret, Token: tokens.AccessToken,
+	}); err != nil {
+		t.Fatalf("revocation = %v", err)
+	}
+	if _, err := f.manager.AuthenticateOAuthAccessToken(ctx, resource.Resource, tokens.AccessToken); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("revoked token authenticated = %v", err)
+	}
+	// A revoked token revokes idempotently, and a fresh one still works.
+	if err := f.manager.RevokeOAuthToken(ctx, credbound.RevokeOAuthTokenInput{
+		Issuer: issuer.Issuer, ClientID: client.Client.ClientID, ClientSecret: client.ClientSecret, Token: tokens.AccessToken,
+	}); err != nil {
+		t.Fatalf("re-revocation = %v", err)
+	}
+	tokens, err = f.manager.IssueOAuthClientCredentials(ctx, credbound.OAuthClientCredentialsInput{
+		Issuer: issuer.Issuer, ClientID: client.Client.ClientID, ClientSecret: client.ClientSecret, Resource: resource.Resource,
+	})
+	if err != nil || tokens.Scope != "documents.read" {
+		t.Fatalf("reissued tokens = %#v, %v", tokens, err)
+	}
 	// Disabling the client revokes its tokens implicitly.
 	if err := f.manager.DisableOAuthClient(ctx, root, credbound.TrustedRequest{Local: true}, client.Client.ID); err != nil {
 		t.Fatal(err)

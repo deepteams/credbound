@@ -1794,6 +1794,17 @@ func (q *Queries) OAuthAuthorizationCodeJSONByPrefix(ctx context.Context, prefix
 	return data_json, err
 }
 
+const oAuthClientAccessTokenJSONByID = `-- name: OAuthClientAccessTokenJSONByID :one
+SELECT data_json FROM credbound.oauth_client_access_tokens WHERE id = $1
+`
+
+func (q *Queries) OAuthClientAccessTokenJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
+	row := q.db.QueryRowContext(ctx, oAuthClientAccessTokenJSONByID, id)
+	var data_json json.RawMessage
+	err := row.Scan(&data_json)
+	return data_json, err
+}
+
 const oAuthClientAccessTokenJSONByPrefix = `-- name: OAuthClientAccessTokenJSONByPrefix :one
 SELECT data_json FROM credbound.oauth_client_access_tokens WHERE prefix = $1
 `
@@ -2488,6 +2499,23 @@ type OAuthUpdateAccessTokenJSONParams struct {
 
 func (q *Queries) OAuthUpdateAccessTokenJSON(ctx context.Context, arg OAuthUpdateAccessTokenJSONParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, oAuthUpdateAccessTokenJSON, arg.ID, arg.DataJson)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const oAuthUpdateClientAccessTokenJSON = `-- name: OAuthUpdateClientAccessTokenJSON :execrows
+UPDATE credbound.oauth_client_access_tokens SET data_json = $2 WHERE id = $1
+`
+
+type OAuthUpdateClientAccessTokenJSONParams struct {
+	ID       string          `json:"id"`
+	DataJson json.RawMessage `json:"data_json"`
+}
+
+func (q *Queries) OAuthUpdateClientAccessTokenJSON(ctx context.Context, arg OAuthUpdateClientAccessTokenJSONParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, oAuthUpdateClientAccessTokenJSON, arg.ID, arg.DataJson)
 	if err != nil {
 		return 0, err
 	}

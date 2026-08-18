@@ -672,6 +672,7 @@ func (s *Store) OAuthAccessTokenByPrefix(ctx context.Context, prefix string) (cr
 func cloneOAuthClientAccessToken(v credbound.OAuthClientAccessToken) credbound.OAuthClientAccessToken {
 	v.Digest = slices.Clone(v.Digest)
 	v.Scopes = slices.Clone(v.Scopes)
+	v.RevokedAt = cloneTime(v.RevokedAt)
 	return v
 }
 
@@ -707,6 +708,27 @@ func (s *Store) OAuthClientAccessTokenByPrefix(ctx context.Context, prefix strin
 		return credbound.OAuthClientAccessToken{}, credbound.ErrNotFound
 	}
 	return cloneOAuthClientAccessToken(s.oauthClientTokens[id]), nil
+}
+
+// RevokeOAuthClientAccessToken marks the client-credentials access token
+// revoked.
+func (s *Store) RevokeOAuthClientAccessToken(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	token, ok := s.oauthClientTokens[id]
+	if !ok {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	token.RevokedAt = &at
+	s.oauthClientTokens[id] = cloneOAuthClientAccessToken(token)
+	return s.finishCommitLocked(ctx, commit, previous)
 }
 
 // OAuthRefreshTokenByPrefix returns the refresh token record addressed by

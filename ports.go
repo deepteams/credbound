@@ -312,9 +312,11 @@ type OAuthStore interface {
 	OAuthAccessTokenByPrefix(context.Context, string) (OAuthAccessToken, error)
 	// CreateOAuthClientAccessToken persists a client-credentials access token
 	// (machine-to-machine, no user subject); OAuthClientAccessTokenByPrefix
-	// resolves one for AuthenticateOAuthAccessToken.
+	// resolves one for AuthenticateOAuthAccessToken, and
+	// RevokeOAuthClientAccessToken stamps one revoked for RevokeOAuthToken.
 	CreateOAuthClientAccessToken(context.Context, OAuthClientAccessToken, Commit) error
 	OAuthClientAccessTokenByPrefix(context.Context, string) (OAuthClientAccessToken, error)
+	RevokeOAuthClientAccessToken(context.Context, string, time.Time, Commit) error
 	OAuthRefreshTokenByPrefix(context.Context, string) (OAuthRefreshToken, error)
 	RotateOAuthRefreshToken(context.Context, string, time.Time, OAuthAccessToken, OAuthRefreshToken, Commit) error
 	RevokeOAuthAccessToken(context.Context, string, time.Time, Commit) error

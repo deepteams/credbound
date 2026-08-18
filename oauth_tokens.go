@@ -280,7 +280,10 @@ func (m *Manager) RevokeOAuthToken(ctx context.Context, input RevokeOAuthTokenIn
 	if prefix, ok := parseOAuthBearer("cba", input.Token); ok {
 		token, lookupErr := store.OAuthAccessTokenByPrefix(ctx, prefix)
 		if lookupErr != nil || token.ClientRecordID != client.ID || !hmac.Equal(token.Digest, m.oauthDigest("access-token", input.Token)) {
-			return nil
+			// The cba prefix also covers client-credentials tokens, which live
+			// in their own table; RFC 7009 still answers success when neither
+			// matches, so a caller cannot probe another client's tokens.
+			return m.revokeOAuthClientAccessToken(ctx, store, client, prefix, input.Token, now)
 		}
 		audit, auditErr := m.newAudit(ctx, client.ID, "oauth.token.revoked", "oauth_access_token", token.ID, token.WorkspaceID, AuditSucceeded, "")
 		if auditErr != nil {
@@ -304,6 +307,30 @@ func (m *Manager) RevokeOAuthToken(ctx context.Context, input RevokeOAuthTokenIn
 		}
 		return m.revokeOAuthRefreshFamily(ctx, token, client, "client_revocation")
 	}
+	return nil
+}
+
+// revokeOAuthClientAccessToken retires one client-credentials access token
+// presented by its own authenticated client; any mismatch answers success
+// without revoking anything, per RFC 7009.
+func (m *Manager) revokeOAuthClientAccessToken(ctx context.Context, store OAuthStore, client OAuthClient, prefix, raw string, now time.Time) error {
+	token, err := store.OAuthClientAccessTokenByPrefix(ctx, prefix)
+	if err != nil || token.ClientRecordID != client.ID || token.RevokedAt != nil || !hmac.Equal(token.Digest, m.oauthDigest("access-token", raw)) {
+		return nil
+	}
+	audit, err := m.newAudit(ctx, client.ID, "oauth.token.revoked", "oauth_client_access_token", token.ID, token.WorkspaceID, AuditSucceeded, "")
+	if err != nil {
+		return err
+	}
+	audit.ActorKind = ActorService
+	change, commit, err := m.newOAuthChange(EventOAuthTokenRevoked, "oauth.token.revoke", audit, client, "", token.ID, token.ResourceID, token.WorkspaceID, token.Scopes)
+	if err != nil {
+		return err
+	}
+	if err := store.RevokeOAuthClientAccessToken(ctx, token.ID, now, commit); err != nil {
+		return m.mapStoreError(ctx, "oauth.token.revoke", err)
+	}
+	m.emitOAuthChange(ctx, change)
 	return nil
 }
 
@@ -356,7 +383,7 @@ func (m *Manager) AuthenticateOAuthAccessToken(ctx context.Context, resourceURI,
 // subject, so the returned OAuthAuthentication has an empty UserID.
 func (m *Manager) authenticateOAuthClientToken(ctx context.Context, store OAuthStore, prefix, raw, resourceURI string) (OAuthAuthentication, error) {
 	token, err := store.OAuthClientAccessTokenByPrefix(ctx, prefix)
-	if err != nil || !m.now().Before(token.ExpiresAt) || !hmac.Equal(token.Digest, m.oauthDigest("access-token", raw)) {
+	if err != nil || token.RevokedAt != nil || !m.now().Before(token.ExpiresAt) || !hmac.Equal(token.Digest, m.oauthDigest("access-token", raw)) {
 		return OAuthAuthentication{}, ErrInvalidCredentials
 	}
 	client, err := store.OAuthClientByID(ctx, token.ClientRecordID)
