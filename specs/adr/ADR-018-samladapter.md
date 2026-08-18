@@ -41,7 +41,13 @@ store, so a captured response can never complete the same ceremony twice. Static
 configuration path — parsed eagerly, no network dependency; a `MetadataURL`
 is supported for IdPs that rotate certificates frequently and is fetched
 lazily, once, over HTTPS with a 10-second timeout and a size cap, under the
-same SSRF posture as `ssoadapter`. An optional SP key pair signs
+SSRF guard shared with the OAuth metadata and JWKS fetchers
+(`internal/ssrf`): every address the host resolves to must be publicly
+routable — loopback, private, link-local, CGNAT and reserved ranges are
+refused — redirects are not followed, and the connection is pinned to the
+vetted address so a DNS rebind between resolution and dial cannot steer the
+fetch into an internal network. Literal loopback hosts are exempt as a
+development escape hatch. An optional SP key pair signs
 HTTP-Redirect AuthnRequests. `ForceReauthentication` maps to
 `ForceAuthn="true"`, but SAML gives the SP no `auth_time` equivalent to
 verify afterwards, so step-up depends on the IdP honoring the flag — a

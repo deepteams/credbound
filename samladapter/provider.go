@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/subtle"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -14,8 +15,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/mail"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -23,6 +26,7 @@ import (
 
 	"github.com/crewjam/saml"
 	"github.com/deepteams/credbound"
+	"github.com/deepteams/credbound/internal/ssrf"
 	xrv "github.com/mattermost/xml-roundtrip-validator"
 	dsig "github.com/russellhaering/goxmldsig"
 )
@@ -88,11 +92,16 @@ type Config struct {
 	// the network. Exactly one of MetadataXML and MetadataURL must be set.
 	MetadataXML []byte
 	// MetadataURL is fetched lazily on first use and then re-fetched every
-	// MetadataRefreshInterval, with a 10-second timeout and the same SSRF
-	// posture as the rest of the adapter: HTTPS only, except for loopback hosts
-	// which may use HTTP in development. A failed refresh keeps serving the last
-	// good metadata. Prefer MetadataXML; use MetadataURL when the IdP rotates
-	// certificates too often to redeploy with fresh static metadata.
+	// MetadataRefreshInterval, with a 10-second timeout and an SSRF-hardened
+	// fetch: HTTPS only, every address the host resolves to must be publicly
+	// routable, redirects are refused, and the connection is pinned to a
+	// vetted address so a DNS rebind between resolution and dial cannot
+	// steer the fetch into an internal network. Loopback hosts named
+	// literally in the URL (localhost, 127.0.0.1, ::1) are exempt for
+	// development and may also use plain HTTP. A failed refresh keeps
+	// serving the last good metadata. Prefer MetadataXML; use MetadataURL
+	// when the IdP rotates certificates too often to redeploy with fresh
+	// static metadata.
 	MetadataURL string
 	// MetadataRefreshInterval bounds how long a fetched MetadataURL document is
 	// cached before it is re-fetched, so a rotated or revoked IdP signing
@@ -130,13 +139,27 @@ type Config struct {
 	TrustAssertedEmail bool
 	// HTTPClient is used only for the one-shot MetadataURL fetch. Defaults
 	// to a client with a 10-second timeout; a supplied client without a
-	// timeout is shallow-copied and given the default.
+	// timeout is shallow-copied and given the default. The Resolver vetting
+	// and the redirect refusal apply to supplied clients too, but the
+	// connection pinning that defeats DNS rebinding requires the default
+	// client: a host that supplies its own transport takes over that part
+	// of the SSRF posture.
 	HTTPClient *http.Client
+	// Resolver vets MetadataURL hosts before dialing: every address the
+	// host resolves to must be publicly routable, or the fetch is refused.
+	// Defaults to net.DefaultResolver. Override it only in tests.
+	Resolver Resolver
 	// Clock supplies the current time for the adapter's own re-validation of
 	// assertion conditions. Defaults to time.Now. Note that crewjam/saml
 	// validates its timestamps with its package-level saml.TimeNow, which
 	// this per-provider clock does not replace.
 	Clock func() time.Time
+}
+
+// Resolver resolves host names for the SSRF guard on MetadataURL fetches;
+// net.DefaultResolver satisfies it.
+type Resolver interface {
+	LookupIPAddr(context.Context, string) ([]net.IPAddr, error)
 }
 
 // Provider is a SAML 2.0 service-provider implementation of
@@ -156,7 +179,12 @@ type Provider struct {
 	metadataURL     string
 	metadataTTL     time.Duration
 	client          *http.Client
-	now             func() time.Time
+	clientSupplied  bool
+	resolver        Resolver
+	// dial performs the pinned metadata connection and exists as a field so
+	// tests can observe the address the guard actually dials.
+	dial func(ctx context.Context, network, address string) (net.Conn, error)
+	now  func() time.Time
 
 	mu              sync.Mutex
 	metadata        *saml.EntityDescriptor
@@ -218,7 +246,12 @@ func New(config Config) (*Provider, error) {
 		allowTransient:  config.AllowTransientNameID,
 		trustEmail:      config.TrustAssertedEmail,
 		client:          httpClient(config.HTTPClient),
+		clientSupplied:  config.HTTPClient != nil,
+		resolver:        config.Resolver,
 		now:             clock,
+	}
+	if provider.resolver == nil {
+		provider.resolver = net.DefaultResolver
 	}
 	hasXML, hasURL := len(config.MetadataXML) > 0, strings.TrimSpace(config.MetadataURL) != ""
 	switch {
@@ -495,7 +528,12 @@ func (p *Provider) fetchMetadata(ctx context.Context) (*saml.EntityDescriptor, e
 	if err != nil {
 		return nil, fmt.Errorf("samladapter: fetch idp metadata: %w", err)
 	}
-	response, err := p.client.Do(request)
+	client, cleanup, err := p.metadataFetchClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("samladapter: fetch idp metadata: %w", err)
+	}
+	defer cleanup()
+	response, err := client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("samladapter: fetch idp metadata: %w", err)
 	}
@@ -511,6 +549,83 @@ func (p *Provider) fetchMetadata(ctx context.Context) (*saml.EntityDescriptor, e
 		return nil, errors.New("samladapter: idp metadata exceeds the size limit")
 	}
 	return parseMetadata(body)
+}
+
+// metadataFetchClient returns the HTTP client for one MetadataURL fetch and
+// a cleanup to run once the fetch completes. Loopback endpoints named
+// literally in the URL — the only hosts validEndpointURL admits over plain
+// HTTP — are an explicit development escape hatch and use the configured
+// client directly. Every other host is vetted first: all addresses it
+// resolves to must be publicly routable (internal/ssrf's shared block list)
+// and redirects are refused. Unless the host supplied its own HTTPClient,
+// the connection is additionally pinned to the vetted address so a DNS
+// rebind between resolution and dial cannot steer the fetch into an
+// internal network.
+func (p *Provider) metadataFetchClient(ctx context.Context) (*http.Client, func(), error) {
+	parsed, err := url.Parse(p.metadataURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	host := parsed.Hostname()
+	if loopbackHost(host) {
+		return p.client, func() {}, nil
+	}
+	resolveCtx, cancel := context.WithTimeout(ctx, p.client.Timeout)
+	defer cancel()
+	addresses, err := p.resolver.LookupIPAddr(resolveCtx, host)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve %q: %w", host, err)
+	}
+	if len(addresses) == 0 {
+		return nil, nil, fmt.Errorf("resolve %q: no addresses", host)
+	}
+	for _, address := range addresses {
+		if !ssrf.PublicIP(address.IP) {
+			return nil, nil, fmt.Errorf("host %q resolves to a non-public address", host)
+		}
+	}
+	if p.clientSupplied {
+		clone := *p.client
+		clone.CheckRedirect = refuseRedirect
+		return &clone, func() {}, nil
+	}
+	port := parsed.Port()
+	if port == "" {
+		port = "443"
+	}
+	dialAddress := net.JoinHostPort(addresses[0].IP.String(), port)
+	dial := p.dial
+	if dial == nil {
+		dialer := &net.Dialer{Timeout: p.client.Timeout}
+		dial = dialer.DialContext
+	}
+	transport := &http.Transport{
+		Proxy:           nil,
+		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, ServerName: host},
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return dial(ctx, "tcp", dialAddress)
+		},
+	}
+	client := &http.Client{
+		Transport:     transport,
+		Timeout:       p.client.Timeout,
+		CheckRedirect: refuseRedirect,
+	}
+	return client, transport.CloseIdleConnections, nil
+}
+
+func refuseRedirect(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
+}
+
+// loopbackHost reports whether host names the local machine literally, the
+// development exemption from the metadata SSRF guard.
+func loopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	address, err := netip.ParseAddr(host)
+	return err == nil && address.IsLoopback()
 }
 
 // parseMetadata decodes and validates an IdP metadata document: either an

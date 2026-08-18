@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -566,6 +568,110 @@ func TestMetadataURLRefreshedAfterTTL(t *testing.T) {
 	}
 	if fetches.Load() != 3 {
 		t.Fatalf("attempted refetch count = %d, want 3", fetches.Load())
+	}
+}
+
+type resolverFunc func(context.Context, string) ([]net.IPAddr, error)
+
+func (f resolverFunc) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return f(ctx, host)
+}
+
+// TestMetadataURLSSRFGuard pins the fetch policy ADR-018 promises: a
+// MetadataURL host resolving to any non-public address — private,
+// loopback, link-local (cloud metadata), CGNAT, or mixed in among public
+// ones — never serves IdP metadata, and resolution failures surface.
+func TestMetadataURLSSRFGuard(t *testing.T) {
+	idp := newTestIdP(t)
+	for name, addresses := range map[string][]net.IPAddr{
+		"private":    {{IP: net.ParseIP("10.0.0.1")}},
+		"loopback":   {{IP: net.ParseIP("127.0.0.1")}},
+		"link-local": {{IP: net.ParseIP("169.254.169.254")}},
+		"cgnat":      {{IP: net.ParseIP("100.64.0.1")}},
+		"mixed":      {{IP: net.ParseIP("93.184.216.34")}, {IP: net.ParseIP("10.0.0.1")}},
+	} {
+		provider := newTestProvider(t, idp, func(c *Config) {
+			c.MetadataXML = nil
+			c.MetadataURL = "https://idp.internal.example.com/metadata"
+			c.Resolver = resolverFunc(func(context.Context, string) ([]net.IPAddr, error) {
+				return addresses, nil
+			})
+		})
+		if _, err := provider.Begin(context.Background(), credbound.SSORequest{}); err == nil || !strings.Contains(err.Error(), "non-public") {
+			t.Fatalf("%s: err = %v, want a non-public address refusal", name, err)
+		}
+	}
+
+	provider := newTestProvider(t, idp, func(c *Config) {
+		c.MetadataXML = nil
+		c.MetadataURL = "https://idp.example.com/metadata"
+		c.Resolver = resolverFunc(func(context.Context, string) ([]net.IPAddr, error) {
+			return nil, errors.New("nxdomain")
+		})
+	})
+	if _, err := provider.Begin(context.Background(), credbound.SSORequest{}); err == nil || !strings.Contains(err.Error(), "resolve") {
+		t.Fatalf("resolution failure: err = %v", err)
+	}
+}
+
+// TestMetadataURLPinsDialToVettedAddress proves the DNS rebinding defense:
+// the connection dials the address the resolver vetted, never a fresh
+// resolution of the hostname.
+func TestMetadataURLPinsDialToVettedAddress(t *testing.T) {
+	idp := newTestIdP(t)
+	provider := newTestProvider(t, idp, func(c *Config) {
+		c.MetadataXML = nil
+		c.MetadataURL = "https://idp.example.com/metadata"
+		c.Resolver = resolverFunc(func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+		})
+	})
+	var dialed string
+	provider.dial = func(_ context.Context, _, address string) (net.Conn, error) {
+		dialed = address
+		return nil, errors.New("dial stopped by test")
+	}
+	if _, err := provider.Begin(context.Background(), credbound.SSORequest{}); err == nil {
+		t.Fatal("Begin must fail when the dial fails")
+	}
+	if dialed != "93.184.216.34:443" {
+		t.Fatalf("dialed %q, want the vetted address 93.184.216.34:443", dialed)
+	}
+}
+
+// TestMetadataURLRefusesRedirects proves a redirecting IdP endpoint cannot
+// steer the metadata fetch elsewhere, including through a host-supplied
+// HTTPClient.
+func TestMetadataURLRefusesRedirects(t *testing.T) {
+	idp := newTestIdP(t)
+	var requests atomic.Int64
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Redirect(w, r, "https://elsewhere.example.com/metadata", http.StatusFound)
+	}))
+	t.Cleanup(server.Close)
+	client := &http.Client{
+		Timeout: time.Minute,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+			},
+		},
+	}
+	provider := newTestProvider(t, idp, func(c *Config) {
+		c.MetadataXML = nil
+		c.MetadataURL = "https://idp.example.com/metadata"
+		c.HTTPClient = client
+		c.Resolver = resolverFunc(func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+		})
+	})
+	if _, err := provider.Begin(context.Background(), credbound.SSORequest{}); err == nil || !strings.Contains(err.Error(), "unexpected status 302") {
+		t.Fatalf("err = %v, want the redirect surfaced as an unexpected status", err)
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("requests = %d, the redirect target must never be fetched", requests.Load())
 	}
 }
 

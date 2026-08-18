@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/deepteams/credbound"
+	"github.com/deepteams/credbound/internal/ssrf"
 )
 
 const maxMetadataDocument = 5 << 10
@@ -155,20 +156,7 @@ func (f *MetadataFetcher) dialContext(ctx context.Context, network, address stri
 }
 
 func publicAddress(address netip.Addr) bool {
-	address = address.Unmap()
-	if !address.IsValid() || !address.IsGlobalUnicast() || address.IsPrivate() || address.IsLoopback() || address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() || address.IsMulticast() || address.IsUnspecified() {
-		return false
-	}
-	for _, raw := range []string{
-		"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15",
-		"198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
-		"2001:db8::/32", "2001::/23", "fc00::/7", "fe80::/10", "ff00::/8",
-	} {
-		if netip.MustParsePrefix(raw).Contains(address) {
-			return false
-		}
-	}
-	return true
+	return ssrf.PublicAddress(address)
 }
 
 func cacheLifetime(value string) time.Duration {
