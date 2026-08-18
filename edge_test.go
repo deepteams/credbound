@@ -44,6 +44,43 @@ func TestPasswordChangeAndInputValidation(t *testing.T) {
 	}
 }
 
+// TestChangePasswordRevokesSessionsKeepsPATs verifies the cascade choice for a
+// voluntary password change: interactive sessions die (a leaked session token
+// must not outlive the password) while PATs, being integration credentials,
+// keep working.
+func TestChangePasswordRevokesSessionsKeepsPATs(t *testing.T) {
+	f := newFixture(t)
+	authn, _ := f.bootstrap(t)
+	ctx := context.Background()
+	actor := aal2(authn.UserID, f.now)
+
+	session, err := f.manager.CreateSession(ctx, actor, credbound.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pat, err := f.manager.CreatePAT(ctx, actor, credbound.CreatePATInput{Name: "ci", Scopes: []string{"read"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.manager.AuthenticateSession(ctx, session.Token); err != nil {
+		t.Fatalf("session before change = %v", err)
+	}
+	if _, err := f.manager.AuthenticatePAT(ctx, pat.Token); err != nil {
+		t.Fatalf("pat before change = %v", err)
+	}
+
+	if err := f.manager.ChangePassword(ctx, actor, "correct horse battery", "another secure password"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := f.manager.AuthenticateSession(ctx, session.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("session after change = %v, want revoked", err)
+	}
+	if _, err := f.manager.AuthenticatePAT(ctx, pat.Token); err != nil {
+		t.Fatalf("pat after change = %v, want still valid", err)
+	}
+}
+
 func TestStepUpAuthorizationAndRBACFailures(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
