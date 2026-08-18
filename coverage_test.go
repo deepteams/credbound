@@ -211,3 +211,56 @@ func TestReadAndDecoyPaths(t *testing.T) {
 		}
 	}
 }
+
+// TestPATLifecycleAndExportBranches covers PAT authentication over a token's
+// lifecycle and ExportUserData authorization and content branches.
+func TestPATLifecycleAndExportBranches(t *testing.T) {
+	f := newFixture(t)
+	authn, workspace := f.bootstrap(t)
+	ctx := context.Background()
+	root := aal2(authn.UserID, f.now)
+
+	member, err := f.manager.CreateUser(ctx, root, workspace.ID, credbound.CreateUserInput{
+		Email: "member@example.com", DisplayName: "M", Password: "another strong password", Role: credbound.RoleMember,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberAAL2 := aal2(member.ID, f.now)
+	issued, err := f.manager.CreatePAT(ctx, memberAAL2, credbound.CreatePATInput{Name: "cli", WorkspaceID: workspace.ID, Scopes: []string{"read"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A valid PAT authenticates.
+	principal, err := f.manager.AuthenticatePAT(ctx, issued.Token)
+	if err != nil || principal.UserID != member.ID {
+		t.Fatalf("valid PAT = %#v, %v", principal, err)
+	}
+	// Self-export requires a recent interactive authentication and returns the
+	// caller's own record.
+	if export, err := f.manager.ExportUserData(ctx, memberAAL2, ""); err != nil || export.User.ID != member.ID {
+		t.Fatalf("self export = %#v, %v", export, err)
+	}
+	// A member cannot export another user's data.
+	if _, err := f.manager.ExportUserData(ctx, memberAAL2, authn.UserID); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("cross-user export = %v", err)
+	}
+	// After revocation the PAT no longer authenticates.
+	if err := f.manager.RevokePAT(ctx, memberAAL2, issued.PAT.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.AuthenticatePAT(ctx, issued.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("revoked PAT = %v", err)
+	}
+	// A PAT of a disabled user is refused.
+	other, err := f.manager.CreatePAT(ctx, memberAAL2, credbound.CreatePATInput{Name: "cli2", WorkspaceID: workspace.ID, Scopes: []string{"read"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.DisableUser(ctx, root, credbound.TrustedRequest{Local: true}, member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.AuthenticatePAT(ctx, other.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("disabled-user PAT = %v", err)
+	}
+}
