@@ -150,7 +150,10 @@
 // listener errors are recorded for observability and never propagate.
 // Both are registered in Config or later with AddTransactionHook and
 // AddEventListener, and implementations embed UnimplementedTransactionHook
-// or UnimplementedEventListener to stay compatible. PasswordPolicy vets
+// or UnimplementedEventListener to stay compatible. A listener that also
+// implements AnyEventListener additionally receives every event through the
+// single OnAnyEvent method — the natural shape for an analytics feed or a
+// webhook dispatcher. PasswordPolicy vets
 // candidate passwords beyond the built-in length rules (for example against
 // a breached-password corpus), and SSOProvider injects the network adapter
 // for each registered identity provider.

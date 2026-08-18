@@ -49,6 +49,9 @@ func main() {
 			functionType := strings.TrimPrefix(signature.String(), "func")
 			fmt.Fprintf(&output, "func (%s) %s%s { return nil }\n\n", spec.noOp, method.Names[0].Name, functionType)
 		}
+		if spec.name == "EventListener" {
+			writeEventRecorder(&output, fset, methods)
+		}
 	}
 
 	formatted, err := format.Source(output.Bytes())
@@ -59,6 +62,28 @@ func main() {
 		panic(err)
 	}
 	fmt.Println("events_generated.go")
+}
+
+// writeEventRecorder emits the internal EventListener implementation that
+// captures the typed event value of an emit callback, so the registry can
+// hand it to AnyEventListener catch-alls without changing any emit site.
+func writeEventRecorder(output *bytes.Buffer, fset *token.FileSet, methods []*ast.Field) {
+	output.WriteString("// anyEventRecorder captures the typed event value an emit callback carries\n")
+	output.WriteString("// so the registry can deliver it to AnyEventListener catch-alls.\n")
+	output.WriteString("type anyEventRecorder struct{ event any }\n\n")
+	output.WriteString("var _ EventListener = (*anyEventRecorder)(nil)\n\n")
+	output.WriteString("func (*anyEventRecorder) unimplementedEventListener() {}\n\n")
+	for _, method := range methods {
+		functionType, ok := method.Type.(*ast.FuncType)
+		if !ok || functionType.Params == nil || len(functionType.Params.List) != 2 {
+			panic("EventListener method " + method.Names[0].Name + " does not take (context.Context, event)")
+		}
+		var eventType bytes.Buffer
+		if err := printer.Fprint(&eventType, fset, functionType.Params.List[1].Type); err != nil {
+			panic(err)
+		}
+		fmt.Fprintf(output, "func (r *anyEventRecorder) %s(_ context.Context, event %s) error {\n\tr.event = event\n\treturn nil\n}\n\n", method.Names[0].Name, eventType.String())
+	}
 }
 
 func interfaceMethods(file *ast.File, name string) []*ast.Field {

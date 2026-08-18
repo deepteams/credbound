@@ -989,6 +989,20 @@ type EventListener interface {
 	OnOAuthEvent(context.Context, OAuthEvent) error
 }
 
+// AnyEventListener is an optional extension an EventListener may also
+// implement to receive every event through a single method — the natural
+// shape for an analytics feed, a host-owned outbox relay, or a webhook
+// dispatcher that would otherwise implement every typed method. For each
+// emitted event the registry first invokes the typed method, then OnAnyEvent
+// on the same listener, under the same post-commit, best-effort delivery:
+// errors and panics are observed and never propagate. The event value is the
+// same typed struct the typed method received (a PasskeyRegisteredEvent, an
+// OAuthEvent, …), so a dispatcher can type-switch on it or marshal it
+// directly, and every one embeds EventMeta for the idempotency key.
+type AnyEventListener interface {
+	OnAnyEvent(ctx context.Context, name EventName, event any) error
+}
+
 // Subscription undoes an AddTransactionHook or AddEventListener
 // registration. Remove is idempotent.
 type Subscription interface {
@@ -1136,9 +1150,25 @@ func (r *eventRegistry) apply(ctx context.Context, operation string, call func(T
 }
 
 func (r *eventRegistry) emit(ctx context.Context, name EventName, call func(EventListener) error) {
-	for _, registered := range r.eventListeners() {
+	listeners := r.eventListeners()
+	if len(listeners) == 0 {
+		return
+	}
+	// The callback carries the typed event value; replaying it against the
+	// generated recorder recovers that value once, so AnyEventListener
+	// catch-alls receive the same struct the typed methods do.
+	var recorder anyEventRecorder
+	_ = call(&recorder)
+	for _, registered := range listeners {
 		started := r.now()
 		err, panicked := safeEventCall(func() error { return call(registered.listener) })
+		r.observer.Observe(ctx, Operation{Name: "event." + string(name), Outcome: callbackOutcome(err, panicked), Duration: r.now().Sub(started)})
+		catchAll, ok := registered.listener.(AnyEventListener)
+		if !ok {
+			continue
+		}
+		started = r.now()
+		err, panicked = safeEventCall(func() error { return catchAll.OnAnyEvent(ctx, name, recorder.event) })
 		r.observer.Observe(ctx, Operation{Name: "event." + string(name), Outcome: callbackOutcome(err, panicked), Duration: r.now().Sub(started)})
 	}
 }

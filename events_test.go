@@ -220,3 +220,54 @@ func TestPATTransactionHookRollsBackMutationAndAudit(t *testing.T) {
 		t.Fatalf("post-commit event emitted after rollback: %#v", events.names)
 	}
 }
+
+type catchAllRecorder struct {
+	credbound.UnimplementedEventListener
+	names  []credbound.EventName
+	events []any
+	fail   bool
+}
+
+func (l *catchAllRecorder) OnAnyEvent(_ context.Context, name credbound.EventName, event any) error {
+	l.names = append(l.names, name)
+	l.events = append(l.events, event)
+	if l.fail {
+		return errors.New("dispatcher offline")
+	}
+	return nil
+}
+
+// TestAnyEventListenerReceivesEveryEvent guards the catch-all extension: a
+// listener implementing AnyEventListener receives every emitted event once,
+// carrying the same typed struct the typed methods receive, and its errors
+// never disturb delivery.
+func TestAnyEventListenerReceivesEveryEvent(t *testing.T) {
+	f := newFixture(t)
+	catchAll := &catchAllRecorder{}
+	typed := &eventRecorder{}
+	f.manager.AddEventListener(catchAll)
+	f.manager.AddEventListener(typed)
+
+	authn, _ := f.bootstrap(t)
+	expected := []credbound.EventName{credbound.EventUserCreated, credbound.EventWorkspaceCreated, credbound.EventBootstrapCompleted}
+	if !reflect.DeepEqual(catchAll.names, expected) {
+		t.Fatalf("catch-all names = %#v", catchAll.names)
+	}
+	created, ok := catchAll.events[0].(credbound.UserCreatedEvent)
+	if !ok || created.User.ID != authn.UserID || created.Name != credbound.EventUserCreated {
+		t.Fatalf("catch-all payload = %#v", catchAll.events[0])
+	}
+	if len(typed.names) != len(catchAll.names) {
+		t.Fatalf("typed methods saw %d events, catch-all %d", len(typed.names), len(catchAll.names))
+	}
+
+	// A failing catch-all never disturbs delivery to other listeners.
+	catchAll.fail = true
+	stepUp := aal2(authn.UserID, f.now)
+	if err := f.manager.ChangePassword(context.Background(), stepUp, "correct horse battery", "another strong password"); err != nil {
+		t.Fatal(err)
+	}
+	if catchAll.names[3] != credbound.EventPasswordChanged || catchAll.names[4] != credbound.EventUserSessionsRevoked {
+		t.Fatalf("catch-all after failure = %#v", catchAll.names)
+	}
+}

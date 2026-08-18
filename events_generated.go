@@ -431,3 +431,366 @@ func (UnimplementedEventListener) OnSCIMGroupMembersChanged(context.Context, SCI
 }
 
 func (UnimplementedEventListener) OnOAuthEvent(context.Context, OAuthEvent) error { return nil }
+
+// anyEventRecorder captures the typed event value an emit callback carries
+// so the registry can deliver it to AnyEventListener catch-alls.
+type anyEventRecorder struct{ event any }
+
+var _ EventListener = (*anyEventRecorder)(nil)
+
+func (*anyEventRecorder) unimplementedEventListener() {}
+
+func (r *anyEventRecorder) OnBootstrapCompleted(_ context.Context, event BootstrapCompletedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSignUpCompleted(_ context.Context, event SignUpCompletedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnUserCreated(_ context.Context, event UserCreatedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnWorkspaceCreated(_ context.Context, event WorkspaceCreatedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnUserStatusChanged(_ context.Context, event UserStatusEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnUserProfileUpdated(_ context.Context, event UserProfileUpdatedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnWorkspaceChanged(_ context.Context, event WorkspaceChangedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnMembershipChanged(_ context.Context, event MembershipChangedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnWorkspaceInvitationCreated(_ context.Context, event WorkspaceInvitationEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnWorkspaceInvitationAccepted(_ context.Context, event WorkspaceInvitationEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnWorkspaceInvitationRevoked(_ context.Context, event WorkspaceInvitationEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnWorkspaceDomainCreated(_ context.Context, event WorkspaceDomainEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnWorkspaceDomainConfirmed(_ context.Context, event WorkspaceDomainEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnWorkspaceDomainPolicyUpdated(_ context.Context, event WorkspaceDomainEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnWorkspaceDomainRemoved(_ context.Context, event WorkspaceDomainEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnPasswordChanged(_ context.Context, event PasswordChangedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnPasswordRehashed(_ context.Context, event PasswordRehashedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnAuthenticationSucceeded(_ context.Context, event AuthenticationEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnAuthenticationFailed(_ context.Context, event AuthenticationFailureEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnStepUpDenied(_ context.Context, event StepUpDeniedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnAuthorizationDenied(_ context.Context, event AuthorizationDeniedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnEmailAdded(_ context.Context, event EmailAddedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnEmailConfirmed(_ context.Context, event EmailConfirmedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnEmailVerificationResent(_ context.Context, event EmailVerificationResentEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnPrimaryEmailChanged(_ context.Context, event PrimaryEmailChangedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnEmailRemoved(_ context.Context, event EmailRemovedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnTOTPEnrollmentStarted(_ context.Context, event TOTPEnrollmentStartedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnTOTPActivated(_ context.Context, event TOTPActivatedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnTOTPDisabled(_ context.Context, event TOTPDisabledEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnTOTPVerified(_ context.Context, event TOTPVerifiedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnTOTPReplayRejected(_ context.Context, event TOTPReplayRejectedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnRecoveryCodeConsumed(_ context.Context, event RecoveryCodeConsumedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnPasskeyRegistered(_ context.Context, event PasskeyRegisteredEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnPasskeyDeleted(_ context.Context, event PasskeyDeletedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnPasskeyAuthenticated(_ context.Context, event PasskeyAuthenticatedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnPATCreated(_ context.Context, event PATCreatedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnPATRevoked(_ context.Context, event PATRevokedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnUserCredentialsRevoked(_ context.Context, event UserCredentialsRevokedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSecondFactorReset(_ context.Context, event SecondFactorResetEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnUserAnonymized(_ context.Context, event UserAnonymizedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnRecoveryCodesRegenerated(_ context.Context, event RecoveryCodesRegeneratedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSessionCreated(_ context.Context, event SessionCreatedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSessionRevoked(_ context.Context, event SessionRevokedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnUserSessionsRevoked(_ context.Context, event UserSessionsRevokedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnUserLocked(_ context.Context, event UserLockedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnPasswordResetRequested(_ context.Context, event PasswordResetRequestedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnPasswordResetCompleted(_ context.Context, event PasswordResetCompletedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnEmailAuthenticationRequested(_ context.Context, event EmailAuthenticationRequestedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnPATAuthenticated(_ context.Context, event PATAuthenticatedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnPATRejected(_ context.Context, event PATRejectedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSSOChallengeIssued(_ context.Context, event SSOChallengeIssuedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSSOLinked(_ context.Context, event SSOLinkedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSSOUnlinked(_ context.Context, event SSOUnlinkedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSSOAuthenticated(_ context.Context, event SSOAuthenticatedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSSOJITProvisioned(_ context.Context, event SSOJITProvisionedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnRoleGranted(_ context.Context, event RoleGrantedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnInstanceRoleChanged(_ context.Context, event InstanceRoleChangedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnInstanceRoleRemoved(_ context.Context, event InstanceRoleRemovedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnClientAuditRecorded(_ context.Context, event ClientAuditRecordedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnAuditUnavailable(_ context.Context, event AuditUnavailableEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSCIMConfigurationCreated(_ context.Context, event SCIMConfigurationCreatedEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSCIMUserProvisioned(_ context.Context, event SCIMUserEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSCIMUserUpdated(_ context.Context, event SCIMUserEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSCIMUserActivated(_ context.Context, event SCIMUserEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSCIMUserSuspended(_ context.Context, event SCIMUserEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSCIMUserDeprovisioned(_ context.Context, event SCIMUserEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSCIMGroupCreated(_ context.Context, event SCIMGroupEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSCIMGroupUpdated(_ context.Context, event SCIMGroupEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSCIMGroupDeleted(_ context.Context, event SCIMGroupEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnSCIMGroupMembersChanged(_ context.Context, event SCIMGroupEvent) error {
+	r.event = event
+	return nil
+}
+
+func (r *anyEventRecorder) OnOAuthEvent(_ context.Context, event OAuthEvent) error {
+	r.event = event
+	return nil
+}
