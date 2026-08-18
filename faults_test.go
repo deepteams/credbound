@@ -400,8 +400,24 @@ type faultStore struct {
 	touchPATErr        error
 	revokePATErr       error
 	removeRoleErr      error
+	emailByAddressErr  error
+	reissueEmailErr    error
 	scimOperation      string
 	scimErr            error
+}
+
+func (s *faultStore) EmailByAddress(ctx context.Context, address string) (credbound.EmailAddress, error) {
+	if s.emailByAddressErr != nil {
+		return credbound.EmailAddress{}, s.emailByAddressErr
+	}
+	return s.Store.EmailByAddress(ctx, address)
+}
+
+func (s *faultStore) ReissueEmailVerification(ctx context.Context, emailID string, verification credbound.EmailVerificationCredential, commit credbound.Commit) error {
+	if s.reissueEmailErr != nil {
+		return s.reissueEmailErr
+	}
+	return s.Store.ReissueEmailVerification(ctx, emailID, verification, commit)
 }
 
 func (s *faultStore) UserByEmail(ctx context.Context, email string) (credbound.User, error) {
@@ -670,3 +686,20 @@ func stringsContains(value, part string) bool {
 type errorReader struct{}
 
 func (errorReader) Read([]byte) (int, error) { return 0, errors.New("entropy unavailable") }
+
+func TestResendEmailVerificationLookupFault(t *testing.T) {
+	ctx := context.Background()
+	fault := &faultStore{Store: memory.New()}
+	manager := managerWith(t, fault, &fakePasswords{}, fakeTOTP{}, &fakePasskeys{}, nil)
+	if _, _, err := manager.Bootstrap(ctx, credbound.BootstrapInput{
+		Email: "root@example.com", DisplayName: "Root", Password: "correct horse battery", WorkspaceName: "Main",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A non-NotFound lookup error from the store propagates rather than being
+	// swallowed by the enumeration-safe decoy.
+	fault.emailByAddressErr = credbound.ErrAuditUnavailable
+	if _, err := manager.ResendEmailVerification(ctx, "root@example.com"); !errors.Is(err, credbound.ErrAuditUnavailable) {
+		t.Fatalf("lookup fault = %v", err)
+	}
+}
