@@ -32,8 +32,9 @@ func mustReplaceAll(code, old, new string) string {
 // postgresPackageDoc because the construction and DSN guidance differ per
 // dialect.
 const sqlitePackageDoc = `// Package sqlite implements every Credbound persistence port — Store plus
-// the optional SessionStore, SignupStore, DomainStore, SCIMStore and
-// OAuthStore capabilities — on SQLite through database/sql and
+// the optional SessionStore, SignupStore, DomainStore, SCIMStore,
+// EmailThrottleStore and OAuthStore capabilities — on SQLite through
+// database/sql and
 // sqlc-generated queries, committing each mutation's hash-chained audit
 // event atomically with the change.
 //
@@ -50,8 +51,9 @@ const sqlitePackageDoc = `// Package sqlite implements every Credbound persisten
 `
 
 const postgresPackageDoc = `// Package postgresql implements every Credbound persistence port — Store
-// plus the optional SessionStore, SignupStore, DomainStore, SCIMStore and
-// OAuthStore capabilities — on PostgreSQL, pairing sqlc-generated
+// plus the optional SessionStore, SignupStore, DomainStore, SCIMStore,
+// EmailThrottleStore and OAuthStore capabilities — on PostgreSQL, pairing
+// sqlc-generated
 // database/sql queries for transactional mutations with pgx streaming for
 // paginated reads, and committing each mutation's hash-chained audit event
 // atomically with the change.

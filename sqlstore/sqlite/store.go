@@ -1,6 +1,7 @@
 // Package sqlite implements every Credbound persistence port — Store plus
-// the optional SessionStore, SignupStore, DomainStore, SCIMStore and
-// OAuthStore capabilities — on SQLite through database/sql and
+// the optional SessionStore, SignupStore, DomainStore, SCIMStore,
+// EmailThrottleStore and OAuthStore capabilities — on SQLite through
+// database/sql and
 // sqlc-generated queries, committing each mutation's hash-chained audit
 // event atomically with the change.
 //

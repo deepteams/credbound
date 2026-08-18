@@ -96,18 +96,37 @@ func TestMutationAuditFailures(t *testing.T) {
 
 	f.store.SetAuditFailure(errors.New("disk full"))
 	steps := map[string]func() error{
-		"create user":    func() error { _, e := f.manager.CreateUser(ctx, root, workspace.ID, credbound.CreateUserInput{Email: "x@example.com", DisplayName: "X", Password: "another strong password", Role: credbound.RoleMember}); return e },
-		"update user":    func() error { _, e := f.manager.UpdateUser(ctx, root, credbound.UpdateUserInput{DisplayName: "Renamed"}); return e },
-		"disable user":   func() error { return f.manager.DisableUser(ctx, root, local, member.ID) },
-		"change pass":    func() error { return f.manager.ChangePassword(ctx, root, "correct horse battery", "another strong password") },
-		"add email":      func() error { _, e := f.manager.BeginEmailAddition(ctx, root, "alias@example.com"); return e },
-		"update ws":      func() error { _, e := f.manager.UpdateWorkspace(ctx, root, ws.ID, credbound.UpdateWorkspaceInput{Name: "Renamed"}); return e },
-		"create pat":     func() error { _, e := f.manager.CreatePAT(ctx, root, credbound.CreatePATInput{Name: "t", Scopes: []string{"read"}}); return e },
+		"create user": func() error {
+			_, e := f.manager.CreateUser(ctx, root, workspace.ID, credbound.CreateUserInput{Email: "x@example.com", DisplayName: "X", Password: "another strong password", Role: credbound.RoleMember})
+			return e
+		},
+		"update user": func() error {
+			_, e := f.manager.UpdateUser(ctx, root, credbound.UpdateUserInput{DisplayName: "Renamed"})
+			return e
+		},
+		"disable user": func() error { return f.manager.DisableUser(ctx, root, local, member.ID) },
+		"change pass": func() error {
+			return f.manager.ChangePassword(ctx, root, "correct horse battery", "another strong password")
+		},
+		"add email": func() error { _, e := f.manager.BeginEmailAddition(ctx, root, "alias@example.com"); return e },
+		"update ws": func() error {
+			_, e := f.manager.UpdateWorkspace(ctx, root, ws.ID, credbound.UpdateWorkspaceInput{Name: "Renamed"})
+			return e
+		},
+		"create pat": func() error {
+			_, e := f.manager.CreatePAT(ctx, root, credbound.CreatePATInput{Name: "t", Scopes: []string{"read"}})
+			return e
+		},
 		"revoke pat":     func() error { return f.manager.RevokePAT(ctx, root, pat.PAT.ID) },
 		"revoke session": func() error { return f.manager.RevokeSession(ctx, root, session.Session.ID) },
 		"begin totp":     func() error { _, e := f.manager.BeginTOTPEnrollment(ctx, root); return e },
-		"set role":       func() error { return f.manager.SetInstanceRole(ctx, root, local, member.ID, credbound.InstanceRoleSupport) },
-		"add membership": func() error { _, e := f.manager.AddMembership(ctx, root, ws.ID, member.ID, credbound.RoleMember); return e },
+		"set role": func() error {
+			return f.manager.SetInstanceRole(ctx, root, local, member.ID, credbound.InstanceRoleSupport)
+		},
+		"add membership": func() error {
+			_, e := f.manager.AddMembership(ctx, root, ws.ID, member.ID, credbound.RoleMember)
+			return e
+		},
 		"revoke creds":   func() error { return f.manager.RevokeUserCredentials(ctx, root, local, member.ID) },
 		"revoke sess'ns": func() error { return f.manager.RevokeUserSessions(ctx, root, local, member.ID) },
 		"enable user":    func() error { return f.manager.EnableUser(ctx, root, local, member.ID) },

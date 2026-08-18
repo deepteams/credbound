@@ -49,8 +49,8 @@ func newFixture(t *testing.T, ssoProviders ...credbound.SSOProvider) *fixture {
 		// Domain confirmations in tests assert verification out of band;
 		// TestConfirmWorkspaceDomainVerifier covers the DNS-verifier path.
 		TrustActorDomainVerification: true,
-		TransactionHooks: []credbound.TransactionHook{credbound.UnimplementedTransactionHook{}},
-		EventListeners:   []credbound.EventListener{credbound.UnimplementedEventListener{}},
+		TransactionHooks:             []credbound.TransactionHook{credbound.UnimplementedTransactionHook{}},
+		EventListeners:               []credbound.EventListener{credbound.UnimplementedEventListener{}},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -1,7 +1,7 @@
 // Package memory provides an in-memory implementation of every Credbound
 // persistence port — Store plus the optional SessionStore, SignupStore,
-// DomainStore, SCIMStore and OAuthStore capabilities — including the
-// hash-chained audit log and its atomic commit semantics.
+// DomainStore, SCIMStore, EmailThrottleStore and OAuthStore capabilities —
+// including the hash-chained audit log and its atomic commit semantics.
 //
 // It exists for tests, examples and prototypes: nothing is persisted beyond
 // the process, so it must never back a production deployment. Wire it into
@@ -55,44 +55,44 @@ type Store struct {
 	// ceremonies records consumed single-use ceremony ids. It is deliberately
 	// outside the snapshot/restore cycle: a ceremony is burned by the commit
 	// attempt even when a hook rejects the transaction afterwards.
-	ceremonies         map[string]time.Time
-	emailIssuance      map[string]time.Time
-	domains            map[string]credbound.WorkspaceDomain
-	domainNames        map[string]string
-	scimConfigurations map[string]credbound.SCIMConfiguration
-	scimCredentials    map[string]credbound.SCIMCredential
-	scimCredentialKeys map[string]string
-	scimUsers          map[string]credbound.SCIMUser
-	scimUserNames      map[string]string
-	scimExternalIDs    map[string]string
-	scimGroups         map[string]credbound.SCIMGroup
-	scimGroupExternal  map[string]string
-	oauthIssuers       map[string]credbound.OAuthIssuer
-	oauthIssuerURLs    map[string]string
-	oauthResources     map[string]credbound.OAuthProtectedResource
-	oauthResourceURIs  map[string]string
-	oauthClients       map[string]credbound.OAuthClient
-	oauthClientKeys    map[string]string
-	oauthInitialTokens map[string]credbound.OAuthInitialAccessToken
-	oauthInitialKeys   map[string]string
-	oauthGrants        map[string]credbound.OAuthGrant
-	oauthCodes         map[string]credbound.OAuthAuthorizationCode
-	oauthCodeKeys      map[string]string
-	oauthAccessTokens  map[string]credbound.OAuthAccessToken
-	oauthAccessKeys    map[string]string
-	oauthClientTokens  map[string]credbound.OAuthClientAccessToken
+	ceremonies           map[string]time.Time
+	emailIssuance        map[string]time.Time
+	domains              map[string]credbound.WorkspaceDomain
+	domainNames          map[string]string
+	scimConfigurations   map[string]credbound.SCIMConfiguration
+	scimCredentials      map[string]credbound.SCIMCredential
+	scimCredentialKeys   map[string]string
+	scimUsers            map[string]credbound.SCIMUser
+	scimUserNames        map[string]string
+	scimExternalIDs      map[string]string
+	scimGroups           map[string]credbound.SCIMGroup
+	scimGroupExternal    map[string]string
+	oauthIssuers         map[string]credbound.OAuthIssuer
+	oauthIssuerURLs      map[string]string
+	oauthResources       map[string]credbound.OAuthProtectedResource
+	oauthResourceURIs    map[string]string
+	oauthClients         map[string]credbound.OAuthClient
+	oauthClientKeys      map[string]string
+	oauthInitialTokens   map[string]credbound.OAuthInitialAccessToken
+	oauthInitialKeys     map[string]string
+	oauthGrants          map[string]credbound.OAuthGrant
+	oauthCodes           map[string]credbound.OAuthAuthorizationCode
+	oauthCodeKeys        map[string]string
+	oauthAccessTokens    map[string]credbound.OAuthAccessToken
+	oauthAccessKeys      map[string]string
+	oauthClientTokens    map[string]credbound.OAuthClientAccessToken
 	oauthClientTokenKeys map[string]string
-	oauthRefreshTokens map[string]credbound.OAuthRefreshToken
-	oauthRefreshKeys   map[string]string
-	throttles          map[string]credbound.LoginThrottle
-	passwordResets     map[string]credbound.PasswordResetCredential
-	emailAuths         map[string]credbound.EmailAuthenticationCredential
-	invitations        map[string]credbound.WorkspaceInvitation
-	audits             []credbound.AuditEvent
-	auditIDs           map[string]struct{}
-	auditSequence      int64
-	auditHead          []byte
-	auditFailure       error
+	oauthRefreshTokens   map[string]credbound.OAuthRefreshToken
+	oauthRefreshKeys     map[string]string
+	throttles            map[string]credbound.LoginThrottle
+	passwordResets       map[string]credbound.PasswordResetCredential
+	emailAuths           map[string]credbound.EmailAuthenticationCredential
+	invitations          map[string]credbound.WorkspaceInvitation
+	audits               []credbound.AuditEvent
+	auditIDs             map[string]struct{}
+	auditSequence        int64
+	auditHead            []byte
+	auditFailure         error
 }
 
 // Tx is the in-memory transaction capability. It intentionally exposes no
@@ -2560,58 +2560,58 @@ func (s *Store) auditEvents(ctx context.Context, page credbound.PageRequest, inc
 }
 
 type storeState struct {
-	users              map[string]credbound.User
-	emails             map[string]string
-	emailAddresses     map[string]credbound.EmailAddress
-	emailIDs           map[string]string
-	emailVerifications map[string]credbound.EmailVerificationCredential
-	passwords          map[string]credbound.PasswordCredential
-	workspaces         map[string]credbound.Workspace
-	memberships        map[string]map[string]credbound.Membership
-	admins             map[string]credbound.InstanceAdministrator
-	ssoIdentities      map[string]credbound.SSOIdentity
-	ssoKeys            map[string]string
-	totp               map[string]credbound.TOTPFactor
-	recovery           map[string][]credbound.RecoveryCode
-	passkeys           map[string]map[string]credbound.Passkey
-	pats               map[string]credbound.PAT
-	patPrefixes        map[string]string
-	sessions           map[string]credbound.Session
-	domains            map[string]credbound.WorkspaceDomain
-	domainNames        map[string]string
-	scimConfigurations map[string]credbound.SCIMConfiguration
-	scimCredentials    map[string]credbound.SCIMCredential
-	scimCredentialKeys map[string]string
-	scimUsers          map[string]credbound.SCIMUser
-	scimUserNames      map[string]string
-	scimExternalIDs    map[string]string
-	scimGroups         map[string]credbound.SCIMGroup
-	scimGroupExternal  map[string]string
-	oauthIssuers       map[string]credbound.OAuthIssuer
-	oauthIssuerURLs    map[string]string
-	oauthResources     map[string]credbound.OAuthProtectedResource
-	oauthResourceURIs  map[string]string
-	oauthClients       map[string]credbound.OAuthClient
-	oauthClientKeys    map[string]string
-	oauthInitialTokens map[string]credbound.OAuthInitialAccessToken
-	oauthInitialKeys   map[string]string
-	oauthGrants        map[string]credbound.OAuthGrant
-	oauthCodes         map[string]credbound.OAuthAuthorizationCode
-	oauthCodeKeys      map[string]string
-	oauthAccessTokens  map[string]credbound.OAuthAccessToken
-	oauthAccessKeys    map[string]string
-	oauthClientTokens  map[string]credbound.OAuthClientAccessToken
+	users                map[string]credbound.User
+	emails               map[string]string
+	emailAddresses       map[string]credbound.EmailAddress
+	emailIDs             map[string]string
+	emailVerifications   map[string]credbound.EmailVerificationCredential
+	passwords            map[string]credbound.PasswordCredential
+	workspaces           map[string]credbound.Workspace
+	memberships          map[string]map[string]credbound.Membership
+	admins               map[string]credbound.InstanceAdministrator
+	ssoIdentities        map[string]credbound.SSOIdentity
+	ssoKeys              map[string]string
+	totp                 map[string]credbound.TOTPFactor
+	recovery             map[string][]credbound.RecoveryCode
+	passkeys             map[string]map[string]credbound.Passkey
+	pats                 map[string]credbound.PAT
+	patPrefixes          map[string]string
+	sessions             map[string]credbound.Session
+	domains              map[string]credbound.WorkspaceDomain
+	domainNames          map[string]string
+	scimConfigurations   map[string]credbound.SCIMConfiguration
+	scimCredentials      map[string]credbound.SCIMCredential
+	scimCredentialKeys   map[string]string
+	scimUsers            map[string]credbound.SCIMUser
+	scimUserNames        map[string]string
+	scimExternalIDs      map[string]string
+	scimGroups           map[string]credbound.SCIMGroup
+	scimGroupExternal    map[string]string
+	oauthIssuers         map[string]credbound.OAuthIssuer
+	oauthIssuerURLs      map[string]string
+	oauthResources       map[string]credbound.OAuthProtectedResource
+	oauthResourceURIs    map[string]string
+	oauthClients         map[string]credbound.OAuthClient
+	oauthClientKeys      map[string]string
+	oauthInitialTokens   map[string]credbound.OAuthInitialAccessToken
+	oauthInitialKeys     map[string]string
+	oauthGrants          map[string]credbound.OAuthGrant
+	oauthCodes           map[string]credbound.OAuthAuthorizationCode
+	oauthCodeKeys        map[string]string
+	oauthAccessTokens    map[string]credbound.OAuthAccessToken
+	oauthAccessKeys      map[string]string
+	oauthClientTokens    map[string]credbound.OAuthClientAccessToken
 	oauthClientTokenKeys map[string]string
-	oauthRefreshTokens map[string]credbound.OAuthRefreshToken
-	oauthRefreshKeys   map[string]string
-	throttles          map[string]credbound.LoginThrottle
-	passwordResets     map[string]credbound.PasswordResetCredential
-	emailAuths         map[string]credbound.EmailAuthenticationCredential
-	invitations        map[string]credbound.WorkspaceInvitation
-	audits             []credbound.AuditEvent
-	auditIDs           map[string]struct{}
-	auditSequence      int64
-	auditHead          []byte
+	oauthRefreshTokens   map[string]credbound.OAuthRefreshToken
+	oauthRefreshKeys     map[string]string
+	throttles            map[string]credbound.LoginThrottle
+	passwordResets       map[string]credbound.PasswordResetCredential
+	emailAuths           map[string]credbound.EmailAuthenticationCredential
+	invitations          map[string]credbound.WorkspaceInvitation
+	audits               []credbound.AuditEvent
+	auditIDs             map[string]struct{}
+	auditSequence        int64
+	auditHead            []byte
 }
 
 func (s *Store) snapshotLocked() storeState {

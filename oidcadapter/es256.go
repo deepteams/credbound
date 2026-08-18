@@ -14,6 +14,10 @@ import (
 	"github.com/deepteams/credbound"
 )
 
+// ES256Signer implements credbound.OIDCSigner over one active ECDSA P-256
+// signing key and any retiring verification-only keys, published together in
+// the issuer's JWKS so rotation never invalidates tokens signed under the
+// previous key. Build one with NewES256KeyRing.
 type ES256Signer struct {
 	kid          string
 	key          *ecdsa.PrivateKey
@@ -27,6 +31,8 @@ type ES256VerificationKey struct {
 	PublicKey *ecdsa.PublicKey
 }
 
+// NewES256Signer creates a signer with a single active key and no retiring
+// verification keys; it is NewES256KeyRing without a ring.
 func NewES256Signer(kid string, key *ecdsa.PrivateKey) (*ES256Signer, error) {
 	return NewES256KeyRing(kid, key)
 }
