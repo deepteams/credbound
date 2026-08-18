@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"golang.org/x/net/idna"
+	"golang.org/x/net/publicsuffix"
 )
 
 // canonicalDomainForLookup folds a domain to the ASCII (punycode), lowercase
@@ -291,6 +292,12 @@ func validWorkspaceDomainName(value string) (string, error) {
 				return "", invalid
 			}
 		}
+	}
+	// Reject a bare public suffix (an eTLD such as "com" or "co.uk"): it is not
+	// a registrable domain, so no single workspace may claim it. A registrable
+	// domain or any subdomain of one is accepted.
+	if suffix, _ := publicsuffix.PublicSuffix(normalized); normalized == suffix {
+		return "", &ValidationError{Field: "domain", Rule: "format", Message: "domain must not be a public suffix"}
 	}
 	return normalized, nil
 }

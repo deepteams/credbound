@@ -230,6 +230,8 @@ func TestWorkspaceDomainValidationAndAuthorization(t *testing.T) {
 		"spaced domain.example.com", "192.168.0.1",
 		strings.Repeat("a", 64) + ".example.com",
 		strings.Repeat("abcdefgh.", 30) + "example.com",
+		// Bare public suffixes are not registrable domains.
+		"co.uk", "com.au", "github.io",
 	} {
 		_, err := f.manager.CreateWorkspaceDomain(ctx, stepUp, workspace.ID, invalid)
 		if !errors.Is(err, credbound.ErrInvalidInput) || !errors.As(err, &validation) || validation.Field != "domain" {
