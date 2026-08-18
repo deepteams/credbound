@@ -3,6 +3,12 @@ name: CI
 on:
   push:
   pull_request:
+  # A weekly scheduled run keeps the vulnerability scan honest on a quiet
+  # default branch: govulncheck findings surface within a week even when no
+  # commit lands to trigger CI.
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
