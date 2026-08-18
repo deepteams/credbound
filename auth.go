@@ -299,8 +299,9 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 // audited and returns ErrInvalidCredentials.
 //
 // A change revokes the user's server-side sessions (when the store is
-// SessionStore-capable) so a leaked session token cannot outlive the new
-// password; this includes the actor's current session, so the host
+// SessionStore-capable) in the same transaction that installs the new
+// password, so a leaked session token cannot outlive it and a failure leaves
+// both untouched; this includes the actor's current session, so the host
 // re-establishes one afterwards. PATs and OAuth grants are deliberately
 // preserved: they are integration credentials, not interactive sessions, and a
 // routine change should not break machine-to-machine access. A host managing
@@ -333,6 +334,7 @@ func (m *Manager) ChangePassword(ctx context.Context, actor Authentication, curr
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
+	now := m.now()
 	event, err := m.newAudit(ctx, actor.UserID, "password.change", "user", actor.UserID, "", AuditSucceeded, "")
 	if err != nil {
 		return err
@@ -342,32 +344,37 @@ func (m *Manager) ChangePassword(ctx context.Context, actor Authentication, curr
 		return err
 	}
 	change := PasswordChange{EventMeta: meta, UserID: actor.UserID}
-	commit := m.transactionalCommit(event, "password.change", func(ctx context.Context, tx Tx, hook TransactionHook) error {
-		return hook.ApplyPasswordChange(ctx, tx, change)
-	})
-	if err := m.store.ReplacePassword(ctx, PasswordCredential{UserID: actor.UserID, Hash: hash, UpdatedAt: m.now()}, commit); err != nil {
+	// The session revocation shares the password change's transaction (see the
+	// Store.ChangePassword contract): the new password and the dead sessions
+	// land together or not at all. PATs and OAuth grants stay intact.
+	var sessionMeta EventMeta
+	var sessionChange UserSessionRevocation
+	if m.sessionStore != nil {
+		sessionMeta, err = m.newEventMeta(EventUserSessionsRevoked, "auth.password.change", actor.UserID, "", event)
+		if err != nil {
+			return err
+		}
+		sessionChange = UserSessionRevocation{EventMeta: sessionMeta, UserID: actor.UserID}
+	}
+	commit := Commit{Audit: event, Transactional: func(ctx context.Context, tx Tx) error {
+		if err := m.events.apply(ctx, "password.change", func(hook TransactionHook) error {
+			return hook.ApplyPasswordChange(ctx, tx, change)
+		}); err != nil {
+			return err
+		}
+		if m.sessionStore == nil {
+			return nil
+		}
+		return m.events.apply(ctx, "session.user_revocation", func(hook TransactionHook) error {
+			return hook.ApplyUserSessionRevocation(ctx, tx, sessionChange)
+		})
+	}}
+	if err := m.store.ChangePassword(ctx, PasswordCredential{UserID: actor.UserID, Hash: hash, UpdatedAt: now}, now, commit); err != nil {
 		return m.mapStoreError(ctx, "auth.password.change", err)
 	}
 	changed := PasswordChangedEvent{EventMeta: meta, UserID: actor.UserID}
 	m.events.emit(ctx, EventPasswordChanged, func(listener EventListener) error { return listener.OnPasswordChanged(ctx, changed) })
-	// Revoke the user's sessions so a leaked session token dies with the old
-	// password. PATs and OAuth grants are intentionally left intact.
 	if m.sessionStore != nil {
-		sessionEvent, err := m.newAudit(ctx, actor.UserID, "session.revoke_all", "user", actor.UserID, "", AuditSucceeded, "")
-		if err != nil {
-			return err
-		}
-		sessionMeta, err := m.newEventMeta(EventUserSessionsRevoked, "auth.password.change", actor.UserID, "", sessionEvent)
-		if err != nil {
-			return err
-		}
-		sessionChange := UserSessionRevocation{EventMeta: sessionMeta, UserID: actor.UserID}
-		sessionCommit := m.transactionalCommit(sessionEvent, "session.user_revocation", func(ctx context.Context, tx Tx, hook TransactionHook) error {
-			return hook.ApplyUserSessionRevocation(ctx, tx, sessionChange)
-		})
-		if err := m.sessionStore.RevokeUserSessions(ctx, actor.UserID, m.now(), sessionCommit); err != nil {
-			return m.mapStoreError(ctx, "auth.password.change", err)
-		}
 		revoked := UserSessionsRevokedEvent{EventMeta: sessionMeta, UserID: actor.UserID}
 		m.events.emit(ctx, EventUserSessionsRevoked, func(listener EventListener) error { return listener.OnUserSessionsRevoked(ctx, revoked) })
 	}

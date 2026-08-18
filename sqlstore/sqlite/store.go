@@ -376,6 +376,18 @@ func (s *Store) ReplacePassword(ctx context.Context, password credbound.Password
 	})
 }
 
+// ChangePassword swaps the user's password credential and stamps their
+// active sessions revoked in the same transaction.
+func (s *Store) ChangePassword(ctx context.Context, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		count, err := q.ReplacePassword(ctx, db.ReplacePasswordParams{UserID: password.UserID, Hash: password.Hash, UpdatedAt: password.UpdatedAt})
+		if err := affected(count, err); err != nil {
+			return err
+		}
+		return mapError(q.RevokeUserSessions(ctx, db.RevokeUserSessionsParams{UserID: password.UserID, RevokedAt: nullableTime(&at)}))
+	})
+}
+
 // LoginThrottleByUserID returns the user's current login throttle state.
 func (s *Store) LoginThrottleByUserID(ctx context.Context, userID string) (credbound.LoginThrottle, error) {
 	row, err := s.queries.GetLoginThrottle(ctx, userID)

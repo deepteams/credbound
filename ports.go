@@ -21,6 +21,12 @@ type Store interface {
 	Users(context.Context, PageRequest) iter.Seq2[PageEvent[User], error]
 	PasswordByUserID(context.Context, string) (PasswordCredential, error)
 	ReplacePassword(context.Context, PasswordCredential, Commit) error
+	// ChangePassword installs the user's new password for an authenticated
+	// password change. Unlike ReplacePassword (also the transparent-rehash
+	// path), a SessionStore-capable store must stamp RevokedAt on the user's
+	// active sessions in the same transaction, so a failure leaves both the
+	// password and the sessions untouched.
+	ChangePassword(ctx context.Context, password PasswordCredential, at time.Time, commit Commit) error
 	// RecordAuthentication updates last_seen_at and clears the user's login
 	// throttle in the same transaction as its audit event.
 	RecordAuthentication(context.Context, string, time.Time, Commit) error
@@ -170,8 +176,8 @@ type SignupStore interface {
 // RevokeUserSessions); without it every one of them returns ErrNotSupported.
 //
 // Cascade contract: a store implementing SessionStore must extend its
-// CompletePasswordReset, SetUserDisabled (when disabling, not when
-// re-enabling) and RevokeUserCredentials implementations to also stamp
+// CompletePasswordReset, ChangePassword, SetUserDisabled (when disabling, not
+// when re-enabling) and RevokeUserCredentials implementations to also stamp
 // RevokedAt on the user's active sessions inside the same transaction, so a
 // recovery or lockdown revokes interactive sessions atomically with the rest
 // of the account's credentials. Stores without the capability keep their

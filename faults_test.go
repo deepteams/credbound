@@ -486,6 +486,13 @@ func (s *faultStore) ReplacePassword(ctx context.Context, password credbound.Pas
 	return s.Store.ReplacePassword(ctx, password, commit)
 }
 
+func (s *faultStore) ChangePassword(ctx context.Context, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {
+	if s.replacePasswordErr != nil {
+		return s.replacePasswordErr
+	}
+	return s.Store.ChangePassword(ctx, password, at, commit)
+}
+
 func (s *faultStore) SaveTOTPEnrollment(ctx context.Context, factor credbound.TOTPFactor, commit credbound.Commit) error {
 	if s.saveTOTPErr != nil {
 		return s.saveTOTPErr

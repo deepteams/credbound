@@ -428,6 +428,26 @@ func (s *Store) PasswordByUserID(ctx context.Context, userID string) (credbound.
 	return password, nil
 }
 
+// ChangePassword swaps the user's password credential and stamps their
+// active sessions revoked in the same commit.
+func (s *Store) ChangePassword(ctx context.Context, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.passwords[password.UserID]; !ok {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	s.passwords[password.UserID] = password
+	s.revokeUserSessionsLocked(password.UserID, at)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
 // ReplacePassword swaps the user's password credential.
 func (s *Store) ReplacePassword(ctx context.Context, password credbound.PasswordCredential, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
