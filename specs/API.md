@@ -126,8 +126,12 @@ WorkspaceDomains(ctx, authn, workspaceID, PageRequest) iter.Seq2[PageEvent[Works
 RevokeUserCredentials(ctx, authn, TrustedRequest, userID) error
 AdminResetSecondFactor(ctx, authn, TrustedRequest, userID) error
 
+ExportUserData(ctx, authn, userID) (UserDataExport, error)
+AnonymizeUser(ctx, authn, TrustedRequest, userID) error
+
 BeginEmailAddition(ctx, authn, email) (IssuedEmailVerification, error)
 ConfirmEmail(ctx, verificationToken) (EmailAddress, error)
+ResendEmailVerification(ctx, email) (IssuedEmailVerification, error)
 SetPrimaryEmail(ctx, authn, emailID) error
 RemoveEmail(ctx, authn, emailID) error
 Emails(ctx, authn, userID, PageRequest) iter.Seq2[PageEvent[EmailAddress], error]
@@ -583,9 +587,16 @@ Callers use `errors.Is` with the sentinel errors:
 - `ErrExpired`
 - `ErrLocked`
 - `ErrSSORequired`
+- `ErrDomainVerification`
 - `ErrAuditUnavailable`
 - `ErrAuditCompromised`
 - `ErrTransactionRejected`
+
+Two further sentinels are contracts between a security provider and the manager,
+not manager-to-host results: `ErrNoPasskey` (the passkey provider reports the
+user has no passkey) and `ErrPasskeyCloneDetected` (the passkey provider rejects
+an assertion whose signature counter regressed; the caller still receives
+`ErrInvalidCredentials`).
 
 An application HTTP adapter must translate them to RFC 9457 with
 `Content-Type: application/problem+json` and at least `type`, `title`, `status`,

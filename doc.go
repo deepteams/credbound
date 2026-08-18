@@ -125,8 +125,12 @@
 // Failures map to sentinel errors compared with errors.Is:
 // ErrInvalidCredentials, ErrUnauthorized, ErrForbidden, ErrStepUpRequired,
 // ErrConflict, ErrNotFound, ErrNotSupported, ErrInvalidInput, ErrExpired,
-// ErrLocked, ErrSSORequired, ErrAuditUnavailable, ErrAuditCompromised and
-// ErrTransactionRejected. User-input validation failures additionally carry
+// ErrLocked, ErrSSORequired, ErrDomainVerification, ErrAuditUnavailable,
+// ErrAuditCompromised and ErrTransactionRejected. Two more are contracts
+// between a security provider and the manager rather than manager-to-host
+// results: ErrNoPasskey (a passkey provider reporting the user has none) and
+// ErrPasskeyCloneDetected (a passkey provider rejecting a cloned authenticator;
+// the caller still sees ErrInvalidCredentials). User-input validation failures additionally carry
 // a *ValidationError{Field, Rule, Message} retrievable with errors.As; every
 // ValidationError also satisfies errors.Is(err, ErrInvalidInput). Public
 // errors never contain secrets, and enumeration-sensitive flows
