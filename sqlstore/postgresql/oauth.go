@@ -582,9 +582,9 @@ func oauthPage[T any](s *Store, ctx context.Context, query string, filterArgs []
 }
 
 func (s *Store) oauthMutate(ctx context.Context, commit credbound.Commit, fn func(*sql.Tx, *db.Queries) error) error {
-	// Serialize with every other mutation: OAuth writes also append to the
-	// singleton audit chain and run read-then-write invariant checks (the DCR
-	// registration count), which the writeMu contract protects.
+	// Read-then-write invariants are protected by row locks here — the audit
+	// chain head is taken FOR UPDATE and open DCR locks its issuer row — so
+	// OAuth mutations run concurrently.
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return mapError(err)

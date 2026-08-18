@@ -9,6 +9,25 @@ import (
 	"strings"
 )
 
+// mustReplace substitutes old with new and fails loudly when the source no
+// longer contains old, so a drifted SQLite source can never silently ship
+// SQLite artifacts — docs, dialect idioms, missing locks — under the
+// postgresql package name. n mirrors strings.Replace.
+func mustReplace(code, old, new string, n int) string {
+	if !strings.Contains(code, old) {
+		panic(fmt.Sprintf("genpostgresstore: replacement source not found in SQLite store:\n%s", old))
+	}
+	return strings.Replace(code, old, new, n)
+}
+
+// mustReplaceAll is mustReplace for every occurrence.
+func mustReplaceAll(code, old, new string) string {
+	if !strings.Contains(code, old) {
+		panic(fmt.Sprintf("genpostgresstore: replacement source not found in SQLite store:\n%s", old))
+	}
+	return strings.ReplaceAll(code, old, new)
+}
+
 // sqlitePackageDoc is the SQLite package doc comment, replaced wholesale by
 // postgresPackageDoc because the construction and DSN guidance differ per
 // dialect.
@@ -19,8 +38,8 @@ const sqlitePackageDoc = `// Package sqlite implements every Credbound persisten
 // event atomically with the change.
 //
 // Open the database with the modernc.org/sqlite driver using a DSN that
-// carries "_pragma=foreign_keys(1)" and "_texttotime=1" (see New for why
-// the store silently relies on both), apply the schema from the module's
+// carries "_pragma=foreign_keys(1)" and "_texttotime=1" (New probes both
+// and rejects a misconfigured DSN), apply the schema from the module's
 // migrations directory, and wire the store into credbound.Config.Store:
 //
 //	db, err := sql.Open("sqlite", "file:auth.db?_pragma=foreign_keys(1)&_texttotime=1")
@@ -46,20 +65,6 @@ const postgresPackageDoc = `// Package postgresql implements every Credbound per
 //
 // TransactionHook callbacks can regain the raw *sql.Tx through TxFrom to
 // append host writes to a Credbound commit.
-`
-
-// sqliteNewDoc is the SQLite-specific doc comment on New; it is deleted
-// because the New replacement below injects the PostgreSQL doc instead.
-const sqliteNewDoc = `// New wraps an already-opened SQLite database. The store issues no PRAGMAs
-// itself and silently relies on the connection being opened with the
-// modernc.org/sqlite driver and a DSN carrying "_pragma=foreign_keys(1)"
-// (referential integrity, which the revocation cascades depend on) and
-// "_texttotime=1" (TEXT timestamp scanning):
-//
-//	sql.Open("sqlite", "file:auth.db?_pragma=foreign_keys(1)&_texttotime=1")
-//
-// Omitting either parameter corrupts behavior quietly rather than failing
-// construction.
 `
 
 // sqliteStoreDecl matches the documented Store declaration so RowQuerier
@@ -101,21 +106,20 @@ func main() {
 		panic(err)
 	}
 	code := string(raw)
-	code = strings.Replace(code, sqlitePackageDoc, postgresPackageDoc, 1)
-	code = strings.Replace(code, sqliteNewDoc, "", 1)
-	code = strings.Replace(code, "package sqlite", "package postgresql", 1)
-	code = strings.Replace(code, `db "github.com/deepteams/credbound/internal/sqlc/sqlite"`, `db "github.com/deepteams/credbound/internal/sqlc/postgresql"`, 1)
+	code = mustReplace(code, sqlitePackageDoc, postgresPackageDoc, 1)
+	code = mustReplace(code, "package sqlite", "package postgresql", 1)
+	code = mustReplace(code, `db "github.com/deepteams/credbound/internal/sqlc/sqlite"`, `db "github.com/deepteams/credbound/internal/sqlc/postgresql"`, 1)
 	// mapError classifies conflicts by the driver's typed code; swap the SQLite
 	// driver error for pgx's PgError and the SQLite result codes for the
 	// PostgreSQL unique_violation SQLSTATE.
-	code = strings.Replace(code, "\tsqlitedriver \"modernc.org/sqlite\"\n", "\t\"github.com/jackc/pgx/v5/pgconn\"\n", 1)
-	code = strings.Replace(code, `// sqliteConstraint is the primary result code shared by every constraint
+	code = mustReplace(code, "\tsqlitedriver \"modernc.org/sqlite\"\n", "\t\"github.com/jackc/pgx/v5/pgconn\"\n", 1)
+	code = mustReplace(code, `// sqliteConstraint is the primary result code shared by every constraint
 // violation (UNIQUE, PRIMARY KEY, CHECK, FOREIGN KEY, NOT NULL); the extended
 // code carries it in its low byte.
 const sqliteConstraint = 19`, `// pgConstraintClass is the SQLSTATE class shared by every integrity
 // constraint violation (unique, foreign key, not null, check, restrict).
 const pgConstraintClass = "23"`, 1)
-	code = strings.Replace(code, `	var sqliteErr *sqlitedriver.Error
+	code = mustReplace(code, `	var sqliteErr *sqlitedriver.Error
 	if errors.As(err, &sqliteErr) && sqliteErr.Code()&0xff == sqliteConstraint {
 		return fmt.Errorf("%w: %v", credbound.ErrConflict, err)
 	}
@@ -124,13 +128,13 @@ const pgConstraintClass = "23"`, 1)
 		return fmt.Errorf("%w: %v", credbound.ErrConflict, err)
 	}
 	return err`, 1)
-	code = strings.ReplaceAll(code, "credbound.StoreSQLite", "credbound.StorePostgreSQL")
-	code = strings.Replace(code, "// Tx is the SQLite transaction capability", "// Tx is the PostgreSQL transaction capability", 1)
-	code = strings.Replace(code, "into the live SQLite", "into the live PostgreSQL", 1)
-	code = strings.Replace(code, `"github.com/deepteams/credbound"`, `"github.com/deepteams/credbound"
+	code = mustReplaceAll(code, "credbound.StoreSQLite", "credbound.StorePostgreSQL")
+	code = mustReplace(code, "// Tx is the SQLite transaction capability", "// Tx is the PostgreSQL transaction capability", 1)
+	code = mustReplace(code, "into the live SQLite", "into the live PostgreSQL", 1)
+	code = mustReplace(code, `"github.com/deepteams/credbound"`, `"github.com/deepteams/credbound"
 	"github.com/jackc/pgx/v5"`, 1)
-	code = strings.Replace(code, sqliteStoreDecl, postgresStoreDecl, 1)
-	code = strings.Replace(code, `// New wraps an already-opened SQLite database. The store issues no PRAGMAs
+	code = mustReplace(code, sqliteStoreDecl, postgresStoreDecl, 1)
+	code = mustReplace(code, `// New wraps an already-opened SQLite database. The store issues no PRAGMAs
 // itself: the connection must be opened with the modernc.org/sqlite driver
 // and a DSN carrying "_pragma=foreign_keys(1)" (referential integrity,
 // which the revocation cascades depend on) and "_texttotime=1" (TEXT
@@ -148,12 +152,12 @@ func New(database *sql.DB, options ...Option)`, `// New builds the PostgreSQL st
 // *pgxpool.Pool as the RowQuerier — a single *pgx.Conn is not safe for
 // concurrent use.
 func New(database *sql.DB, rows RowQuerier, options ...Option)`, 1)
-	code = strings.Replace(code, "if database == nil {", "if database == nil || rows == nil {", 1)
-	code = strings.Replace(code, `	if err := verifyConnection(database); err != nil {
+	code = mustReplace(code, "if database == nil {", "if database == nil || rows == nil {", 1)
+	code = mustReplace(code, `	if err := verifyConnection(database); err != nil {
 		return nil, err
 	}
 `, "", 1)
-	code = strings.Replace(code, `
+	code = mustReplace(code, `
 // verifyConnection probes the DSN parameters the store depends on.
 // foreign_keys is per-connection in SQLite, so only a DSN pragma — applied
 // by the driver to every pooled connection — makes the check meaningful
@@ -173,13 +177,13 @@ func verifyConnection(database *sql.DB) error {
 	return nil
 }
 `, "", 1)
-	code = strings.Replace(code, "sqlite database is required", "PostgreSQL database/sql and pgx row querier are required", 1)
-	code = strings.Replace(code, "&Store{db: database, queries: db.New(database),", "&Store{db: database, rows: rows, queries: db.New(database),", 1)
-	code = strings.ReplaceAll(code, "row.Active == 1", "row.Active")
-	code = strings.ReplaceAll(code, "row.RequireMfa == 1", "row.RequireMfa")
-	code = strings.Replace(code, "var requireMFA int64", "var requireMFA bool", 1)
-	code = strings.Replace(code, "value.DisabledAt, value.RequireMFA = timePointer(disabled), requireMFA == 1", "value.DisabledAt, value.RequireMFA = timePointer(disabled), requireMFA", 1)
-	code = strings.Replace(code, `// boolValue converts a policy flag to its SQLite representation.
+	code = mustReplace(code, "sqlite database is required", "PostgreSQL database/sql and pgx row querier are required", 1)
+	code = mustReplace(code, "&Store{db: database, queries: db.New(database),", "&Store{db: database, rows: rows, queries: db.New(database),", 1)
+	code = mustReplaceAll(code, "row.Active == 1", "row.Active")
+	code = mustReplaceAll(code, "row.RequireMfa == 1", "row.RequireMfa")
+	code = mustReplace(code, "var requireMFA int64", "var requireMFA bool", 1)
+	code = mustReplace(code, "value.DisabledAt, value.RequireMFA = timePointer(disabled), requireMFA == 1", "value.DisabledAt, value.RequireMFA = timePointer(disabled), requireMFA", 1)
+	code = mustReplace(code, `// boolValue converts a policy flag to its SQLite representation.
 func boolValue(value bool) int64 {
 	if value {
 		return 1
@@ -187,32 +191,32 @@ func boolValue(value bool) int64 {
 	return 0
 }`, `// boolValue converts a policy flag to its PostgreSQL representation.
 func boolValue(value bool) bool { return value }`, 1)
-	code = strings.ReplaceAll(code, "row.Disabled == 1", "row.Disabled")
-	code = strings.ReplaceAll(code, "row.IsPrimary == 1", "row.IsPrimary")
-	code = strings.ReplaceAll(code, "email.IsPrimary == 1", "email.IsPrimary")
+	code = mustReplaceAll(code, "row.Disabled == 1", "row.Disabled")
+	code = mustReplaceAll(code, "row.IsPrimary == 1", "row.IsPrimary")
+	code = mustReplaceAll(code, "email.IsPrimary == 1", "email.IsPrimary")
 	oldDisabled := `disabled := int64(0)
 	if user.Disabled {
 		disabled = 1
 	}`
-	code = strings.Replace(code, oldDisabled, `disabled := user.Disabled`, 1)
+	code = mustReplace(code, oldDisabled, `disabled := user.Disabled`, 1)
 	oldPrimary := `primary := int64(0)
 	if email.Primary {
 		primary = 1
 	}`
-	code = strings.Replace(code, oldPrimary, `primary := email.Primary`, 1)
-	code = strings.Replace(code, "var primary int64", "var primary bool", 1)
-	code = strings.Replace(code, "primary == 1", "primary", 1)
-	code = strings.Replace(code, "ScopesJson: string(scopes)", "ScopesJson: scopes", 1)
-	code = strings.Replace(code, "json.Unmarshal([]byte(row.ScopesJson), &scopes)", "json.Unmarshal(row.ScopesJson, &scopes)", 1)
-	code = strings.Replace(code, "var scopes string", "var scopes []byte", 1)
-	code = strings.Replace(code, "json.Unmarshal([]byte(scopes), &value.Scopes)", "json.Unmarshal(scopes, &value.Scopes)", 1)
-	code = strings.Replace(code, `disabledValue := int64(0)
+	code = mustReplace(code, oldPrimary, `primary := email.Primary`, 1)
+	code = mustReplace(code, "var primary int64", "var primary bool", 1)
+	code = mustReplace(code, "primary == 1", "primary", 1)
+	code = mustReplace(code, "ScopesJson: string(scopes)", "ScopesJson: scopes", 1)
+	code = mustReplace(code, "json.Unmarshal([]byte(row.ScopesJson), &scopes)", "json.Unmarshal(row.ScopesJson, &scopes)", 1)
+	code = mustReplace(code, "var scopes string", "var scopes []byte", 1)
+	code = mustReplace(code, "json.Unmarshal([]byte(scopes), &value.Scopes)", "json.Unmarshal(scopes, &value.Scopes)", 1)
+	code = mustReplace(code, `disabledValue := int64(0)
 		if disabled {
 			disabledValue = 1
 		}`, `disabledValue := disabled`, 1)
-	code = strings.Replace(code, "var disabled int64", "var disabled bool", 1)
-	code = strings.Replace(code, "value.Disabled, value.LastSeenAt = disabled == 1, timePointer(seen)", "value.Disabled, value.LastSeenAt = disabled, timePointer(seen)", 1)
-	code = strings.Replace(code, `		if disabled {
+	code = mustReplace(code, "var disabled int64", "var disabled bool", 1)
+	code = mustReplace(code, "value.Disabled, value.LastSeenAt = disabled == 1, timePointer(seen)", "value.Disabled, value.LastSeenAt = disabled, timePointer(seen)", 1)
+	code = mustReplace(code, `		if disabled {
 			admin, adminErr := q.GetInstanceAdministrator(ctx, userID)`, `		if disabled {
 			if _, lockErr := q.LockRootAdministrators(ctx); lockErr != nil {
 				return mapError(lockErr)
@@ -225,7 +229,7 @@ func boolValue(value bool) bool { return value }`, 1)
 	// SetUserDisabled and therefore needs the same row locks on PostgreSQL. The
 	// SQLite source has no locks (it serializes writes on a single connection),
 	// so inject them into the generated PostgreSQL code before the count.
-	code = strings.Replace(code, `		if _, err := q.GetUserByID(ctx, userID); err != nil {
+	code = mustReplace(code, `		if _, err := q.GetUserByID(ctx, userID); err != nil {
 			return mapError(err)
 		}
 		admin, adminErr := q.GetInstanceAdministrator(ctx, userID)`, `		if _, err := q.GetUserByID(ctx, userID); err != nil {
@@ -241,10 +245,35 @@ func boolValue(value bool) bool { return value }`, 1)
 	// The in-process write mutex serializes SQLite mutations to protect the
 	// read-then-write invariants; PostgreSQL protects them with row locks and
 	// must let mutations run concurrently, so drop the mutex acquisition from
-	// the generated mutateIf. The now-unused writeMu field and lockWrites
-	// method are harmless and left in place.
-	code = strings.Replace(code, "\tdefer s.lockWrites()()\n", "", 1)
-	code = strings.Replace(code, `func (s *Store) UpsertMembership(ctx context.Context, membership credbound.Membership, commit credbound.Commit) error {
+	// the generated mutateIf along with the field, its SQLite-specific
+	// contract comment, and the lockWrites helper.
+	code = mustReplace(code, "\tdefer s.lockWrites()()\n", "", 1)
+	code = mustReplace(code, `	// writeMu serializes mutations. SQLite is a single-writer database with no
+	// row-level locking, so the read-then-write invariant checks inside a
+	// mutation (last root administrator, sole workspace admin, the singleton
+	// audit chain head) are only safe if mutations do not interleave. Holding
+	// this for the duration of each write transaction guarantees that within a
+	// process; reads never take it, so streaming list operations stay
+	// concurrent. Across processes sharing one database file, open the
+	// connection with "_txlock=immediate" so the file-level write lock provides
+	// the same guarantee.
+	//
+	// It is held across the TransactionHook callback, so a hook must append to
+	// the commit's transaction through TxFrom and must not call back into a
+	// Store mutation — doing so self-deadlocks on this non-reentrant mutex (it
+	// would also be a nested-transaction error on the same connection).
+	writeMu sync.Mutex
+}`, "}", 1)
+	code = mustReplace(code, `
+// lockWrites acquires the mutation mutex and returns its release function, so a
+// mutation can serialize itself with "defer s.lockWrites()()".
+func (s *Store) lockWrites() func() {
+	s.writeMu.Lock()
+	return s.writeMu.Unlock
+}
+`, "", 1)
+	code = mustReplace(code, "\t\"sync\"\n\t\"sync/atomic\"\n", "\t\"sync/atomic\"\n", 1)
+	code = mustReplace(code, `func (s *Store) UpsertMembership(ctx context.Context, membership credbound.Membership, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		current, err := q.GetMembership`, `func (s *Store) UpsertMembership(ctx context.Context, membership credbound.Membership, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
@@ -252,7 +281,7 @@ func boolValue(value bool) bool { return value }`, 1)
 			return mapError(err)
 		}
 		current, err := q.GetMembership`, 1)
-	code = strings.Replace(code, `func (s *Store) RemoveMembership(ctx context.Context, workspaceID, userID string, at time.Time, commit credbound.Commit) error {
+	code = mustReplace(code, `func (s *Store) RemoveMembership(ctx context.Context, workspaceID, userID string, at time.Time, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		current, err := q.GetMembership`, `func (s *Store) RemoveMembership(ctx context.Context, workspaceID, userID string, at time.Time, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
@@ -260,7 +289,7 @@ func boolValue(value bool) bool { return value }`, 1)
 			return mapError(err)
 		}
 		current, err := q.GetMembership`, 1)
-	code = strings.Replace(code, `func (s *Store) SetInstanceRole(ctx context.Context, admin credbound.InstanceAdministrator, commit credbound.Commit) error {
+	code = mustReplace(code, `func (s *Store) SetInstanceRole(ctx context.Context, admin credbound.InstanceAdministrator, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		current, err := q.GetInstanceAdministrator`, `func (s *Store) SetInstanceRole(ctx context.Context, admin credbound.InstanceAdministrator, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
@@ -270,7 +299,7 @@ func boolValue(value bool) bool { return value }`, 1)
 			}
 		}
 		current, err := q.GetInstanceAdministrator`, 1)
-	code = strings.Replace(code, `func (s *Store) RemoveInstanceRole(ctx context.Context, userID string, commit credbound.Commit) error {
+	code = mustReplace(code, `func (s *Store) RemoveInstanceRole(ctx context.Context, userID string, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		admin, err := q.GetInstanceAdministrator`, `func (s *Store) RemoveInstanceRole(ctx context.Context, userID string, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
@@ -279,7 +308,7 @@ func boolValue(value bool) bool { return value }`, 1)
 		}
 		admin, err := q.GetInstanceAdministrator`, 1)
 
-	code = strings.Replace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT u.id, e.address, u.display_name, u.disabled, u.last_seen_at, u.created_at, u.updated_at
+	code = mustReplace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT u.id, e.address, u.display_name, u.disabled, u.last_seen_at, u.created_at, u.updated_at
 FROM credbound_users u
 JOIN credbound_user_emails e ON e.user_id = u.id AND e.is_primary = 1
 WHERE (? = '' OR u.created_at < ? OR (u.created_at = ? AND u.id < ?))
@@ -289,38 +318,38 @@ JOIN credbound_user_emails e ON e.user_id = u.id AND e.is_primary
 WHERE (NOT $1 OR u.created_at < $2 OR (u.created_at = $3 AND u.id < $4))
 ORDER BY u.created_at DESC, u.id DESC LIMIT $5`+"`"+`, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)`, 1)
 
-	code = strings.Replace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT id, user_id, name, credential_id, credential_json, created_at, last_used_at
+	code = mustReplace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT id, user_id, name, credential_id, credential_json, created_at, last_used_at
 FROM credbound_passkeys WHERE user_id = ? ORDER BY created_at, id`+"`"+`, userID)`, `s.rows.Query(streamCtx, `+"`"+`SELECT id, user_id, name, credential_id, credential_json, created_at, last_used_at
 FROM credbound_passkeys WHERE user_id = $1 ORDER BY created_at, id`+"`"+`, userID)`, 1)
-	code = strings.Replace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT id, user_id, address, is_primary, verified_at, created_at, updated_at
+	code = mustReplace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT id, user_id, address, is_primary, verified_at, created_at, updated_at
 FROM credbound_user_emails
 WHERE user_id = ? AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
 ORDER BY created_at DESC, id DESC LIMIT ?`+"`"+`, userID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)`, `s.rows.Query(streamCtx, `+"`"+`SELECT id, user_id, address, is_primary, verified_at, created_at, updated_at
 FROM credbound_user_emails
 WHERE user_id = $1 AND (NOT $2 OR created_at < $3 OR (created_at = $4 AND id < $5))
 ORDER BY created_at DESC, id DESC LIMIT $6`+"`"+`, userID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)`, 1)
-	code = strings.Replace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT id, user_id, name, prefix, digest, workspace_id, scopes_json, created_at, expires_at, last_used_at, revoked_at
+	code = mustReplace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT id, user_id, name, prefix, digest, workspace_id, scopes_json, created_at, expires_at, last_used_at, revoked_at
 FROM credbound_personal_access_tokens
 WHERE user_id = ? AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
 ORDER BY created_at DESC, id DESC LIMIT ?`+"`"+`, userID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)`, `s.rows.Query(streamCtx, `+"`"+`SELECT id, user_id, name, prefix, digest, workspace_id, scopes_json, created_at, expires_at, last_used_at, revoked_at
 FROM credbound_personal_access_tokens
 WHERE user_id = $1 AND (NOT $2 OR created_at < $3 OR (created_at = $4 AND id < $5))
 ORDER BY created_at DESC, id DESC LIMIT $6`+"`"+`, userID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)`, 1)
-	code = strings.Replace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
+	code = mustReplace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
 FROM credbound_workspace_invitations
 WHERE workspace_id = ? AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
 ORDER BY created_at DESC, id DESC LIMIT ?`+"`"+`, workspaceID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)`, `s.rows.Query(streamCtx, `+"`"+`SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
 FROM credbound_workspace_invitations
 WHERE workspace_id = $1 AND (NOT $2 OR created_at < $3 OR (created_at = $4 AND id < $5))
 ORDER BY created_at DESC, id DESC LIMIT $6`+"`"+`, workspaceID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)`, 1)
-	code = strings.Replace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT id, user_id, provider_configuration_id, provider_kind, issuer, subject, email, created_at, last_used_at
+	code = mustReplace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT id, user_id, provider_configuration_id, provider_kind, issuer, subject, email, created_at, last_used_at
 FROM credbound_sso_identities
 WHERE user_id = ? AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
 ORDER BY created_at DESC, id DESC LIMIT ?`+"`"+`, userID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)`, `s.rows.Query(streamCtx, `+"`"+`SELECT id, user_id, provider_configuration_id, provider_kind, issuer, subject, email, created_at, last_used_at
 FROM credbound_sso_identities
 WHERE user_id = $1 AND (NOT $2 OR created_at < $3 OR (created_at = $4 AND id < $5))
 ORDER BY created_at DESC, id DESC LIMIT $6`+"`"+`, userID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)`, 1)
-	code = strings.Replace(code, `query := `+"`"+`SELECT w.id, w.name, w.created_at, w.updated_at, w.disabled_at, w.require_mfa
+	code = mustReplace(code, `query := `+"`"+`SELECT w.id, w.name, w.created_at, w.updated_at, w.disabled_at, w.require_mfa
 FROM credbound_workspaces w
 WHERE (? = '' OR EXISTS (SELECT 1 FROM credbound_memberships m WHERE m.workspace_id = w.id AND m.user_id = ?))
 AND (? = '' OR w.created_at < ? OR (w.created_at = ? AND w.id < ?))
@@ -329,8 +358,8 @@ FROM credbound_workspaces w
 WHERE (NOT $1 OR EXISTS (SELECT 1 FROM credbound_memberships m WHERE m.workspace_id = w.id AND m.user_id = $2))
 AND (NOT $3 OR w.created_at < $4 OR (w.created_at = $5 AND w.id < $6))
 ORDER BY w.created_at DESC, w.id DESC LIMIT $7`+"`", 1)
-	code = strings.Replace(code, "s.db.QueryContext(streamCtx, query, userID, userID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)", "s.rows.Query(streamCtx, query, userID != \"\", nullableUUID(userID), cursor.ID != \"\", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)", 1)
-	code = strings.Replace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT workspace_id, user_id, role, status, provisioning_source, created_at, updated_at
+	code = mustReplace(code, "s.db.QueryContext(streamCtx, query, userID, userID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)", "s.rows.Query(streamCtx, query, userID != \"\", nullableUUID(userID), cursor.ID != \"\", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)", 1)
+	code = mustReplace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT workspace_id, user_id, role, status, provisioning_source, created_at, updated_at
 FROM credbound_memberships
 WHERE workspace_id = ? AND (? = '' OR created_at < ? OR (created_at = ? AND user_id < ?))
 ORDER BY created_at DESC, user_id DESC LIMIT ?`+"`"+`, workspaceID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)`, `s.rows.Query(streamCtx, `+"`"+`SELECT workspace_id, user_id, role, status, provisioning_source, created_at, updated_at
@@ -341,10 +370,10 @@ ORDER BY created_at DESC, user_id DESC LIMIT $6`+"`"+`, workspaceID, cursor.ID !
 	// ClaimEmailIssuance is hand-written raw SQL (sqlc cannot bind the
 	// conditional upsert's WHERE parameter); convert its placeholders and the
 	// upsert keyword to the PostgreSQL dialect.
-	code = strings.Replace(code, "VALUES (?, ?, ?)\nON CONFLICT (address, purpose) DO UPDATE SET last_issued_at = excluded.last_issued_at WHERE credbound_email_issuance.last_issued_at <= ?",
+	code = mustReplace(code, "VALUES (?, ?, ?)\nON CONFLICT (address, purpose) DO UPDATE SET last_issued_at = excluded.last_issued_at WHERE credbound_email_issuance.last_issued_at <= ?",
 		"VALUES ($1, $2, $3)\nON CONFLICT (address, purpose) DO UPDATE SET last_issued_at = EXCLUDED.last_issued_at WHERE credbound_email_issuance.last_issued_at <= $4", 1)
 
-	code = strings.Replace(code, `func nullableString(value string) sql.NullString {`, `func nullableUUID(value string) any {
+	code = mustReplace(code, `func nullableString(value string) sql.NullString {`, `func nullableUUID(value string) any {
 	if value == "" {
 		return nil
 	}
@@ -359,11 +388,11 @@ func nullableString(value string) sql.NullString {`, 1)
 		panic("audit section markers not found")
 	}
 	code = code[:start] + postgresAuditSection + code[end:]
-	code = strings.Replace(code, "AND sequence > ? ORDER BY sequence", "AND sequence > $1 ORDER BY sequence", 1)
-	code = strings.Replace(code, "s.db.QueryContext(streamCtx, chainedAuditQuery, afterSequence)", "s.rows.Query(streamCtx, chainedAuditQuery, afterSequence)", 1)
+	code = mustReplace(code, "AND sequence > ? ORDER BY sequence", "AND sequence > $1 ORDER BY sequence", 1)
+	code = mustReplace(code, "s.db.QueryContext(streamCtx, chainedAuditQuery, afterSequence)", "s.rows.Query(streamCtx, chainedAuditQuery, afterSequence)", 1)
 	// PostgreSQL objects live in the dedicated `credbound` schema; every raw
 	// SQL table reference is schema-qualified instead of prefix-namespaced.
-	code = strings.ReplaceAll(code, "credbound_", "credbound.")
+	code = mustReplaceAll(code, "credbound_", "credbound.")
 	code = "// Code generated by internal/cmd/genpostgresstore; DO NOT EDIT.\n\n" + code
 	formatted, err := format.Source([]byte(code))
 	if err != nil {
@@ -390,13 +419,13 @@ func generateDomains() {
 		panic(err)
 	}
 	code := string(raw)
-	code = strings.Replace(code, "package sqlite", "package postgresql", 1)
-	code = strings.Replace(code, `db "github.com/deepteams/credbound/internal/sqlc/sqlite"`, `db "github.com/deepteams/credbound/internal/sqlc/postgresql"`, 1)
-	code = strings.ReplaceAll(code, "row.AutoJoin == 1", "row.AutoJoin")
-	code = strings.ReplaceAll(code, "row.EnforceSso == 1", "row.EnforceSso")
-	code = strings.Replace(code, "var autoJoin, enforceSSO int64", "var autoJoin, enforceSSO bool", 1)
-	code = strings.Replace(code, "value.AutoJoin, value.EnforceSSO = autoJoin == 1, enforceSSO == 1", "value.AutoJoin, value.EnforceSSO = autoJoin, enforceSSO", 1)
-	code = strings.Replace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at
+	code = mustReplace(code, "package sqlite", "package postgresql", 1)
+	code = mustReplace(code, `db "github.com/deepteams/credbound/internal/sqlc/sqlite"`, `db "github.com/deepteams/credbound/internal/sqlc/postgresql"`, 1)
+	code = mustReplaceAll(code, "row.AutoJoin == 1", "row.AutoJoin")
+	code = mustReplaceAll(code, "row.EnforceSso == 1", "row.EnforceSso")
+	code = mustReplace(code, "var autoJoin, enforceSSO int64", "var autoJoin, enforceSSO bool", 1)
+	code = mustReplace(code, "value.AutoJoin, value.EnforceSSO = autoJoin == 1, enforceSSO == 1", "value.AutoJoin, value.EnforceSSO = autoJoin, enforceSSO", 1)
+	code = mustReplace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at
 FROM credbound_workspace_domains
 WHERE workspace_id = ? AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
 ORDER BY created_at DESC, id DESC LIMIT ?`+"`"+`, workspaceID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)`, `s.rows.Query(streamCtx, `+"`"+`SELECT id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at
@@ -405,7 +434,7 @@ WHERE workspace_id = $1 AND (NOT $2 OR created_at < $3 OR (created_at = $4 AND i
 ORDER BY created_at DESC, id DESC LIMIT $6`+"`"+`, workspaceID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)`, 1)
 	// PostgreSQL objects live in the dedicated `credbound` schema; every raw
 	// SQL table reference is schema-qualified instead of prefix-namespaced.
-	code = strings.ReplaceAll(code, "credbound_", "credbound.")
+	code = mustReplaceAll(code, "credbound_", "credbound.")
 	code = "// Code generated by internal/cmd/genpostgresstore; DO NOT EDIT.\n\n" + code
 	formatted, err := format.Source([]byte(code))
 	if err != nil {
@@ -425,13 +454,13 @@ func generateSession() {
 		panic(err)
 	}
 	code := string(raw)
-	code = strings.Replace(code, "package sqlite", "package postgresql", 1)
-	code = strings.Replace(code, `db "github.com/deepteams/credbound/internal/sqlc/sqlite"`, `db "github.com/deepteams/credbound/internal/sqlc/postgresql"`, 1)
-	code = strings.Replace(code, "Level: int64(session.Level)", "Level: int16(session.Level)", 1)
-	code = strings.Replace(code, "row.SecondFactorRequired == 1", "row.SecondFactorRequired", 1)
-	code = strings.Replace(code, "var secondFactor int64", "var secondFactor bool", 1)
-	code = strings.Replace(code, "value.SecondFactorRequired = secondFactor == 1", "value.SecondFactorRequired = secondFactor", 1)
-	code = strings.Replace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT id, user_id, method, level, authenticated_at, second_factor_required, user_agent, ip_address, created_at, last_seen_at, expires_at, revoked_at
+	code = mustReplace(code, "package sqlite", "package postgresql", 1)
+	code = mustReplace(code, `db "github.com/deepteams/credbound/internal/sqlc/sqlite"`, `db "github.com/deepteams/credbound/internal/sqlc/postgresql"`, 1)
+	code = mustReplace(code, "Level: int64(session.Level)", "Level: int16(session.Level)", 1)
+	code = mustReplace(code, "row.SecondFactorRequired == 1", "row.SecondFactorRequired", 1)
+	code = mustReplace(code, "var secondFactor int64", "var secondFactor bool", 1)
+	code = mustReplace(code, "value.SecondFactorRequired = secondFactor == 1", "value.SecondFactorRequired = secondFactor", 1)
+	code = mustReplace(code, `s.db.QueryContext(streamCtx, `+"`"+`SELECT id, user_id, method, level, authenticated_at, second_factor_required, user_agent, ip_address, created_at, last_seen_at, expires_at, revoked_at
 FROM credbound_sessions
 WHERE user_id = ? AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
 ORDER BY created_at DESC, id DESC LIMIT ?`+"`"+`, userID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)`, `s.rows.Query(streamCtx, `+"`"+`SELECT id, user_id, method, level, authenticated_at, second_factor_required, user_agent, ip_address, created_at, last_seen_at, expires_at, revoked_at
@@ -440,7 +469,7 @@ WHERE user_id = $1 AND (NOT $2 OR created_at < $3 OR (created_at = $4 AND id < $
 ORDER BY created_at DESC, id DESC LIMIT $6`+"`"+`, userID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)`, 1)
 	// PostgreSQL objects live in the dedicated `credbound` schema; every raw
 	// SQL table reference is schema-qualified instead of prefix-namespaced.
-	code = strings.ReplaceAll(code, "credbound_", "credbound.")
+	code = mustReplaceAll(code, "credbound_", "credbound.")
 	code = "// Code generated by internal/cmd/genpostgresstore; DO NOT EDIT.\n\n" + code
 	formatted, err := format.Source([]byte(code))
 	if err != nil {
@@ -460,19 +489,26 @@ func generateOAuth() {
 		panic(err)
 	}
 	code := string(raw)
-	code = strings.Replace(code, "package sqlite", "package postgresql", 1)
-	code = strings.Replace(code, `db "github.com/deepteams/credbound/internal/sqlc/sqlite"`, `db "github.com/deepteams/credbound/internal/sqlc/postgresql"`, 1)
+	code = mustReplace(code, "package sqlite", "package postgresql", 1)
+	code = mustReplace(code, `db "github.com/deepteams/credbound/internal/sqlc/sqlite"`, `db "github.com/deepteams/credbound/internal/sqlc/postgresql"`, 1)
 	// PostgreSQL relies on row locks, not the SQLite write mutex.
-	code = strings.Replace(code, "\tdefer s.lockWrites()()\n", "", 1)
-	code = strings.Replace(code, "func oauthParam(value any) string { return string(oauthJSON(value)) }", "func oauthParam(value any) []byte { return oauthJSON(value) }", 1)
-	code = strings.ReplaceAll(code, "int64(token.RegistrationCount)", "int32(token.RegistrationCount)")
-	code = strings.ReplaceAll(code, "int64(previousCount)", "int32(previousCount)")
-	code = strings.ReplaceAll(code, "int64(value.RegistrationCount)", "int32(value.RegistrationCount)")
-	code = strings.ReplaceAll(code, "int64(value.MaxRegistrations)", "int32(value.MaxRegistrations)")
-	code = strings.Replace(code, `"fmt"`, `"fmt"
+	code = mustReplace(code, `	// Serialize with every other mutation: OAuth writes also append to the
+	// singleton audit chain and run read-then-write invariant checks (the DCR
+	// registration count), which the writeMu contract protects.
+	defer s.lockWrites()()
+`, `	// Read-then-write invariants are protected by row locks here — the audit
+	// chain head is taken FOR UPDATE and open DCR locks its issuer row — so
+	// OAuth mutations run concurrently.
+`, 1)
+	code = mustReplace(code, "func oauthParam(value any) string { return string(oauthJSON(value)) }", "func oauthParam(value any) []byte { return oauthJSON(value) }", 1)
+	code = mustReplaceAll(code, "int64(token.RegistrationCount)", "int32(token.RegistrationCount)")
+	code = mustReplaceAll(code, "int64(previousCount)", "int32(previousCount)")
+	code = mustReplaceAll(code, "int64(value.RegistrationCount)", "int32(value.RegistrationCount)")
+	code = mustReplaceAll(code, "int64(value.MaxRegistrations)", "int32(value.MaxRegistrations)")
+	code = mustReplace(code, `"fmt"`, `"fmt"
 	"strconv"
 	"strings"`, 1)
-	code = strings.Replace(code, `func oauthQuery(query string) string { return query }`, `func oauthQuery(query string) string {
+	code = mustReplace(code, `func oauthQuery(query string) string { return query }`, `func oauthQuery(query string) string {
 	var result strings.Builder
 	index := 1
 	for _, char := range query {
@@ -486,27 +522,24 @@ func generateOAuth() {
 	}
 	return result.String()
 }`, 1)
-	code = strings.Replace(code, `var _ = errors.Is
-var _ = strings.Builder{}
-`, "", 1)
 	// Open dynamic client registration counts existing clients then inserts,
 	// with no indexed guard. SQLite serializes writes on one connection;
 	// PostgreSQL must lock the issuer row so concurrent open registrations for
 	// the same issuer cannot each read a stale count and overrun the limit.
-	code = strings.Replace(code, `		if value.Source == credbound.OAuthClientDCR && issuer.DCRMode == credbound.OAuthDCROpen {
+	code = mustReplace(code, `		if value.Source == credbound.OAuthClientDCR && issuer.DCRMode == credbound.OAuthDCROpen {
 			records, err := q.OAuthClientJSONsByIssuer(ctx, value.IssuerID)`, `		if value.Source == credbound.OAuthClientDCR && issuer.DCRMode == credbound.OAuthDCROpen {
 			if _, err := q.OAuthLockIssuer(ctx, value.IssuerID); err != nil {
 				return mapError(err)
 			}
 			records, err := q.OAuthClientJSONsByIssuer(ctx, value.IssuerID)`, 1)
-	code = strings.ReplaceAll(code, "(? = '' OR created_at", "(NOT ? OR created_at")
-	code = strings.ReplaceAll(code, "(? = '' OR user_id = ?)", "(NOT ? OR user_id = ?)")
-	code = strings.ReplaceAll(code, "(? = '' OR workspace_id = ?)", "(NOT ? OR workspace_id = ?)")
-	code = strings.Replace(code, `[]any{userID, userID, workspaceID, workspaceID}`, `[]any{userID != "", nullableUUID(userID), workspaceID != "", nullableUUID(workspaceID)}`, 1)
-	code = strings.Replace(code, `args = append(args, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)`, `args = append(args, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)`, 1)
+	code = mustReplaceAll(code, "(? = '' OR created_at", "(NOT ? OR created_at")
+	code = mustReplaceAll(code, "(? = '' OR user_id = ?)", "(NOT ? OR user_id = ?)")
+	code = mustReplaceAll(code, "(? = '' OR workspace_id = ?)", "(NOT ? OR workspace_id = ?)")
+	code = mustReplace(code, `[]any{userID, userID, workspaceID, workspaceID}`, `[]any{userID != "", nullableUUID(userID), workspaceID != "", nullableUUID(workspaceID)}`, 1)
+	code = mustReplace(code, `args = append(args, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)`, `args = append(args, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)`, 1)
 	// PostgreSQL objects live in the dedicated `credbound` schema; every raw
 	// SQL table reference is schema-qualified instead of prefix-namespaced.
-	code = strings.ReplaceAll(code, "credbound_", "credbound.")
+	code = mustReplaceAll(code, "credbound_", "credbound.")
 	code = "// Code generated by internal/cmd/genpostgresstore; DO NOT EDIT.\n\n" + code
 	formatted, err := format.Source([]byte(code))
 	if err != nil {
@@ -526,30 +559,20 @@ func generateSCIM() {
 		panic(err)
 	}
 	code := string(raw)
-	code = strings.Replace(code, "package sqlite", "package postgresql", 1)
-	code = strings.Replace(code, `db "github.com/deepteams/credbound/internal/sqlc/sqlite"`, `db "github.com/deepteams/credbound/internal/sqlc/postgresql"`, 1)
-	code = strings.ReplaceAll(code, "row.Enabled == 1", "row.Enabled")
-	code = strings.ReplaceAll(code, "row.TrustDirectoryEmails == 1", "row.TrustDirectoryEmails")
-	code = strings.ReplaceAll(code, "row.Active == 1", "row.Active")
-	code = strings.ReplaceAll(code, "active == 1", "active")
-	code = strings.ReplaceAll(code, "GroupRoleMappingsJson: string(mappings)", "GroupRoleMappingsJson: mappings")
-	code = strings.ReplaceAll(code, "EmailsJson: string(emails)", "EmailsJson: emails")
-	code = strings.ReplaceAll(code, "ProfileJson: string(profile)", "ProfileJson: profile")
-	code = strings.ReplaceAll(code, "MemberIdsJson: string(members)", "MemberIdsJson: members")
-	code = strings.Replace(code, "var id, configurationID, userID, userName, displayName, emails, profile string", "var id, configurationID, userID, userName, displayName string\n\tvar emails, profile []byte", 1)
-	code = strings.Replace(code, "var active int64", "var active bool", 1)
-	code = strings.Replace(code, "var id, configurationID, displayName, members string", "var id, configurationID, displayName string\n\tvar members []byte", 1)
-	code = strings.Replace(code, "func sqlBool(value bool) int64 {\n\tif value {\n\t\treturn 1\n\t}\n\treturn 0\n}", "func sqlBool(value bool) bool { return value }", 1)
-
-	oldGroup := `s.db.QueryContext(streamCtx, ` + "`" + `SELECT id, configuration_id, external_id, display_name, member_ids_json, created_at, updated_at, deleted_at
-FROM credbound_scim_groups
-WHERE configuration_id = ? AND deleted_at IS NULL AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?` + "`" + `, configurationID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)`
-	newGroup := `s.rows.Query(streamCtx, ` + "`" + `SELECT id, configuration_id, external_id, display_name, member_ids_json, created_at, updated_at, deleted_at
-FROM credbound_scim_groups
-WHERE configuration_id = $1 AND deleted_at IS NULL AND (NOT $2 OR created_at < $3 OR (created_at = $4 AND id < $5))
-ORDER BY created_at DESC, id DESC LIMIT $6` + "`" + `, configurationID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)`
-	code = strings.Replace(code, oldGroup, newGroup, 1)
+	code = mustReplace(code, "package sqlite", "package postgresql", 1)
+	code = mustReplace(code, `db "github.com/deepteams/credbound/internal/sqlc/sqlite"`, `db "github.com/deepteams/credbound/internal/sqlc/postgresql"`, 1)
+	code = mustReplaceAll(code, "row.Enabled == 1", "row.Enabled")
+	code = mustReplaceAll(code, "row.TrustDirectoryEmails == 1", "row.TrustDirectoryEmails")
+	code = mustReplaceAll(code, "row.Active == 1", "row.Active")
+	code = mustReplaceAll(code, "active == 1", "active")
+	code = mustReplaceAll(code, "GroupRoleMappingsJson: string(mappings)", "GroupRoleMappingsJson: mappings")
+	code = mustReplaceAll(code, "EmailsJson: string(emails)", "EmailsJson: emails")
+	code = mustReplaceAll(code, "ProfileJson: string(profile)", "ProfileJson: profile")
+	code = mustReplaceAll(code, "MemberIdsJson: string(members)", "MemberIdsJson: members")
+	code = mustReplace(code, "var id, configurationID, userID, userName, displayName, emails, profile string", "var id, configurationID, userID, userName, displayName string\n\tvar emails, profile []byte", 1)
+	code = mustReplace(code, "var active int64", "var active bool", 1)
+	code = mustReplace(code, "var id, configurationID, displayName, members string", "var id, configurationID, displayName string\n\tvar members []byte", 1)
+	code = mustReplace(code, "func sqlBool(value bool) int64 {\n\tif value {\n\t\treturn 1\n\t}\n\treturn 0\n}", "func sqlBool(value bool) bool { return value }", 1)
 
 	start := strings.Index(code, "func sqliteSCIMUserListQuery(")
 	end := strings.Index(code, "func sqlBool(")
@@ -557,13 +580,13 @@ ORDER BY created_at DESC, id DESC LIMIT $6` + "`" + `, configurationID, cursor.I
 		panic("SCIM query helper markers not found")
 	}
 	code = code[:start] + postgresSCIMUserListQuery + code[end:]
-	code = strings.Replace(code, "query, args, err := sqliteSCIMUserListQuery", "query, args, err := postgresSCIMUserListQuery", 1)
-	code = strings.Replace(code, "query, args, err := sqliteSCIMGroupListQuery", "query, args, err := postgresSCIMGroupListQuery", 1)
-	code = strings.Replace(code, "rows, err := s.db.QueryContext(streamCtx, query, args...)", "rows, err := s.rows.Query(streamCtx, query, args...)", 1)
-	code = strings.Replace(code, "rows, err := s.db.QueryContext(streamCtx, query, args...)", "rows, err := s.rows.Query(streamCtx, query, args...)", 1)
+	code = mustReplace(code, "query, args, err := sqliteSCIMUserListQuery", "query, args, err := postgresSCIMUserListQuery", 1)
+	code = mustReplace(code, "query, args, err := sqliteSCIMGroupListQuery", "query, args, err := postgresSCIMGroupListQuery", 1)
+	code = mustReplace(code, "rows, err := s.db.QueryContext(streamCtx, query, args...)", "rows, err := s.rows.Query(streamCtx, query, args...)", 1)
+	code = mustReplace(code, "rows, err := s.db.QueryContext(streamCtx, query, args...)", "rows, err := s.rows.Query(streamCtx, query, args...)", 1)
 	// PostgreSQL objects live in the dedicated `credbound` schema; every raw
 	// SQL table reference is schema-qualified instead of prefix-namespaced.
-	code = strings.ReplaceAll(code, "credbound_", "credbound.")
+	code = mustReplaceAll(code, "credbound_", "credbound.")
 	code = "// Code generated by internal/cmd/genpostgresstore; DO NOT EDIT.\n\n" + code
 	formatted, err := format.Source([]byte(code))
 	if err != nil {
