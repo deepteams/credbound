@@ -66,6 +66,11 @@ func TestSessionStoreLifecycle(t *testing.T) {
 	if err != nil || revoked.RevokedAt == nil || !revoked.RevokedAt.Equal(revokedAt) {
 		t.Fatalf("revoked session = %#v, %v", revoked, err)
 	}
+	// A revoked session refuses the touch, so an authentication racing the
+	// revocation cannot record activity on a dead session.
+	if err := f.store.TouchSession(ctx, session.ID, revokedAt.Add(time.Minute), f.event("session.touch.revoked")); !errors.Is(err, credbound.ErrConflict) {
+		t.Fatalf("revoked touch error = %v", err)
+	}
 	// Re-revoking keeps the first timestamp.
 	if err := f.store.RevokeSession(ctx, session.ID, revokedAt.Add(time.Hour), f.event("session.revoke.repeat")); err != nil {
 		t.Fatal(err)

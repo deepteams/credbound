@@ -332,3 +332,18 @@ func TestKeySeparationLegacyFallback(t *testing.T) {
 		t.Fatal("mismatched digest accepted")
 	}
 }
+
+// TestLegacyContinuationsCarryNoConsumption pins the migration posture:
+// continuations sealed before ceremony ids existed consume nothing and stay
+// bounded by their TTL alone.
+func TestLegacyContinuationsCarryNoConsumption(t *testing.T) {
+	if consumption := (ceremonyContinuation{ID: "x", ExpiresAt: time.Unix(1, 0)}).consumption(); consumption == nil || consumption.ID != "x" {
+		t.Fatalf("ceremony consumption = %#v", consumption)
+	}
+	if consumption := (ceremonyContinuation{}).consumption(); consumption != nil {
+		t.Fatalf("legacy passkey continuation consumption = %#v", consumption)
+	}
+	if consumption := (ssoContinuation{}).consumption(); consumption != nil {
+		t.Fatalf("legacy SSO continuation consumption = %#v", consumption)
+	}
+}
