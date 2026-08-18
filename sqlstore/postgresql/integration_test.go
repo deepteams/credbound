@@ -104,8 +104,20 @@ func TestPostgreSQLMigrationsAndStore(t *testing.T) {
 	assertPostgreSQLSequence(t, store.SCIMGroups(ctx, configurationID, credbound.SCIMFilter{}, page))
 	assertPostgreSQLSequence(t, store.SCIMUsers(ctx, configurationID, credbound.SCIMFilter{Attribute: "id", Value: "not-a-uuid"}, page))
 	assertPostgreSQLSequence(t, store.SCIMGroups(ctx, configurationID, credbound.SCIMFilter{Attribute: "id", Value: "not-a-uuid"}, page))
-	if _, err := database.ExecContext(ctx, `UPDATE credbound_audit_events SET reason = 'tampered' WHERE id = $1`, commit.Audit.ID); err == nil {
-		t.Fatal("append-only audit update unexpectedly succeeded")
+	// The audit trail is append-only: the migration installs BEFORE
+	// UPDATE/DELETE triggers on credbound.audit_events that raise "credbound
+	// audit events are immutable". Requiring that exact message — on the real
+	// table — keeps a typo'd table name (whose error is a relation-not-found)
+	// from passing as immutability.
+	if _, err := database.ExecContext(ctx, `UPDATE credbound.audit_events SET reason = 'tampered' WHERE id = $1`, commit.Audit.ID); err == nil || !strings.Contains(err.Error(), "immutable") {
+		t.Fatalf("append-only audit update = %v, want the immutability trigger error", err)
+	}
+	if _, err := database.ExecContext(ctx, `DELETE FROM credbound.audit_events WHERE id = $1`, commit.Audit.ID); err == nil || !strings.Contains(err.Error(), "immutable") {
+		t.Fatalf("append-only audit delete = %v, want the immutability trigger error", err)
+	}
+	var auditReason string
+	if err := database.QueryRowContext(ctx, `SELECT reason FROM credbound.audit_events WHERE id = $1`, commit.Audit.ID).Scan(&auditReason); err != nil || auditReason == "tampered" {
+		t.Fatalf("audit row after tamper attempts = %q, %v", auditReason, err)
 	}
 
 	second := credbound.User{ID: pgID(8), Email: "second@example.com", DisplayName: "Second", CreatedAt: now, UpdatedAt: now}
