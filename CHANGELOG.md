@@ -9,6 +9,14 @@ breaking changes may land in any release and are called out explicitly.
 
 ### Added
 
+- `Config.SessionTouchInterval` coarsens the write every successful
+  `AuthenticateSession` used to perform (last-seen touch plus audit event)
+  to at most one write per session per interval, without giving up instant
+  revocation: every store-backed check still runs on every call. The
+  explicit trade-offs — last-seen granularity and audit density — replace
+  each host inventing its own result cache, whose window delays
+  revocation.
+
 - The reads an administration interface needs no longer require
   over-granting or going without: `Manager.WorkspaceMembers` streams a
   workspace's memberships joined with each member's display name and

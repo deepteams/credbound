@@ -406,9 +406,15 @@ sign out immediately; it is idempotent on already-revoked sessions. Sessions
 are global, not workspace-scoped: a SCIM deprovisioning suspends the
 membership (denying tenant authorization) without ending them; directory
 offboarding that must end sessions everywhere uses `DisableUser` or
-`RevokeUserSessions`. Every successful `AuthenticateSession` performs one
-write transaction (last-seen touch plus audit); high-traffic hosts may cache
-the result per token for a short, bounded interval.
+`RevokeUserSessions`. By default every successful `AuthenticateSession`
+performs one write transaction (last-seen touch plus audit); high-traffic
+hosts set `Config.SessionTouchInterval` to coarsen that to at most one write
+per session per interval. Revocation, expiry, idle and disabled-user checks
+still run against the store on every call, so — unlike a host-side result
+cache — a revoked session is refused on the very next request; the traded
+costs are last-seen granularity and an audit log recording session activity
+at most once per interval per session. The interval must stay shorter than
+`Config.SessionIdleTimeout` when both are set.
 
 Workspace domains require a `DomainStore`-capable store. `CreateWorkspaceDomain`
 returns a DNS challenge value; the host proves control of the domain (for

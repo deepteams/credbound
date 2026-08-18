@@ -140,6 +140,21 @@ type Config struct {
 	// successful AuthenticateSession refreshes last-seen, so the window slides
 	// with activity.
 	SessionIdleTimeout time.Duration
+	// SessionTouchInterval coarsens the write AuthenticateSession performs:
+	// a successful validation whose session was already touched within the
+	// interval skips the last-seen refresh and its audit event, turning the
+	// per-request write transaction into at most one write per session per
+	// interval. Revocation, expiry, idle and disabled-user checks still run
+	// against the store on every call, so — unlike a host-side result cache —
+	// a revoked session is refused on the very next request; the explicit
+	// trade-offs are last-seen granularity, an audit log that records session
+	// activity at most once per interval per session, and a revocation racing
+	// one in-flight validation no longer being caught by the touch's
+	// conflict check. Zero keeps the per-request write. When
+	// SessionIdleTimeout is set, the interval must be shorter than it, or a
+	// continuously active session could idle-expire; New rejects the
+	// combination.
+	SessionTouchInterval time.Duration
 	// EmailIssuanceCooldown is the minimum interval between two token-issuing
 	// emails to the same address for the same purpose (password reset,
 	// magic-link, email OTP, verification resend). Within the window the flow
@@ -239,6 +254,7 @@ type Manager struct {
 	domainClaimTTL        time.Duration
 	sessionTTL            time.Duration
 	sessionIdleTimeout    time.Duration
+	sessionTouchInterval  time.Duration
 	emailIssuanceCooldown time.Duration
 	ssoProviders          map[string]SSOProvider
 	ssoAssurance          map[string]SSOAssurancePolicy
@@ -307,6 +323,12 @@ func New(cfg Config) (*Manager, error) {
 	}
 	if cfg.SessionTTL <= 0 {
 		cfg.SessionTTL = 30 * 24 * time.Hour
+	}
+	if cfg.SessionTouchInterval < 0 {
+		return nil, fmt.Errorf("%w: session touch interval cannot be negative", ErrInvalidInput)
+	}
+	if cfg.SessionTouchInterval > 0 && cfg.SessionIdleTimeout > 0 && cfg.SessionTouchInterval >= cfg.SessionIdleTimeout {
+		return nil, fmt.Errorf("%w: session touch interval must be shorter than the idle timeout, or an active session could idle-expire", ErrInvalidInput)
 	}
 	if cfg.MinPasswordLen == 0 {
 		cfg.MinPasswordLen = 12
@@ -486,6 +508,7 @@ func New(cfg Config) (*Manager, error) {
 		domainClaimTTL:        cfg.DomainClaimTTL,
 		sessionTTL:            cfg.SessionTTL,
 		sessionIdleTimeout:    cfg.SessionIdleTimeout,
+		sessionTouchInterval:  cfg.SessionTouchInterval,
 		emailIssuanceCooldown: cfg.EmailIssuanceCooldown,
 		ssoProviders:          ssoProviders,
 		ssoAssurance:          ssoAssurance,

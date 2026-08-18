@@ -110,11 +110,14 @@ func (m *Manager) CreateSession(ctx context.Context, actor Authentication, _ Cre
 // no authentication.succeeded (or any other) event; the audit log is the
 // record of session activity.
 //
-// Cost note: every successful validation performs one write transaction (the
-// last-seen touch committed with its audit event). High-traffic hosts should
-// budget for that, and may cache the (Authentication, Session) result for a
-// short, bounded interval per token — accepting that a revocation takes
-// effect at the end of the cache window rather than instantly.
+// Cost note: by default every successful validation performs one write
+// transaction (the last-seen touch committed with its audit event).
+// High-traffic hosts set Config.SessionTouchInterval to coarsen that to at
+// most one write per session per interval — revocation, expiry, idle and
+// disabled-user checks still run against the store on every call, so a
+// revoked session is refused on the very next request, unlike with a
+// host-side result cache. Within the interval the session's LastSeenAt is
+// returned as last persisted.
 func (m *Manager) AuthenticateSession(ctx context.Context, raw string) (_ Authentication, _ Session, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.session.authenticate", started, err) }()
@@ -173,6 +176,18 @@ func (m *Manager) AuthenticateSession(ctx context.Context, raw string) (_ Authen
 		return Authentication{}, Session{}, ErrInvalidCredentials
 	}
 	now := m.now()
+	authentication := Authentication{
+		UserID: session.UserID, Method: session.Method, Level: session.Level,
+		AuthenticatedAt: session.AuthenticatedAt, SecondFactorRequired: session.SecondFactorRequired,
+	}
+	// Within the configured touch interval the validation stays read-only:
+	// the session was touched recently enough that refreshing last-seen (and
+	// appending its audit event) again would only add write contention. Every
+	// store-backed check above already ran, so revocation remains instant.
+	if m.sessionTouchInterval > 0 && now.Before(session.LastSeenAt.Add(m.sessionTouchInterval)) {
+		session.Digest = nil
+		return authentication, session, nil
+	}
 	event, err := m.newAudit(ctx, session.UserID, "session.authenticate", "session", session.ID, "", AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, Session{}, err
@@ -188,10 +203,6 @@ func (m *Manager) AuthenticateSession(ctx context.Context, raw string) (_ Authen
 	}
 	session.LastSeenAt = now
 	session.Digest = nil
-	authentication := Authentication{
-		UserID: session.UserID, Method: session.Method, Level: session.Level,
-		AuthenticatedAt: session.AuthenticatedAt, SecondFactorRequired: session.SecondFactorRequired,
-	}
 	return authentication, session, nil
 }
 

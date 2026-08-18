@@ -254,6 +254,66 @@ func TestSessionIdleTimeout(t *testing.T) {
 	}
 }
 
+// TestSessionTouchInterval pins the coarsened write contract of
+// Config.SessionTouchInterval: within the interval a successful validation
+// performs no write — last-seen stays as persisted — while a revocation
+// still takes effect on the very next request; past the interval the touch
+// resumes; and a configuration that could defeat the idle timeout, or a
+// negative interval, is refused at construction.
+func TestSessionTouchInterval(t *testing.T) {
+	f := newFixture(t)
+	authn, _ := f.bootstrap(t)
+	ctx := context.Background()
+	manager, err := credbound.New(credbound.Config{
+		Store: f.store, Passwords: f.passwords, TOTP: fakeTOTP{}, Passkeys: &fakePasskeys{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		Clock: func() time.Time { return f.now }, Random: &counterReader{next: 0x71},
+		SessionTouchInterval: 5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued, err := manager.CreateSession(ctx, credbound.Authentication{UserID: authn.UserID, Method: credbound.MethodPassword, Level: credbound.AAL1, AuthenticatedAt: f.now}, credbound.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := issued.Session.LastSeenAt
+	f.now = f.now.Add(2 * time.Minute)
+	if _, session, err := manager.AuthenticateSession(ctx, issued.Token); err != nil || !session.LastSeenAt.Equal(created) {
+		t.Fatalf("validation within the interval must stay read-only: %#v, %v", session, err)
+	}
+	f.now = f.now.Add(4 * time.Minute)
+	if _, session, err := manager.AuthenticateSession(ctx, issued.Token); err != nil || !session.LastSeenAt.Equal(f.now) {
+		t.Fatalf("validation past the interval must touch last-seen: %#v, %v", session, err)
+	}
+	// Revocation is checked against the store on every call, so it bites on
+	// the next request even inside the interval window.
+	if err := manager.SignOut(ctx, issued.Token); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(time.Minute)
+	if _, _, err := manager.AuthenticateSession(ctx, issued.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("revoked session within the interval = %v", err)
+	}
+
+	for name, mutate := range map[string]func(*credbound.Config){
+		"negative interval": func(c *credbound.Config) { c.SessionTouchInterval = -time.Second },
+		"interval not below idle window": func(c *credbound.Config) {
+			c.SessionIdleTimeout = 15 * time.Minute
+			c.SessionTouchInterval = 15 * time.Minute
+		},
+	} {
+		config := credbound.Config{
+			Store: f.store, Passwords: f.passwords, TOTP: fakeTOTP{}, Passkeys: &fakePasskeys{},
+			SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		}
+		mutate(&config)
+		if _, err := credbound.New(config); !errors.Is(err, credbound.ErrInvalidInput) {
+			t.Fatalf("%s: New = %v", name, err)
+		}
+	}
+}
+
 func TestCreateSessionAuthorization(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
