@@ -1509,7 +1509,10 @@ func (s *Store) SessionByID(ctx context.Context, id string) (credbound.Session, 
 	return cloneSession(session), nil
 }
 
-// TouchSession updates the session's and user's last-seen times.
+// TouchSession updates the session's and user's last-seen times. A session
+// already revoked reports credbound.ErrConflict, so an authentication racing
+// a revocation can neither record activity on nor extend the idle window of
+// a dead session.
 func (s *Store) TouchSession(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1519,6 +1522,9 @@ func (s *Store) TouchSession(ctx context.Context, id string, at time.Time, commi
 	session, ok := s.sessions[id]
 	if !ok {
 		return credbound.ErrNotFound
+	}
+	if session.RevokedAt != nil {
+		return credbound.ErrConflict
 	}
 	previous, err := s.prepareCommitLocked(commit)
 	if err != nil {

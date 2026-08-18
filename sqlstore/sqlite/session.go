@@ -35,7 +35,10 @@ func (s *Store) SessionByID(ctx context.Context, id string) (credbound.Session, 
 	return sessionFromRow(row), nil
 }
 
-// TouchSession updates the session's and user's last-seen times.
+// TouchSession updates the session's and user's last-seen times. A session
+// already revoked reports credbound.ErrConflict, so an authentication racing
+// a revocation can neither record activity on nor extend the idle window of
+// a dead session.
 func (s *Store) TouchSession(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		session, err := q.GetSession(ctx, id)
@@ -43,8 +46,13 @@ func (s *Store) TouchSession(ctx context.Context, id string, at time.Time, commi
 			return mapError(err)
 		}
 		count, err := q.TouchSession(ctx, db.TouchSessionParams{ID: id, LastSeenAt: at})
-		if err := affected(count, err); err != nil {
-			return err
+		if err != nil {
+			return mapError(err)
+		}
+		// The session exists, so zero affected rows means a concurrent
+		// revocation won the race.
+		if count == 0 {
+			return credbound.ErrConflict
 		}
 		count, err = q.TouchUserLastSeen(ctx, db.TouchUserLastSeenParams{ID: session.UserID, LastSeenAt: nullableTime(&at)})
 		return affected(count, err)

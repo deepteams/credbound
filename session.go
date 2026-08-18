@@ -161,6 +161,12 @@ func (m *Manager) AuthenticateSession(ctx context.Context, raw string) (_ Authen
 		return Authentication{}, Session{}, err
 	}
 	if err := m.sessionStore.TouchSession(ctx, session.ID, now, Commit{Audit: event}); err != nil {
+		if errors.Is(err, ErrConflict) {
+			// A concurrent revocation won the race between validation and
+			// the touch: the session is dead and answers like any invalid
+			// credential instead of authenticating one last time.
+			return Authentication{}, Session{}, ErrInvalidCredentials
+		}
 		return Authentication{}, Session{}, m.mapStoreError(ctx, "auth.session.authenticate", err)
 	}
 	session.LastSeenAt = now

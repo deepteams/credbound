@@ -202,7 +202,10 @@ type SignupStore interface {
 type SessionStore interface {
 	CreateSession(ctx context.Context, session Session, commit Commit) error
 	SessionByID(ctx context.Context, id string) (Session, error)
-	// TouchSession updates the session's last-seen timestamp (and the user's
+	// TouchSession refuses a session already revoked with ErrConflict, so an
+	// authentication racing a revocation can neither record activity on nor
+	// extend the idle window of a dead session; otherwise it
+	// updates the session's last-seen timestamp (and the user's
 	// last_seen_at) in the same transaction as its audit event.
 	TouchSession(ctx context.Context, id string, at time.Time, commit Commit) error
 	RevokeSession(ctx context.Context, id string, at time.Time, commit Commit) error

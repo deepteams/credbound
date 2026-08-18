@@ -324,7 +324,7 @@ SELECT id, user_id, method, level, authenticated_at, second_factor_required, use
 FROM credbound.sessions WHERE id = $1;
 
 -- name: TouchSession :execrows
-UPDATE credbound.sessions SET last_seen_at = $2 WHERE id = $1;
+UPDATE credbound.sessions SET last_seen_at = $2 WHERE id = $1 AND revoked_at IS NULL;
 
 -- name: RevokeSessionByID :execrows
 UPDATE credbound.sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL;

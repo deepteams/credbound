@@ -3068,7 +3068,7 @@ func (q *Queries) TouchSSOIdentity(ctx context.Context, arg TouchSSOIdentityPara
 }
 
 const touchSession = `-- name: TouchSession :execrows
-UPDATE credbound_sessions SET last_seen_at = ?2 WHERE id = ?1
+UPDATE credbound_sessions SET last_seen_at = ?2 WHERE id = ?1 AND revoked_at IS NULL
 `
 
 type TouchSessionParams struct {
