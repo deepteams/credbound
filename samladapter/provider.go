@@ -114,6 +114,15 @@ type Config struct {
 	// therefore cannot key a durable credbound SSO identity; enable it only
 	// for IdPs that mislabel stable identifiers as transient.
 	AllowTransientNameID bool
+	// TrustAssertedEmail forwards the asserted email attribute to credbound as
+	// verified. Off by default: SAML carries no email_verified equivalent, so
+	// an IdP that lets a subject influence its outbound attributes (self-service
+	// profiles, loosely-mapped directories, guest accounts) could otherwise
+	// assert someone else's address and drive JIT provisioning to squat it.
+	// Enable it only for an IdP whose email attribute is authoritative for the
+	// subject. When off, the email is dropped and credbound keys the identity
+	// on issuer and subject alone.
+	TrustAssertedEmail bool
 	// HTTPClient is used only for the one-shot MetadataURL fetch. Defaults
 	// to a client with a 10-second timeout; a supplied client without a
 	// timeout is shallow-copied and given the default.
@@ -138,6 +147,7 @@ type Provider struct {
 	certificate     *x509.Certificate
 	signatureMethod string
 	allowTransient  bool
+	trustEmail      bool
 	metadataURL     string
 	client          *http.Client
 	now             func() time.Time
@@ -199,6 +209,7 @@ func New(config Config) (*Provider, error) {
 		certificate:     config.Certificate,
 		signatureMethod: signatureMethod,
 		allowTransient:  config.AllowTransientNameID,
+		trustEmail:      config.TrustAssertedEmail,
 		client:          httpClient(config.HTTPClient),
 		now:             clock,
 	}
@@ -354,14 +365,17 @@ func (p *Provider) claims(assertion *saml.Assertion, requestID string) (credboun
 		return credbound.SSOClaims{}, errors.New("samladapter: issuer or subject is empty or exceeds 500 characters")
 	}
 	claims := credbound.SSOClaims{Issuer: issuer, Subject: subject}
-	// SAML attributes are asserted by the IdP itself (typically from its
-	// directory) under the same signature as the subject, so a present,
-	// well-formed email is forwarded as verified. A malformed or oversized
-	// value is dropped rather than failing the ceremony, because credbound
-	// keys SSO identities on issuer and subject, never on email.
-	if email := emailAttribute(assertion); email != "" && len(email) <= maxEmailLength {
-		if parsed, err := mail.ParseAddress(email); err == nil && parsed.Address == email {
-			claims.Email, claims.EmailVerified = email, true
+	// SAML carries no email_verified equivalent, so a signed email attribute
+	// proves only that the IdP emitted it, not that the subject owns it. The
+	// email is forwarded as verified solely when the host opted in with
+	// TrustAssertedEmail for an IdP whose email attribute is authoritative;
+	// otherwise it is dropped and credbound keys the identity on issuer and
+	// subject alone. A malformed or oversized value is dropped either way.
+	if p.trustEmail {
+		if email := emailAttribute(assertion); email != "" && len(email) <= maxEmailLength {
+			if parsed, err := mail.ParseAddress(email); err == nil && parsed.Address == email {
+				claims.Email, claims.EmailVerified = email, true
+			}
 		}
 	}
 	// The asserted AuthnContextClassRef is forwarded, bounded, so the

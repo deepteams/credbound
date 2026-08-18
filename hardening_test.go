@@ -264,6 +264,42 @@ func TestTOTPLockout(t *testing.T) {
 	}
 }
 
+// TestPasswordSuccessDoesNotResetSecondFactorLockout proves the online-guessing
+// defense for the second factor: a correct password, while a second factor is
+// still pending, must not clear the lockout counter accumulated by TOTP
+// failures — otherwise an attacker holding the password could reset the budget
+// between guesses indefinitely.
+func TestPasswordSuccessDoesNotResetSecondFactorLockout(t *testing.T) {
+	f := newLockoutFixture(t, 3, 15*time.Minute)
+	authn := f.bootstrap(t)
+	ctx := context.Background()
+	if _, err := f.manager.BeginTOTPEnrollment(ctx, authn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.ConfirmTOTPEnrollment(ctx, authn, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	// Two wrong codes: counter at 2 of 3, not yet locked.
+	for range 2 {
+		if _, err := f.manager.VerifyTOTP(ctx, authn, "000000"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+			t.Fatalf("TOTP failure error = %v", err)
+		}
+	}
+	// A correct password mid-2FA must not reset the counter.
+	pending, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery")
+	if err != nil || !pending.SecondFactorRequired {
+		t.Fatalf("password re-auth = %#v, %v", pending, err)
+	}
+	// The third wrong code therefore locks the account; had the password
+	// cleared the counter this would still be attempt one of three.
+	if _, err := f.manager.VerifyTOTP(ctx, authn, "000000"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("third TOTP failure error = %v", err)
+	}
+	if _, err := f.manager.VerifyTOTP(ctx, authn, "123456"); !errors.Is(err, credbound.ErrLocked) {
+		t.Fatalf("account not locked after counter carried over: %v", err)
+	}
+}
+
 func TestLockoutDisabled(t *testing.T) {
 	f := newLockoutFixture(t, -1, 0)
 	f.bootstrap(t)

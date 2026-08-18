@@ -258,9 +258,28 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 	if factorErr != nil && !errors.Is(factorErr, ErrNotFound) {
 		return Authentication{}, factorErr
 	}
-	audit, auditErr := m.recordAuthenticationAudit(ctx, user.ID, "auth.password", AuditSucceeded, "")
-	if auditErr != nil {
-		return Authentication{}, auditErr
+	// A password success completes the authentication only when no second
+	// factor is pending. While one is, the audit is appended but the lockout
+	// and last_seen are left untouched: the completing factor (VerifyTOTP)
+	// clears them atomically on success. Clearing them here would let a
+	// correct password reset the lockout counter between TOTP guesses,
+	// nullifying the online-guessing defense for the second factor.
+	var audit AuditEvent
+	if requiresSecondFactor {
+		event, eventErr := m.newAudit(ctx, user.ID, "auth.password", "user", user.ID, "", AuditSucceeded, "")
+		if eventErr != nil {
+			return Authentication{}, eventErr
+		}
+		if appendErr := m.store.AppendAudit(ctx, Commit{Audit: event}); appendErr != nil {
+			return Authentication{}, m.mapStoreError(ctx, "auth.password", appendErr)
+		}
+		audit = event
+	} else {
+		recorded, auditErr := m.recordAuthenticationAudit(ctx, user.ID, "auth.password", AuditSucceeded, "")
+		if auditErr != nil {
+			return Authentication{}, auditErr
+		}
+		audit = recorded
 	}
 	authentication := Authentication{
 		UserID:               user.ID,

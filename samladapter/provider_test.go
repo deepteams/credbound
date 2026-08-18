@@ -127,7 +127,7 @@ func TestBeginSignsRedirectWithSPKey(t *testing.T) {
 
 func TestFinishHappyPath(t *testing.T) {
 	idp := newTestIdP(t)
-	provider := newTestProvider(t, idp, nil)
+	provider := newTestProvider(t, idp, func(c *Config) { c.TrustAssertedEmail = true })
 	challenge, _ := begin(t, provider, false)
 	s := defaultSession()
 	s.UserEmail = "user@example.com"
@@ -282,7 +282,7 @@ func TestFinishNameIDFormatPolicy(t *testing.T) {
 
 func TestFinishEmailExtraction(t *testing.T) {
 	idp := newTestIdP(t)
-	provider := newTestProvider(t, idp, nil)
+	provider := newTestProvider(t, idp, func(c *Config) { c.TrustAssertedEmail = true })
 
 	finish := func(t *testing.T, mutate func(*saml.Session)) credbound.SSOClaims {
 		t.Helper()
@@ -351,6 +351,29 @@ func TestFinishEmailExtraction(t *testing.T) {
 			t.Fatalf("claims = %+v", claims)
 		}
 	})
+}
+
+// TestFinishDropsUntrustedEmail is the secure default: without TrustAssertedEmail
+// a signed email attribute is not forwarded, so a permissive IdP cannot assert
+// someone else's address to drive JIT squatting; issuer and subject survive.
+func TestFinishDropsUntrustedEmail(t *testing.T) {
+	idp := newTestIdP(t)
+	provider := newTestProvider(t, idp, nil)
+	challenge, _ := begin(t, provider, false)
+	s := defaultSession()
+	s.UserEmail = "victim@example.com"
+	response := idp.respond(challenge.RedirectURL, s, nil)
+
+	claims, err := provider.Finish(context.Background(), challenge.Session, []byte(response))
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	if claims.Email != "" || claims.EmailVerified {
+		t.Fatalf("untrusted email must be dropped, got %+v", claims)
+	}
+	if claims.Subject != "user-123" {
+		t.Fatalf("subject must survive a dropped email, got %q", claims.Subject)
+	}
 }
 
 func TestFinishRejectsMultipleAssertions(t *testing.T) {
