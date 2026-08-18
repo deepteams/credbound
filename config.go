@@ -116,10 +116,14 @@ type Config struct {
 	// SSOProviders registers the identity providers the host enables. Each
 	// must expose a unique UUIDv7 configuration ID and a known kind.
 	SSOProviders []SSOProvider
-	// SSOAssurance optionally constrains, per provider configuration ID,
-	// the authentication context a provider must assert before FinishSSO
-	// grants AAL2; see SSOAssurancePolicy. Every key must name a
-	// registered provider and every policy must require something.
+	// SSOAssurance sets, per provider configuration ID, the authentication
+	// context a provider must assert before FinishSSO grants AAL2; see
+	// SSOAssurancePolicy. A provider with no entry here grants only AAL1 —
+	// SSO never mints AAL2 on the IdP's unverified word — so a provider whose
+	// sign-ins must satisfy a RequireMFA workspace or a step-up needs a
+	// policy (use TrustUnverified to trust an IdP that asserts no ACR or
+	// AMR). Every key must name a registered provider and every policy must
+	// require something.
 	SSOAssurance map[string]SSOAssurancePolicy
 	// TransactionHooks run inside every mutation's store transaction, after
 	// the mutation and before the audit write. A hook error aborts the
@@ -306,7 +310,7 @@ func New(cfg Config) (*Manager, error) {
 			return nil, fmt.Errorf("%w: SSO assurance policy for unregistered provider configuration", ErrInvalidInput)
 		}
 		if policy.empty() {
-			return nil, fmt.Errorf("%w: an SSO assurance policy must require an ACR or AMR", ErrInvalidInput)
+			return nil, fmt.Errorf("%w: an SSO assurance policy must require an ACR or AMR, or set TrustUnverified", ErrInvalidInput)
 		}
 	}
 	dummyHash, err := cfg.Passwords.Hash("credbound-dummy-password")

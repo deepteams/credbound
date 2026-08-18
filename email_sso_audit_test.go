@@ -504,3 +504,50 @@ func TestSSOAssurancePolicy(t *testing.T) {
 		t.Fatalf("empty policy error = %v", err)
 	}
 }
+
+// TestSSOAAL1WithoutAssurance locks the fail-safe default: a provider with no
+// assurance policy authenticates at AAL1, never AAL2, so an unverified IdP
+// cannot satisfy a RequireMFA workspace or a step-up on its own word.
+func TestSSOAAL1WithoutAssurance(t *testing.T) {
+	provider := &fakeSSOProvider{
+		configurationID: "0198b463-0000-7000-8000-0000000000dd", kind: credbound.SSOProviderOIDC,
+		claims: credbound.SSOClaims{Issuer: "https://idp.example.com", Subject: "subject-3", Email: "root@example.com", EmailVerified: true},
+	}
+	store := memory.New()
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	manager, err := credbound.New(credbound.Config{
+		Store: store, Passwords: &fakePasswords{}, TOTP: fakeTOTP{}, Passkeys: &fakePasskeys{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		Clock: func() time.Time { return now }, Random: &counterReader{next: 0x62},
+		StepUpMaxAge: 10 * time.Minute, CeremonyTTL: 5 * time.Minute,
+		SSOProviders: []credbound.SSOProvider{provider},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	authn, _, err := manager.Bootstrap(ctx, credbound.BootstrapInput{
+		Email: "root@example.com", DisplayName: "Root", Password: "correct horse battery", WorkspaceName: "Main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	link, err := manager.BeginSSOLink(ctx, authn, provider.configurationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	linked, err := manager.FinishSSO(ctx, link.Continuation, []byte("valid"))
+	if err != nil || linked.Level != credbound.AAL1 {
+		t.Fatalf("unverified SSO link level = %#v, %v", linked, err)
+	}
+
+	login, err := manager.BeginSSO(ctx, provider.configurationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signedIn, err := manager.FinishSSO(ctx, login.Continuation, []byte("valid"))
+	if err != nil || signedIn.Level != credbound.AAL1 {
+		t.Fatalf("unverified SSO sign-in level = %#v, %v", signedIn, err)
+	}
+}

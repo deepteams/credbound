@@ -31,12 +31,21 @@ func newFixture(t *testing.T, ssoProviders ...credbound.SSOProvider) *fixture {
 		store: memory.New(), now: time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC),
 		passwords: &fakePasswords{}, passkeys: &fakePasskeys{},
 	}
+	// SSO grants AAL2 only for providers the host trusts through an assurance
+	// policy; the fixture trusts every provider it registers so link/JIT/
+	// step-up paths keep exercising AAL2. TestSSOAAL1WithoutAssurance covers
+	// the fail-safe default separately.
+	assurance := make(map[string]credbound.SSOAssurancePolicy, len(ssoProviders))
+	for _, provider := range ssoProviders {
+		assurance[provider.ConfigurationID()] = credbound.SSOAssurancePolicy{TrustUnverified: true}
+	}
 	manager, err := credbound.New(credbound.Config{
 		Store: f.store, Passwords: f.passwords, TOTP: fakeTOTP{}, Passkeys: f.passkeys,
 		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
 		Clock: func() time.Time { return f.now }, Random: &counterReader{next: 0x42},
 		StepUpMaxAge: 10 * time.Minute, CeremonyTTL: 5 * time.Minute,
 		SSOProviders:     ssoProviders,
+		SSOAssurance:     assurance,
 		TransactionHooks: []credbound.TransactionHook{credbound.UnimplementedTransactionHook{}},
 		EventListeners:   []credbound.EventListener{credbound.UnimplementedEventListener{}},
 	})

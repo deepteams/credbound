@@ -107,8 +107,11 @@ func (m *Manager) beginSSO(ctx context.Context, actor Authentication, providerCo
 }
 
 // FinishSSO completes any SSO ceremony (sign-in, link or step-up) by
-// validating the provider response against the sealed continuation, and
-// returns an AAL2 interactive authentication. Link ceremonies persist the
+// validating the provider response against the sealed continuation. The
+// authentication is AAL2 only when the provider carries a Config.SSOAssurance
+// policy the asserted context satisfies (or that trusts the provider
+// unverified); otherwise it is AAL1, because SSO never mints AAL2 on the
+// IdP's unverified word. Link ceremonies persist the
 // new identity atomically with the audit event; sign-in and step-up resolve
 // the stable issuer/subject pair and update its last use. Failed or
 // mismatched ceremonies return ErrInvalidCredentials, stale continuations
@@ -147,19 +150,25 @@ func (m *Manager) FinishSSO(ctx context.Context, continuation string, response [
 	if claims.Issuer == "" || claims.Subject == "" || len(claims.Issuer) > 500 || len(claims.Subject) > 500 {
 		return Authentication{}, ErrInvalidCredentials
 	}
-	if policy, constrained := m.ssoAssurance[state.ProviderConfigurationID]; constrained && !policy.satisfiedBy(claims) {
-		// The IdP authenticated the user without the assurance the host
-		// requires: AAL2 is verified here, never taken on the provider's
-		// word. ErrStepUpRequired lets the host send the user back to the
-		// IdP for its second factor.
-		if state.UserID != "" {
-			audit, auditErr := m.recordAuthenticationAudit(ctx, state.UserID, "auth.sso", AuditFailed, "assurance_policy")
-			if auditErr != nil {
-				return Authentication{}, auditErr
+	// A registered assurance policy is the only thing that lifts an SSO
+	// sign-in to AAL2: without one the provider's word is unverified and the
+	// authentication stays AAL1, so it can neither satisfy a RequireMFA
+	// workspace nor a step-up. A policy that is present but unsatisfied fails
+	// closed with ErrStepUpRequired so the host can send the user back to the
+	// IdP for its second factor.
+	level := AAL1
+	if policy, constrained := m.ssoAssurance[state.ProviderConfigurationID]; constrained {
+		if !policy.satisfiedBy(claims) {
+			if state.UserID != "" {
+				audit, auditErr := m.recordAuthenticationAudit(ctx, state.UserID, "auth.sso", AuditFailed, "assurance_policy")
+				if auditErr != nil {
+					return Authentication{}, auditErr
+				}
+				m.emitAuthenticationFailed(ctx, "auth.sso.finish", audit, MethodSSO, state.UserID, "assurance_policy")
 			}
-			m.emitAuthenticationFailed(ctx, "auth.sso.finish", audit, MethodSSO, state.UserID, "assurance_policy")
+			return Authentication{}, ErrStepUpRequired
 		}
-		return Authentication{}, ErrStepUpRequired
+		level = AAL2
 	}
 	if claims.Email != "" {
 		normalizedEmail, emailErr := validEmail(claims.Email)
@@ -169,7 +178,7 @@ func (m *Manager) FinishSSO(ctx context.Context, continuation string, response [
 		claims.Email = normalizedEmail
 	}
 	if state.Operation == ssoLink {
-		return m.finishSSOLink(ctx, provider, state, claims)
+		return m.finishSSOLink(ctx, provider, state, claims, level)
 	}
 	identity, lookupErr := m.store.SSOIdentity(ctx, state.ProviderConfigurationID, claims.Issuer, claims.Subject)
 	if lookupErr != nil {
@@ -180,7 +189,7 @@ func (m *Manager) FinishSSO(ctx context.Context, continuation string, response [
 		// just in time by a confirmed auto-join domain. Step-up ceremonies
 		// must resolve to an already linked identity and keep failing here.
 		if state.Operation == ssoLogin {
-			return m.finishSSOJIT(ctx, provider, state, claims)
+			return m.finishSSOJIT(ctx, provider, state, claims, level)
 		}
 		return Authentication{}, ErrInvalidCredentials
 	}
@@ -204,7 +213,7 @@ func (m *Manager) FinishSSO(ctx context.Context, continuation string, response [
 		}
 		return Authentication{}, m.mapStoreError(ctx, "auth.sso.finish", err)
 	}
-	authentication := Authentication{UserID: user.ID, Method: MethodSSO, Level: AAL2, AuthenticatedAt: now}
+	authentication := Authentication{UserID: user.ID, Method: MethodSSO, Level: level, AuthenticatedAt: now}
 	if meta, metaErr := m.newEventMeta(EventSSOAuthenticated, "auth.sso.finish", user.ID, "", event); metaErr == nil {
 		authenticated := SSOAuthenticatedEvent{EventMeta: meta, IdentityID: identity.ID, Authentication: authentication}
 		m.events.emit(ctx, EventSSOAuthenticated, func(listener EventListener) error { return listener.OnSSOAuthenticated(ctx, authenticated) })
@@ -226,7 +235,7 @@ func (m *Manager) FinishSSO(ctx context.Context, continuation string, response [
 // audit as a normal SSO login. Any account already owning the address — the
 // SSO-002 no-auto-link rule — and every other refusal reproduce today's
 // unknown-identity failure verbatim: ErrInvalidCredentials.
-func (m *Manager) finishSSOJIT(ctx context.Context, provider SSOProvider, state ssoContinuation, claims SSOClaims) (Authentication, error) {
+func (m *Manager) finishSSOJIT(ctx context.Context, provider SSOProvider, state ssoContinuation, claims SSOClaims, level AssuranceLevel) (Authentication, error) {
 	if m.domainStore == nil || !claims.EmailVerified || claims.Email == "" {
 		return Authentication{}, ErrInvalidCredentials
 	}
@@ -334,12 +343,12 @@ func (m *Manager) finishSSOJIT(ctx context.Context, provider SSOProvider, state 
 	m.events.emit(ctx, EventSSOLinked, func(listener EventListener) error { return listener.OnSSOLinked(ctx, linkedEvent) })
 	jitEvent := SSOJITProvisionedEvent{EventMeta: jitMeta, User: user, Email: primaryEmail, Membership: membership, Identity: identity, DomainID: domain.ID}
 	m.events.emit(ctx, EventSSOJITProvisioned, func(listener EventListener) error { return listener.OnSSOJITProvisioned(ctx, jitEvent) })
-	authentication := Authentication{UserID: userID, Method: MethodSSO, Level: AAL2, AuthenticatedAt: now}
+	authentication := Authentication{UserID: userID, Method: MethodSSO, Level: level, AuthenticatedAt: now}
 	m.emitAuthenticationSucceeded(ctx, "auth.sso.finish", event, authentication)
 	return authentication, nil
 }
 
-func (m *Manager) finishSSOLink(ctx context.Context, provider SSOProvider, state ssoContinuation, claims SSOClaims) (Authentication, error) {
+func (m *Manager) finishSSOLink(ctx context.Context, provider SSOProvider, state ssoContinuation, claims SSOClaims, level AssuranceLevel) (Authentication, error) {
 	id, err := m.newID()
 	if err != nil {
 		return Authentication{}, err
@@ -368,7 +377,7 @@ func (m *Manager) finishSSOLink(ctx context.Context, provider SSOProvider, state
 	}
 	linked := SSOLinkedEvent{EventMeta: meta, Identity: identity}
 	m.events.emit(ctx, EventSSOLinked, func(listener EventListener) error { return listener.OnSSOLinked(ctx, linked) })
-	return Authentication{UserID: state.UserID, Method: MethodSSO, Level: AAL2, AuthenticatedAt: now}, nil
+	return Authentication{UserID: state.UserID, Method: MethodSSO, Level: level, AuthenticatedAt: now}, nil
 }
 
 // UnlinkSSO removes one of the actor's linked external identities,

@@ -827,16 +827,27 @@ type SSOClaims struct {
 // asserted ACR to be one of the listed values; RequiredAMR requires every
 // listed method among the asserted AMR values; both together must both
 // hold. Registered per provider configuration in Config.SSOAssurance.
+//
+// A provider without a registered policy grants only AAL1: SSO cannot mint
+// AAL2 on the IdP's unverified word. TrustUnverified is the explicit,
+// auditable opt-out for a provider whose IdP asserts no ACR or AMR yet the
+// host still consciously trusts to have authenticated at AAL2 — it grants
+// AAL2 without inspecting the asserted context, and is the only way a
+// policy may leave both AcceptedACR and RequiredAMR empty.
 type SSOAssurancePolicy struct {
-	AcceptedACR []string
-	RequiredAMR []string
+	AcceptedACR     []string
+	RequiredAMR     []string
+	TrustUnverified bool
 }
 
 func (p SSOAssurancePolicy) empty() bool {
-	return len(p.AcceptedACR) == 0 && len(p.RequiredAMR) == 0
+	return len(p.AcceptedACR) == 0 && len(p.RequiredAMR) == 0 && !p.TrustUnverified
 }
 
 func (p SSOAssurancePolicy) satisfiedBy(claims SSOClaims) bool {
+	if p.TrustUnverified {
+		return true
+	}
 	if len(p.AcceptedACR) > 0 && !stringInList(claims.ACR, p.AcceptedACR) {
 		return false
 	}
