@@ -95,14 +95,12 @@ func (m *Manager) tokenDigest(value string) []byte {
 	return digest(m.digestKey, value)
 }
 
-// matchTokenDigest verifies a stored token digest. Digests written before the
-// key separation were computed under the raw SecretKey, so both keys are
-// accepted; new digests always use the derived key.
+// matchTokenDigest verifies a stored token digest under the HKDF-derived
+// HMAC key in constant time. Digests written under the raw SecretKey before
+// the key separation are no longer accepted: every token digest guards a
+// single-use credential whose TTL expired long before this window closed.
 func (m *Manager) matchTokenDigest(stored []byte, value string) bool {
-	if hmac.Equal(stored, digest(m.digestKey, value)) {
-		return true
-	}
-	return hmac.Equal(stored, digest(m.secretKey, value))
+	return hmac.Equal(stored, digest(m.digestKey, value))
 }
 
 func newGCM(key []byte) (cipher.AEAD, error) {
@@ -132,7 +130,9 @@ func (m *Manager) seal(plaintext []byte) ([]byte, error) {
 func (m *Manager) open(ciphertext []byte) ([]byte, error) {
 	// Data sealed before the key separation used the raw SecretKey; try the
 	// derived key first and fall back so existing TOTP secrets and passkey
-	// credentials keep decrypting.
+	// credentials keep decrypting. Unlike token digests, sealed credentials
+	// live for years, so this acceptance window stays open until v1 ships a
+	// re-seal migration; new data always seals under the derived key.
 	for _, key := range [][]byte{m.sealKey, m.secretKey} {
 		gcm, err := newGCM(key)
 		if err != nil {

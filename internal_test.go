@@ -318,8 +318,8 @@ func TestKeySeparationLegacyFallback(t *testing.T) {
 	if err != nil || string(plaintext) != "pre-separation data" {
 		t.Fatalf("legacy unseal = %q, %v", plaintext, err)
 	}
-	if !current.matchTokenDigest(digest(raw, "token"), "token") {
-		t.Fatal("legacy digest rejected")
+	if current.matchTokenDigest(digest(raw, "token"), "token") {
+		t.Fatal("legacy raw-key digest still accepted after the window closed")
 	}
 	if !current.matchTokenDigest(current.tokenDigest("token"), "token") {
 		t.Fatal("derived digest rejected")
