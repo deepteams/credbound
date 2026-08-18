@@ -319,6 +319,12 @@ FROM credbound_memberships
 WHERE workspace_id = $1 AND (NOT $2 OR created_at < $3 OR (created_at = $4 AND user_id < $5))
 ORDER BY created_at DESC, user_id DESC LIMIT $6`+"`"+`, workspaceID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)`, 1)
 
+	// ClaimEmailIssuance is hand-written raw SQL (sqlc cannot bind the
+	// conditional upsert's WHERE parameter); convert its placeholders and the
+	// upsert keyword to the PostgreSQL dialect.
+	code = strings.Replace(code, "VALUES (?, ?, ?)\nON CONFLICT (address, purpose) DO UPDATE SET last_issued_at = excluded.last_issued_at WHERE credbound_email_issuance.last_issued_at <= ?",
+		"VALUES ($1, $2, $3)\nON CONFLICT (address, purpose) DO UPDATE SET last_issued_at = EXCLUDED.last_issued_at WHERE credbound_email_issuance.last_issued_at <= $4", 1)
+
 	code = strings.Replace(code, `func nullableString(value string) sql.NullString {`, `func nullableUUID(value string) any {
 	if value == "" {
 		return nil

@@ -48,6 +48,12 @@ type CredboundEmailAuthentication struct {
 	UsedAt    sql.NullTime `json:"used_at"`
 }
 
+type CredboundEmailIssuance struct {
+	Address      string    `json:"address"`
+	Purpose      string    `json:"purpose"`
+	LastIssuedAt time.Time `json:"last_issued_at"`
+}
+
 type CredboundInstance struct {
 	Singleton     int64     `json:"singleton"`
 	InitializedAt time.Time `json:"initialized_at"`

@@ -79,6 +79,14 @@ func (m *Manager) ResendEmailVerification(ctx context.Context, address string) (
 	if err := m.domainRequiresSSO(ctx, normalized, "email.verification.resend"); err != nil {
 		return IssuedEmailVerification{}, err
 	}
+	if allowed, err := m.allowEmailIssuance(ctx, normalized, "email.verification.resend"); err != nil {
+		return IssuedEmailVerification{}, err
+	} else if !allowed {
+		if auditErr := m.appendAuthenticationAudit(ctx, "", "email.verification.resend", AuditFailed, "throttled"); auditErr != nil {
+			return IssuedEmailVerification{}, auditErr
+		}
+		return IssuedEmailVerification{}, nil
+	}
 	email, lookupErr := m.store.EmailByAddress(ctx, normalized)
 	// Derive a fresh identifier and secret before deciding the outcome so an
 	// unknown or already-verified address performs the same work as a pending
@@ -277,6 +285,19 @@ func (m *Manager) Emails(ctx context.Context, actor Authentication, userID strin
 		return errorSeq[PageEvent[EmailAddress]](err)
 	}
 	return m.store.Emails(ctx, userID, page)
+}
+
+// allowEmailIssuance enforces the per-address issuance cooldown. It returns
+// true when issuance is permitted — always so when the cooldown is disabled or
+// the store lacks the capability — and false when the address is still within
+// its cooldown window for that purpose. It is keyed by address alone, so it
+// never distinguishes existing from unknown accounts.
+func (m *Manager) allowEmailIssuance(ctx context.Context, address, purpose string) (bool, error) {
+	if m.emailIssuanceCooldown <= 0 || m.emailThrottle == nil {
+		return true, nil
+	}
+	now := m.now()
+	return m.emailThrottle.ClaimEmailIssuance(ctx, address, purpose, now, now.Add(-m.emailIssuanceCooldown))
 }
 
 func parseEmailVerification(raw string) (string, bool) {

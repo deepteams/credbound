@@ -192,6 +192,20 @@ type SessionStore interface {
 	Sessions(ctx context.Context, userID string, page PageRequest) iter.Seq2[PageEvent[Session], error]
 }
 
+// EmailThrottleStore is an optional persistence capability that backs the
+// per-address cooldown on unauthenticated email-issuing flows (BeginPasswordReset,
+// BeginEmailAuthentication, BeginEmailOTP, ResendEmailVerification). Without it,
+// or with Config.EmailIssuanceCooldown left at zero, those flows are not
+// throttled and the host is responsible for its own rate limiting.
+type EmailThrottleStore interface {
+	// ClaimEmailIssuance atomically records an issuance for (address, purpose)
+	// at time `at` and reports whether it was allowed: it claims only when no
+	// prior issuance for that pair is newer than notBefore. It is keyed by
+	// address regardless of account existence, so it opens no enumeration
+	// oracle, and it needs no audit commit — it is rate-limit bookkeeping.
+	ClaimEmailIssuance(ctx context.Context, address, purpose string, at, notBefore time.Time) (bool, error)
+}
+
 // DomainStore is an optional persistence capability required by the
 // workspace-domain operations (CreateWorkspaceDomain, ConfirmWorkspaceDomain,
 // UpdateWorkspaceDomainPolicy, RemoveWorkspaceDomain, WorkspaceDomains), by

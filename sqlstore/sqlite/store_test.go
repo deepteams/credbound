@@ -802,3 +802,30 @@ func TestLifecycleStoreStreamFailures(t *testing.T) {
 		}
 	}
 }
+
+func TestClaimEmailIssuance(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	base := f.now
+	// First claim for a pair succeeds.
+	ok, err := f.store.ClaimEmailIssuance(ctx, "user@example.com", "password.reset", base, base.Add(-time.Minute))
+	if err != nil || !ok {
+		t.Fatalf("first claim = %v, %v", ok, err)
+	}
+	// A second claim within the cooldown window is refused.
+	ok, err = f.store.ClaimEmailIssuance(ctx, "user@example.com", "password.reset", base.Add(10*time.Second), base.Add(10*time.Second).Add(-time.Minute))
+	if err != nil || ok {
+		t.Fatalf("throttled claim = %v, %v", ok, err)
+	}
+	// A different purpose is tracked independently.
+	ok, err = f.store.ClaimEmailIssuance(ctx, "user@example.com", "email_otp", base, base.Add(-time.Minute))
+	if err != nil || !ok {
+		t.Fatalf("independent-purpose claim = %v, %v", ok, err)
+	}
+	// After the cooldown elapses, the pair can claim again.
+	later := base.Add(2 * time.Minute)
+	ok, err = f.store.ClaimEmailIssuance(ctx, "user@example.com", "password.reset", later, later.Add(-time.Minute))
+	if err != nil || !ok {
+		t.Fatalf("post-cooldown claim = %v, %v", ok, err)
+	}
+}

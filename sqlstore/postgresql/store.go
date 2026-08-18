@@ -365,6 +365,25 @@ func (s *Store) LoginThrottleByUserID(ctx context.Context, userID string) (credb
 	}, nil
 }
 
+// ClaimEmailIssuance atomically records an email issuance for (address,
+// purpose) and reports whether it was allowed: it claims only when no earlier
+// issuance is newer than notBefore, so a caller gets at most one send per
+// cooldown window. It is rate-limit bookkeeping keyed by address regardless of
+// account existence, so it opens no audit transaction and leaks nothing.
+func (s *Store) ClaimEmailIssuance(ctx context.Context, address, purpose string, at, notBefore time.Time) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `INSERT INTO credbound.email_issuance (address, purpose, last_issued_at) VALUES ($1, $2, $3)
+ON CONFLICT (address, purpose) DO UPDATE SET last_issued_at = EXCLUDED.last_issued_at WHERE credbound.email_issuance.last_issued_at <= $4`,
+		address, purpose, at, notBefore)
+	if err != nil {
+		return false, mapError(err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, mapError(err)
+	}
+	return affected == 1, nil
+}
+
 // RecordLoginFailure counts a failed login (restarting the window after an
 // expired lockout) and applies lockedUntil once the failure threshold is
 // reached, returning the updated throttle.

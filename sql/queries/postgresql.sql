@@ -92,6 +92,7 @@ UPDATE credbound.login_throttles SET locked_until = $2 WHERE user_id = $1;
 -- name: ClearLoginThrottle :exec
 DELETE FROM credbound.login_throttles WHERE user_id = $1;
 
+
 -- name: InsertPasswordReset :exec
 INSERT INTO credbound.password_resets (id, user_id, digest, created_at, expires_at, used_at) VALUES ($1, $2, $3, $4, $5, NULL);
 

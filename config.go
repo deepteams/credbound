@@ -125,6 +125,13 @@ type Config struct {
 	// successful AuthenticateSession refreshes last-seen, so the window slides
 	// with activity.
 	SessionIdleTimeout time.Duration
+	// EmailIssuanceCooldown is the minimum interval between two token-issuing
+	// emails to the same address for the same purpose (password reset,
+	// magic-link, email OTP, verification resend). Within the window the flow
+	// answers with its usual enumeration-safe decoy and issues no token, so a
+	// user cannot be bombarded with mails. Zero disables the cooldown. It
+	// requires an EmailThrottleStore-capable store; otherwise it is inert.
+	EmailIssuanceCooldown time.Duration
 	// SSOProviders registers the identity providers the host enables. Each
 	// must expose a unique UUIDv7 configuration ID and a known kind.
 	SSOProviders []SSOProvider
@@ -194,42 +201,44 @@ type Manager struct {
 	// read* rings list every key accepted when reading, active first, so a
 	// rotation with Retired* configured never invalidates existing data;
 	// writes always use the single active key above.
-	readSealKeys         [][]byte
-	readDigestKeys       [][]byte
-	readPATPeppers       [][]byte
-	readRecoveryPeppers  [][]byte
-	stepUpMaxAge         time.Duration
-	ceremonyTTL          time.Duration
-	minPasswordLen       int
-	passwordPolicy       PasswordPolicy
-	maxFailedLogins      int64
-	lockoutDuration      time.Duration
-	clock                func() time.Time
-	random               io.Reader
-	observer             Observer
-	adminPermissions     map[InstanceRole]map[Permission]struct{}
-	workspaceRoles       *roleCatalog
-	emailVerificationTTL time.Duration
-	passwordResetTTL     time.Duration
-	emailAuthTTL         time.Duration
-	invitationTTL        time.Duration
-	sessionTTL           time.Duration
-	sessionIdleTimeout   time.Duration
-	ssoProviders         map[string]SSOProvider
-	ssoAssurance         map[string]SSOAssurancePolicy
-	events               *eventRegistry
-	scimStore            SCIMStore
-	oauthStore           OAuthStore
-	oauth                *OAuthConfig
-	signupStore          SignupStore
-	signup               *SignUpConfig
-	sessionStore         SessionStore
-	domainStore          DomainStore
-	domainVerifier       DomainVerifier
-	dummyHash            string
-	idMu                 sync.Mutex
-	idUnixMilli          int64
-	idSequence           uint16
+	readSealKeys          [][]byte
+	readDigestKeys        [][]byte
+	readPATPeppers        [][]byte
+	readRecoveryPeppers   [][]byte
+	stepUpMaxAge          time.Duration
+	ceremonyTTL           time.Duration
+	minPasswordLen        int
+	passwordPolicy        PasswordPolicy
+	maxFailedLogins       int64
+	lockoutDuration       time.Duration
+	clock                 func() time.Time
+	random                io.Reader
+	observer              Observer
+	adminPermissions      map[InstanceRole]map[Permission]struct{}
+	workspaceRoles        *roleCatalog
+	emailVerificationTTL  time.Duration
+	passwordResetTTL      time.Duration
+	emailAuthTTL          time.Duration
+	invitationTTL         time.Duration
+	sessionTTL            time.Duration
+	sessionIdleTimeout    time.Duration
+	emailIssuanceCooldown time.Duration
+	ssoProviders          map[string]SSOProvider
+	ssoAssurance          map[string]SSOAssurancePolicy
+	events                *eventRegistry
+	scimStore             SCIMStore
+	oauthStore            OAuthStore
+	oauth                 *OAuthConfig
+	signupStore           SignupStore
+	signup                *SignUpConfig
+	sessionStore          SessionStore
+	emailThrottle         EmailThrottleStore
+	domainStore           DomainStore
+	domainVerifier        DomainVerifier
+	dummyHash             string
+	idMu                  sync.Mutex
+	idUnixMilli           int64
+	idSequence            uint16
 }
 
 // New validates the configuration and builds a Manager. It rejects missing
@@ -368,6 +377,7 @@ func New(cfg Config) (*Manager, error) {
 	scimStore, _ := cfg.Store.(SCIMStore)
 	signupStore, _ := cfg.Store.(SignupStore)
 	sessionStore, _ := cfg.Store.(SessionStore)
+	emailThrottle, _ := cfg.Store.(EmailThrottleStore)
 	domainStore, _ := cfg.Store.(DomainStore)
 	var signupConfig *SignUpConfig
 	if cfg.SignUp != nil {
@@ -397,48 +407,50 @@ func New(cfg Config) (*Manager, error) {
 		}
 	}
 	return &Manager{
-		store:                cfg.Store,
-		passwords:            cfg.Passwords,
-		totp:                 cfg.TOTP,
-		passkeys:             cfg.Passkeys,
-		secretKey:            append([]byte(nil), cfg.SecretKey...),
-		sealKey:              sealKey,
-		digestKey:            digestKey,
-		patPepper:            append([]byte(nil), cfg.PATPepper...),
-		recoveryPepper:       append([]byte(nil), cfg.RecoveryPepper...),
-		readSealKeys:         readSealKeys,
-		readDigestKeys:       readDigestKeys,
-		readPATPeppers:       readPATPeppers,
-		readRecoveryPeppers:  readRecoveryPeppers,
-		stepUpMaxAge:         cfg.StepUpMaxAge,
-		ceremonyTTL:          cfg.CeremonyTTL,
-		minPasswordLen:       cfg.MinPasswordLen,
-		passwordPolicy:       cfg.PasswordPolicy,
-		maxFailedLogins:      int64(cfg.MaxFailedLogins),
-		lockoutDuration:      cfg.LockoutDuration,
-		clock:                cfg.Clock,
-		random:               cfg.Random,
-		observer:             cfg.Observer,
-		adminPermissions:     adminPermissions,
-		workspaceRoles:       workspaceRoles,
-		emailVerificationTTL: cfg.EmailVerificationTTL,
-		passwordResetTTL:     cfg.PasswordResetTTL,
-		emailAuthTTL:         cfg.EmailAuthenticationTTL,
-		invitationTTL:        cfg.InvitationTTL,
-		sessionTTL:           cfg.SessionTTL,
-		sessionIdleTimeout:   cfg.SessionIdleTimeout,
-		ssoProviders:         ssoProviders,
-		ssoAssurance:         maps.Clone(cfg.SSOAssurance),
-		events:               events,
-		scimStore:            scimStore,
-		oauthStore:           oauthStore,
-		oauth:                oauthConfig,
-		signupStore:          signupStore,
-		signup:               signupConfig,
-		sessionStore:         sessionStore,
-		domainStore:          domainStore,
-		domainVerifier:       cfg.DomainVerifier,
-		dummyHash:            dummyHash,
+		store:                 cfg.Store,
+		passwords:             cfg.Passwords,
+		totp:                  cfg.TOTP,
+		passkeys:              cfg.Passkeys,
+		secretKey:             append([]byte(nil), cfg.SecretKey...),
+		sealKey:               sealKey,
+		digestKey:             digestKey,
+		patPepper:             append([]byte(nil), cfg.PATPepper...),
+		recoveryPepper:        append([]byte(nil), cfg.RecoveryPepper...),
+		readSealKeys:          readSealKeys,
+		readDigestKeys:        readDigestKeys,
+		readPATPeppers:        readPATPeppers,
+		readRecoveryPeppers:   readRecoveryPeppers,
+		stepUpMaxAge:          cfg.StepUpMaxAge,
+		ceremonyTTL:           cfg.CeremonyTTL,
+		minPasswordLen:        cfg.MinPasswordLen,
+		passwordPolicy:        cfg.PasswordPolicy,
+		maxFailedLogins:       int64(cfg.MaxFailedLogins),
+		lockoutDuration:       cfg.LockoutDuration,
+		clock:                 cfg.Clock,
+		random:                cfg.Random,
+		observer:              cfg.Observer,
+		adminPermissions:      adminPermissions,
+		workspaceRoles:        workspaceRoles,
+		emailVerificationTTL:  cfg.EmailVerificationTTL,
+		passwordResetTTL:      cfg.PasswordResetTTL,
+		emailAuthTTL:          cfg.EmailAuthenticationTTL,
+		invitationTTL:         cfg.InvitationTTL,
+		sessionTTL:            cfg.SessionTTL,
+		sessionIdleTimeout:    cfg.SessionIdleTimeout,
+		emailIssuanceCooldown: cfg.EmailIssuanceCooldown,
+		ssoProviders:          ssoProviders,
+		ssoAssurance:          maps.Clone(cfg.SSOAssurance),
+		events:                events,
+		scimStore:             scimStore,
+		oauthStore:            oauthStore,
+		oauth:                 oauthConfig,
+		signupStore:           signupStore,
+		signup:                signupConfig,
+		sessionStore:          sessionStore,
+		emailThrottle:         emailThrottle,
+		domainStore:           domainStore,
+		domainVerifier:        cfg.DomainVerifier,
+		dummyHash:             dummyHash,
 	}, nil
 }
 

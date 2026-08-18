@@ -25,6 +25,14 @@ func (m *Manager) BeginEmailAuthentication(ctx context.Context, email string) (_
 	if err := m.domainRequiresSSO(ctx, normalized, "email_authentication.request"); err != nil {
 		return IssuedEmailAuthentication{}, err
 	}
+	if allowed, err := m.allowEmailIssuance(ctx, normalized, "email_authentication.request"); err != nil {
+		return IssuedEmailAuthentication{}, err
+	} else if !allowed {
+		if auditErr := m.appendAuthenticationAudit(ctx, "", "email_authentication.request", AuditFailed, "throttled"); auditErr != nil {
+			return IssuedEmailAuthentication{}, auditErr
+		}
+		return IssuedEmailAuthentication{}, nil
+	}
 	user, lookupErr := m.store.UserByEmail(ctx, normalized)
 	// Generate the identifier and secret before deciding the outcome so the
 	// work performed is identical for unknown addresses.

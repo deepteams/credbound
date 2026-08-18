@@ -15,6 +15,7 @@ CREATE TABLE credbound.audit_events (id uuid PRIMARY KEY CHECK (substring(id::te
 CREATE UNIQUE INDEX audit_events_sequence_idx ON credbound.audit_events(sequence) WHERE sequence IS NOT NULL;
 CREATE TABLE credbound.audit_chain (singleton integer PRIMARY KEY CHECK (singleton = 1), sequence bigint NOT NULL, head_hash bytea NOT NULL);
 CREATE TABLE credbound.login_throttles (user_id uuid PRIMARY KEY REFERENCES credbound.users(id), failed_attempts bigint NOT NULL, locked_until timestamptz, updated_at timestamptz NOT NULL);
+CREATE TABLE credbound.email_issuance (address TEXT NOT NULL, purpose TEXT NOT NULL, last_issued_at timestamptz NOT NULL, PRIMARY KEY (address, purpose));
 CREATE TABLE credbound.password_resets (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), user_id uuid NOT NULL REFERENCES credbound.users(id), digest bytea NOT NULL, created_at timestamptz NOT NULL, expires_at timestamptz NOT NULL, used_at timestamptz);
 CREATE INDEX password_resets_user_idx ON credbound.password_resets(user_id);
 CREATE TABLE credbound.email_authentications (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), user_id uuid NOT NULL REFERENCES credbound.users(id), email_id uuid NOT NULL REFERENCES credbound.user_emails(id), digest bytea NOT NULL, created_at timestamptz NOT NULL, expires_at timestamptz NOT NULL, used_at timestamptz);

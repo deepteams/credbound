@@ -56,6 +56,7 @@ type Store struct {
 	// outside the snapshot/restore cycle: a ceremony is burned by the commit
 	// attempt even when a hook rejects the transaction afterwards.
 	ceremonies         map[string]time.Time
+	emailIssuance      map[string]time.Time
 	domains            map[string]credbound.WorkspaceDomain
 	domainNames        map[string]string
 	scimConfigurations map[string]credbound.SCIMConfiguration
@@ -144,8 +145,9 @@ func New() *Store {
 		totp: make(map[string]credbound.TOTPFactor), recovery: make(map[string][]credbound.RecoveryCode),
 		passkeys: make(map[string]map[string]credbound.Passkey), pats: make(map[string]credbound.PAT),
 		patPrefixes: make(map[string]string), sessions: make(map[string]credbound.Session),
-		ceremonies: make(map[string]time.Time),
-		domains:    make(map[string]credbound.WorkspaceDomain), domainNames: make(map[string]string), auditIDs: make(map[string]struct{}),
+		ceremonies:    make(map[string]time.Time),
+		emailIssuance: make(map[string]time.Time),
+		domains:       make(map[string]credbound.WorkspaceDomain), domainNames: make(map[string]string), auditIDs: make(map[string]struct{}),
 		auditHead: make([]byte, 32), throttles: make(map[string]credbound.LoginThrottle),
 		passwordResets: make(map[string]credbound.PasswordResetCredential),
 		emailAuths:     make(map[string]credbound.EmailAuthenticationCredential),
@@ -703,6 +705,23 @@ func (s *Store) EmailVerificationByID(ctx context.Context, emailID string) (cred
 	}
 	verification := s.emailVerifications[emailID]
 	return cloneEmail(email), cloneEmailVerification(verification), nil
+}
+
+// ClaimEmailIssuance atomically records an email issuance and reports whether
+// it was allowed: it claims only when no earlier issuance for (address,
+// purpose) is newer than notBefore.
+func (s *Store) ClaimEmailIssuance(ctx context.Context, address, purpose string, at, notBefore time.Time) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := address + "\x00" + purpose
+	if last, ok := s.emailIssuance[key]; ok && last.After(notBefore) {
+		return false, nil
+	}
+	s.emailIssuance[key] = at
+	return true, nil
 }
 
 // EmailByAddress returns the address record without its verification

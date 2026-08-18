@@ -35,6 +35,14 @@ func (m *Manager) BeginEmailOTP(ctx context.Context, email string) (_ IssuedEmai
 	if err := m.domainRequiresSSO(ctx, normalized, "email_otp.request"); err != nil {
 		return IssuedEmailOTP{}, err
 	}
+	if allowed, err := m.allowEmailIssuance(ctx, normalized, "email_otp.request"); err != nil {
+		return IssuedEmailOTP{}, err
+	} else if !allowed {
+		if auditErr := m.appendAuthenticationAudit(ctx, "", "email_otp.request", AuditFailed, "throttled"); auditErr != nil {
+			return IssuedEmailOTP{}, auditErr
+		}
+		return IssuedEmailOTP{}, nil
+	}
 	user, lookupErr := m.store.UserByEmail(ctx, normalized)
 	// Generate the identifier and code before deciding the outcome so the
 	// work performed is identical for unknown addresses.

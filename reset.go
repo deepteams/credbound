@@ -27,6 +27,14 @@ func (m *Manager) BeginPasswordReset(ctx context.Context, email string) (_ Issue
 	if err := m.domainRequiresSSO(ctx, normalized, "password.reset.request"); err != nil {
 		return IssuedPasswordReset{}, err
 	}
+	if allowed, err := m.allowEmailIssuance(ctx, normalized, "password.reset.request"); err != nil {
+		return IssuedPasswordReset{}, err
+	} else if !allowed {
+		if auditErr := m.appendAuthenticationAudit(ctx, "", "password.reset.request", AuditFailed, "throttled"); auditErr != nil {
+			return IssuedPasswordReset{}, auditErr
+		}
+		return IssuedPasswordReset{}, nil
+	}
 	user, lookupErr := m.store.UserByEmail(ctx, normalized)
 	// Generate the identifier and secret before deciding the outcome so the
 	// work performed is identical for unknown addresses.

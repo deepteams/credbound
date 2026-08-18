@@ -81,6 +81,45 @@ func TestChangePasswordRevokesSessionsKeepsPATs(t *testing.T) {
 	}
 }
 
+// TestEmailIssuanceCooldown verifies the per-address anti-bombing cooldown:
+// within the window a repeated request returns the enumeration-safe decoy (no
+// token, no error), a different purpose is independent, and the window slides
+// shut and reopens with the clock.
+func TestEmailIssuanceCooldown(t *testing.T) {
+	f := newFixture(t)
+	f.bootstrap(t)
+	ctx := context.Background()
+	manager, err := credbound.New(credbound.Config{
+		Store: f.store, Passwords: f.passwords, TOTP: fakeTOTP{}, Passkeys: &fakePasskeys{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		Clock: func() time.Time { return f.now }, Random: &counterReader{next: 0x77},
+		EmailIssuanceCooldown: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := manager.BeginPasswordReset(ctx, "root@example.com")
+	if err != nil || first.Token == "" {
+		t.Fatalf("first reset = %#v, %v", first, err)
+	}
+	// A second reset inside the cooldown answers with the decoy, no token.
+	second, err := manager.BeginPasswordReset(ctx, "root@example.com")
+	if err != nil || second.Token != "" {
+		t.Fatalf("throttled reset = %#v, %v", second, err)
+	}
+	// A different purpose (magic link) has its own window.
+	link, err := manager.BeginEmailAuthentication(ctx, "root@example.com")
+	if err != nil || link.Token == "" {
+		t.Fatalf("independent purpose = %#v, %v", link, err)
+	}
+	// Once the cooldown elapses, reset issues again.
+	f.now = f.now.Add(2 * time.Minute)
+	third, err := manager.BeginPasswordReset(ctx, "root@example.com")
+	if err != nil || third.Token == "" {
+		t.Fatalf("post-cooldown reset = %#v, %v", third, err)
+	}
+}
+
 func TestStepUpAuthorizationAndRBACFailures(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
