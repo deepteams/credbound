@@ -24,14 +24,19 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/deepteams/credbound"
 	db "github.com/deepteams/credbound/internal/sqlc/sqlite"
+	sqlitedriver "modernc.org/sqlite"
 )
+
+// sqliteConstraint is the primary result code shared by every constraint
+// violation (UNIQUE, PRIMARY KEY, CHECK, FOREIGN KEY, NOT NULL); the extended
+// code carries it in its low byte.
+const sqliteConstraint = 19
 
 // Store is the SQLite-backed implementation of the Credbound persistence
 // ports. It is safe for concurrent use: mutations run inside transactions
@@ -2006,8 +2011,10 @@ func mapError(err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
 		return credbound.ErrNotFound
 	}
-	message := strings.ToLower(err.Error())
-	if strings.Contains(message, "unique constraint") || strings.Contains(message, "constraint failed") || strings.Contains(message, "duplicate key") {
+	// Classify a constraint violation by the driver's typed result code rather
+	// than a message substring, which was locale-fragile and wording-fragile.
+	var sqliteErr *sqlitedriver.Error
+	if errors.As(err, &sqliteErr) && sqliteErr.Code()&0xff == sqliteConstraint {
 		return fmt.Errorf("%w: %v", credbound.ErrConflict, err)
 	}
 	return err

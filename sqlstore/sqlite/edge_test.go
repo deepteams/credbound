@@ -273,8 +273,12 @@ func TestInternalMappingAndScanErrors(t *testing.T) {
 	if err := affected(0, boom); !errors.Is(err, boom) {
 		t.Fatal(err)
 	}
-	if err := mapError(errors.New("UNIQUE constraint failed")); !errors.Is(err, credbound.ErrConflict) {
-		t.Fatal(err)
+	// mapError classifies by the driver's typed result code, so a plain error
+	// (not a *sqlite.Error) is passed through unchanged; real constraint
+	// violations mapping to ErrConflict are covered by the store-level tests
+	// (duplicate inserts, bad-id CHECK violations).
+	if err := mapError(errors.New("UNIQUE constraint failed")); errors.Is(err, credbound.ErrConflict) {
+		t.Fatal("plain error text must not be classified as a conflict")
 	}
 	if err := mapError(boom); !errors.Is(err, boom) || mapError(nil) != nil {
 		t.Fatal(err)

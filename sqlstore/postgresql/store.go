@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,7 +33,12 @@ import (
 	"github.com/deepteams/credbound"
 	db "github.com/deepteams/credbound/internal/sqlc/postgresql"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// pgConstraintClass is the SQLSTATE class shared by every integrity
+// constraint violation (unique, foreign key, not null, check, restrict).
+const pgConstraintClass = "23"
 
 // RowQuerier is the pgx query surface the store streams paginated reads
 // through; both *pgxpool.Pool and *pgx.Conn satisfy it, but only a pool is
@@ -2005,8 +2009,10 @@ func mapError(err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
 		return credbound.ErrNotFound
 	}
-	message := strings.ToLower(err.Error())
-	if strings.Contains(message, "unique constraint") || strings.Contains(message, "constraint failed") || strings.Contains(message, "duplicate key") {
+	// Classify a constraint violation by the driver's typed result code rather
+	// than a message substring, which was locale-fragile and wording-fragile.
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && len(pgErr.Code) >= 2 && pgErr.Code[:2] == pgConstraintClass {
 		return fmt.Errorf("%w: %v", credbound.ErrConflict, err)
 	}
 	return err

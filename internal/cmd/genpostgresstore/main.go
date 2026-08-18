@@ -105,6 +105,25 @@ func main() {
 	code = strings.Replace(code, sqliteNewDoc, "", 1)
 	code = strings.Replace(code, "package sqlite", "package postgresql", 1)
 	code = strings.Replace(code, `db "github.com/deepteams/credbound/internal/sqlc/sqlite"`, `db "github.com/deepteams/credbound/internal/sqlc/postgresql"`, 1)
+	// mapError classifies conflicts by the driver's typed code; swap the SQLite
+	// driver error for pgx's PgError and the SQLite result codes for the
+	// PostgreSQL unique_violation SQLSTATE.
+	code = strings.Replace(code, "\tsqlitedriver \"modernc.org/sqlite\"\n", "\t\"github.com/jackc/pgx/v5/pgconn\"\n", 1)
+	code = strings.Replace(code, `// sqliteConstraint is the primary result code shared by every constraint
+// violation (UNIQUE, PRIMARY KEY, CHECK, FOREIGN KEY, NOT NULL); the extended
+// code carries it in its low byte.
+const sqliteConstraint = 19`, `// pgConstraintClass is the SQLSTATE class shared by every integrity
+// constraint violation (unique, foreign key, not null, check, restrict).
+const pgConstraintClass = "23"`, 1)
+	code = strings.Replace(code, `	var sqliteErr *sqlitedriver.Error
+	if errors.As(err, &sqliteErr) && sqliteErr.Code()&0xff == sqliteConstraint {
+		return fmt.Errorf("%w: %v", credbound.ErrConflict, err)
+	}
+	return err`, `	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && len(pgErr.Code) >= 2 && pgErr.Code[:2] == pgConstraintClass {
+		return fmt.Errorf("%w: %v", credbound.ErrConflict, err)
+	}
+	return err`, 1)
 	code = strings.ReplaceAll(code, "credbound.StoreSQLite", "credbound.StorePostgreSQL")
 	code = strings.Replace(code, "// Tx is the SQLite transaction capability", "// Tx is the PostgreSQL transaction capability", 1)
 	code = strings.Replace(code, "into the live SQLite", "into the live PostgreSQL", 1)
