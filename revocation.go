@@ -53,3 +53,48 @@ func (m *Manager) RevokeUserCredentials(ctx context.Context, actor Authenticatio
 	m.events.emit(ctx, EventUserCredentialsRevoked, func(listener EventListener) error { return listener.OnUserCredentialsRevoked(ctx, revoked) })
 	return nil
 }
+
+// AdminResetSecondFactor is the total-loss recovery path: when a user has
+// lost every second factor (TOTP device, recovery codes, passkeys), an
+// instance administrator removes them all and revokes the user's
+// server-side sessions in one atomic operation, so the account falls back
+// to its first factor and the user re-enrolls from a fresh sign-in. The
+// actor needs admin users write and an admin mutation (fresh AAL2, or a
+// trusted local request); the target must exist and cannot be the actor —
+// an administrator's own factors are removed through DisableTOTP and
+// DeletePasskey, which re-prove possession. Hosts should notify the
+// affected user out of band through SecondFactorResetEvent.
+func (m *Manager) AdminResetSecondFactor(ctx context.Context, actor Authentication, request TrustedRequest, userID string) (err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "admin.second_factor.reset", started, err) }()
+	if !validUUIDv7(userID) {
+		return fmt.Errorf("%w: invalid user id", ErrInvalidInput)
+	}
+	if userID == actor.UserID {
+		return fmt.Errorf("%w: an administrator cannot reset their own second factor", ErrInvalidInput)
+	}
+	if err := m.requireAdminMutation(ctx, actor, request, "admin.second_factor.reset"); err != nil {
+		return err
+	}
+	if err := m.AuthorizeAdmin(ctx, actor, PermissionUsersWrite); err != nil {
+		return err
+	}
+	event, err := m.newAudit(ctx, actor.UserID, "user.second_factor.reset", "user", userID, "", AuditSucceeded, "")
+	if err != nil {
+		return err
+	}
+	meta, err := m.newEventMeta(EventSecondFactorReset, "admin.second_factor.reset", actor.UserID, "", event)
+	if err != nil {
+		return err
+	}
+	change := SecondFactorReset{EventMeta: meta, UserID: userID}
+	commit := m.transactionalCommit(event, "user.second_factor.reset", func(ctx context.Context, tx Tx, hook TransactionHook) error {
+		return hook.ApplySecondFactorReset(ctx, tx, change)
+	})
+	if err := m.store.ResetSecondFactor(ctx, userID, m.now(), commit); err != nil {
+		return m.mapStoreError(ctx, "admin.second_factor.reset", err)
+	}
+	reset := SecondFactorResetEvent{EventMeta: meta, UserID: userID}
+	m.events.emit(ctx, EventSecondFactorReset, func(listener EventListener) error { return listener.OnSecondFactorReset(ctx, reset) })
+	return nil
+}

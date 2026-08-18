@@ -83,10 +83,12 @@ const (
 	EventTOTPVerified                 EventName = "totp.verified"
 	EventTOTPReplayRejected           EventName = "totp.replay_rejected"
 	EventRecoveryCodeConsumed         EventName = "recovery_code.consumed"
+	EventRecoveryCodesRegenerated     EventName = "recovery_codes.regenerated"
 	EventPasskeyRegistered            EventName = "passkey.registered"
 	EventPasskeyDeleted               EventName = "passkey.deleted"
 	EventPasskeyAuthenticated         EventName = "passkey.authenticated"
 	EventUserCredentialsRevoked       EventName = "user.credentials_revoked"
+	EventSecondFactorReset            EventName = "user.second_factor_reset"
 	EventUserLocked                   EventName = "user.locked"
 	EventUserProfileUpdated           EventName = "user.profile_updated"
 	EventSessionCreated               EventName = "session.created"
@@ -292,6 +294,22 @@ type PATRevocation struct {
 type UserCredentialRevocation struct {
 	EventMeta
 	UserID string
+}
+
+// SecondFactorReset reports the administrative removal of every second
+// factor of a user: the TOTP factor with its recovery codes and all
+// passkeys, with the user's sessions revoked in the same transaction.
+type SecondFactorReset struct {
+	EventMeta
+	UserID string
+}
+
+// RecoveryCodeRegeneration reports the replacement of a user's recovery
+// codes; payloads carry only the count, never code material.
+type RecoveryCodeRegeneration struct {
+	EventMeta
+	UserID            string
+	RecoveryCodeCount int
 }
 
 // SessionCreation carries the created session record; its Digest is always
@@ -561,6 +579,23 @@ type UserCredentialsRevokedEvent struct {
 	UserID string
 }
 
+// SecondFactorResetEvent reports that an instance administrator removed
+// every second factor of the user (TOTP, recovery codes, passkeys) and
+// revoked their sessions — the total-loss recovery path. Hosts should
+// notify the affected user out of band.
+type SecondFactorResetEvent struct {
+	EventMeta
+	UserID string
+}
+
+// RecoveryCodesRegeneratedEvent reports that the user replaced their
+// recovery codes; the previous set stopped working in the same transaction.
+type RecoveryCodesRegeneratedEvent struct {
+	EventMeta
+	UserID            string
+	RecoveryCodeCount int
+}
+
 // SessionCreatedEvent reports a new server-side session. The Session carries
 // a nil Digest and the raw token is never part of any event.
 // AuthenticateSession emits no per-validation event — it runs on every
@@ -809,6 +844,8 @@ type TransactionHook interface {
 	ApplyPATCreation(context.Context, Tx, PATCreation) error
 	ApplyPATRevocation(context.Context, Tx, PATRevocation) error
 	ApplyUserCredentialRevocation(context.Context, Tx, UserCredentialRevocation) error
+	ApplySecondFactorReset(context.Context, Tx, SecondFactorReset) error
+	ApplyRecoveryCodeRegeneration(context.Context, Tx, RecoveryCodeRegeneration) error
 	ApplySessionCreation(context.Context, Tx, SessionCreation) error
 	ApplySessionRevocation(context.Context, Tx, SessionRevocation) error
 	ApplyUserSessionRevocation(context.Context, Tx, UserSessionRevocation) error
@@ -874,6 +911,8 @@ type EventListener interface {
 	OnPATCreated(context.Context, PATCreatedEvent) error
 	OnPATRevoked(context.Context, PATRevokedEvent) error
 	OnUserCredentialsRevoked(context.Context, UserCredentialsRevokedEvent) error
+	OnSecondFactorReset(context.Context, SecondFactorResetEvent) error
+	OnRecoveryCodesRegenerated(context.Context, RecoveryCodesRegeneratedEvent) error
 	OnSessionCreated(context.Context, SessionCreatedEvent) error
 	OnSessionRevoked(context.Context, SessionRevokedEvent) error
 	OnUserSessionsRevoked(context.Context, UserSessionsRevokedEvent) error

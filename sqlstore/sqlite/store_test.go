@@ -135,6 +135,7 @@ func TestStoreContractAndImmutableAudit(t *testing.T) {
 
 	testTOTP(t, f, user)
 	testPasskeys(t, f, user)
+	testSecondFactorReset(t, f, user)
 	testPATs(t, f, user, workspace)
 
 	workspacePage := collectAudit(t, f.store.AuditEvents(ctx, workspace.ID, credbound.PageRequest{Limit: 50}))
@@ -453,7 +454,57 @@ func testTOTP(t *testing.T, f *fixture, user credbound.User) {
 	if err != nil || !used {
 		t.Fatalf("recovery use = %v, %v", used, err)
 	}
+	replacement := []credbound.RecoveryCode{{UserID: user.ID, Digest: []byte("replacement")}}
+	if err := f.store.ReplaceRecoveryCodes(ctx, user.ID, replacement, f.event(user.ID, "recovery.replace", user.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := f.store.CountUnusedRecoveryCodes(ctx, user.ID); err != nil || count != 1 {
+		t.Fatalf("replaced code count = %d, %v", count, err)
+	}
+	used, err = f.store.ConsumeRecoveryCode(ctx, user.ID, []byte("recovery"), f.now, f.event(user.ID, "recovery.stale", user.ID, ""))
+	if err != nil || used {
+		t.Fatalf("stale recovery code = %v, %v", used, err)
+	}
 	if err := f.store.DisableTOTP(ctx, user.ID, f.event(user.ID, "totp.disable", user.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.ReplaceRecoveryCodes(ctx, user.ID, replacement, f.event(user.ID, "recovery.replace.gone", user.ID, "")); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("replace without factor error = %v", err)
+	}
+}
+
+func testSecondFactorReset(t *testing.T, f *fixture, user credbound.User) {
+	t.Helper()
+	ctx := context.Background()
+	factor := credbound.TOTPFactor{UserID: user.ID, EncryptedSecret: []byte("sealed"), CreatedAt: f.now, UpdatedAt: f.now}
+	if err := f.store.SaveTOTPEnrollment(ctx, factor, f.event(user.ID, "totp.begin.reset", user.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	factor.Active = true
+	if err := f.store.ActivateTOTP(ctx, factor, []credbound.RecoveryCode{{UserID: user.ID, Digest: []byte("code")}}, f.event(user.ID, "totp.activate.reset", user.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	passkey := credbound.Passkey{ID: f.id(), UserID: user.ID, Name: "Reset", CredentialID: []byte("reset-credential"), CredentialJSON: []byte("sealed"), CreatedAt: f.now}
+	if err := f.store.SavePasskey(ctx, passkey, f.event(user.ID, "passkey.create.reset", passkey.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.ResetSecondFactor(ctx, "018f0000-0000-7000-8000-000000000000", f.now, f.event(user.ID, "second_factor.reset.unknown", user.ID, "")); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("unknown user reset error = %v", err)
+	}
+	if err := f.store.ResetSecondFactor(ctx, user.ID, f.now, f.event(user.ID, "second_factor.reset", user.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.TOTPByUserID(ctx, user.ID); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("TOTP after reset error = %v", err)
+	}
+	if count, err := f.store.CountUnusedRecoveryCodes(ctx, user.ID); err != nil || count != 0 {
+		t.Fatalf("recovery codes after reset = %d, %v", count, err)
+	}
+	for value, err := range f.store.Passkeys(ctx, user.ID) {
+		t.Fatalf("passkey after reset = %#v, %v", value, err)
+	}
+	// A user with no second factor left resets successfully again.
+	if err := f.store.ResetSecondFactor(ctx, user.ID, f.now, f.event(user.ID, "second_factor.reset.repeat", user.ID, "")); err != nil {
 		t.Fatal(err)
 	}
 }

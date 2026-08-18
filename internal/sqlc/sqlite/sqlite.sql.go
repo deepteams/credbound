@@ -377,6 +377,15 @@ func (q *Queries) DeleteTOTP(ctx context.Context, userID string) (int64, error) 
 	return result.RowsAffected()
 }
 
+const deleteUserPasskeys = `-- name: DeleteUserPasskeys :exec
+DELETE FROM credbound_passkeys WHERE user_id = ?1
+`
+
+func (q *Queries) DeleteUserPasskeys(ctx context.Context, userID string) error {
+	_, err := q.db.ExecContext(ctx, deleteUserPasskeys, userID)
+	return err
+}
+
 const deleteWorkspaceDomain = `-- name: DeleteWorkspaceDomain :execrows
 DELETE FROM credbound_workspace_domains WHERE id = ?1
 `

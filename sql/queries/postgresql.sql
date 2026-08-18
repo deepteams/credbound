@@ -257,6 +257,9 @@ UPDATE credbound.passkeys SET credential_json = $3, last_used_at = $4 WHERE user
 -- name: DeletePasskey :execrows
 DELETE FROM credbound.passkeys WHERE user_id = $1 AND id = $2;
 
+-- name: DeleteUserPasskeys :exec
+DELETE FROM credbound.passkeys WHERE user_id = $1;
+
 -- name: InsertPAT :exec
 INSERT INTO credbound.personal_access_tokens (id, user_id, name, prefix, digest, workspace_id, scopes_json, created_at, expires_at, last_used_at, revoked_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, NULL);

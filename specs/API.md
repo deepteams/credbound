@@ -122,6 +122,7 @@ UpdateWorkspaceDomainPolicy(ctx, authn, domainID, WorkspaceDomainPolicyInput) er
 RemoveWorkspaceDomain(ctx, authn, domainID) error
 WorkspaceDomains(ctx, authn, workspaceID, PageRequest) iter.Seq2[PageEvent[WorkspaceDomain], error]
 RevokeUserCredentials(ctx, authn, TrustedRequest, userID) error
+AdminResetSecondFactor(ctx, authn, TrustedRequest, userID) error
 
 BeginEmailAddition(ctx, authn, email) (IssuedEmailVerification, error)
 ConfirmEmail(ctx, verificationToken) (EmailAddress, error)
@@ -133,6 +134,7 @@ BeginTOTPEnrollment(ctx, authn) (TOTPEnrollment, error)
 ConfirmTOTPEnrollment(ctx, authn, code) ([]string, error)
 VerifyTOTP(ctx, authn, code) (Authentication, error)
 DisableTOTP(ctx, authn, code) error
+RegenerateRecoveryCodes(ctx, authn) ([]string, error)
 TOTPStatus(ctx, authn, userID) (TOTPStatus, error)
 
 BeginPasskeyRegistration(ctx, authn, name) (PasskeyChallenge, error)
@@ -269,6 +271,16 @@ be terminated by the host alongside it. `ChangePassword` deliberately revokes
 nothing: the actor proved possession of the current password, so a routine
 change is not a compromise response — hosts that want the cascade pair it with
 `RevokeUserSessions` or `RevokeUserCredentials`.
+
+`RegenerateRecoveryCodes` replaces the actor's recovery codes with a fresh
+single-display set under a fresh interactive AAL2 authentication; the previous
+set stops working in the same transaction. `AdminResetSecondFactor` is the
+total-loss recovery path: an instance administrator with users write and an
+admin mutation atomically removes the target's TOTP factor with its recovery
+codes and every passkey and revokes their server-side sessions, so the account
+falls back to its first factor; the administrator can never target their own
+account, and hosts should notify the affected user out of band through
+`SecondFactorResetEvent`.
 
 `WithRequestMetadata(ctx, RequestMetadata)` attaches the client network context
 that every audit event recorded while serving the request will carry. The host

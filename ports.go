@@ -60,6 +60,16 @@ type Store interface {
 	ConsumeRecoveryCode(context.Context, string, []byte, time.Time, Commit) (bool, error)
 	CountUnusedRecoveryCodes(context.Context, string) (int64, error)
 	DisableTOTP(context.Context, string, Commit) error
+	// ReplaceRecoveryCodes atomically deletes the user's recovery codes and
+	// inserts the replacement set. It returns ErrNotFound without an active
+	// TOTP factor.
+	ReplaceRecoveryCodes(ctx context.Context, userID string, codes []RecoveryCode, commit Commit) error
+	// ResetSecondFactor atomically removes the user's TOTP factor with its
+	// recovery codes and every passkey and, for SessionStore-capable
+	// stores, revokes the user's sessions in the same transaction. It
+	// succeeds even when the user has no second factor; an unknown user
+	// reports ErrNotFound.
+	ResetSecondFactor(ctx context.Context, userID string, at time.Time, commit Commit) error
 
 	Passkeys(context.Context, string) iter.Seq2[Passkey, error]
 	SavePasskey(context.Context, Passkey, Commit) error

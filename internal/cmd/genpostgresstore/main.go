@@ -111,7 +111,18 @@ func main() {
 	code = strings.Replace(code, `"github.com/deepteams/credbound"`, `"github.com/deepteams/credbound"
 	"github.com/jackc/pgx/v5"`, 1)
 	code = strings.Replace(code, sqliteStoreDecl, postgresStoreDecl, 1)
-	code = strings.Replace(code, "func New(database *sql.DB, options ...Option)", `// New builds the PostgreSQL store from two views of the same database: a
+	code = strings.Replace(code, `// New wraps an already-opened SQLite database. The store issues no PRAGMAs
+// itself: the connection must be opened with the modernc.org/sqlite driver
+// and a DSN carrying "_pragma=foreign_keys(1)" (referential integrity,
+// which the revocation cascades depend on) and "_texttotime=1" (TEXT
+// timestamp scanning):
+//
+//	sql.Open("sqlite", "file:auth.db?_pragma=foreign_keys(1)&_texttotime=1")
+//
+// New probes the connection and reports ErrInvalidInput when either
+// parameter is missing, so a misconfigured DSN fails construction instead
+// of corrupting behavior quietly at runtime.
+func New(database *sql.DB, options ...Option)`, `// New builds the PostgreSQL store from two views of the same database: a
 // *sql.DB used by the sqlc-generated queries for transactional mutations
 // (open one with pgx's stdlib.OpenDB or stdlib.OpenDBFromPool), and a pgx
 // RowQuerier used to stream paginated reads. In production pass a
@@ -119,6 +130,30 @@ func main() {
 // concurrent use.
 func New(database *sql.DB, rows RowQuerier, options ...Option)`, 1)
 	code = strings.Replace(code, "if database == nil {", "if database == nil || rows == nil {", 1)
+	code = strings.Replace(code, `	if err := verifyConnection(database); err != nil {
+		return nil, err
+	}
+`, "", 1)
+	code = strings.Replace(code, `
+// verifyConnection probes the DSN parameters the store depends on.
+// foreign_keys is per-connection in SQLite, so only a DSN pragma — applied
+// by the driver to every pooled connection — makes the check meaningful
+// beyond the probed connection.
+func verifyConnection(database *sql.DB) error {
+	var enforced int
+	if err := database.QueryRow("PRAGMA foreign_keys").Scan(&enforced); err != nil {
+		return fmt.Errorf("probe sqlite foreign_keys: %w", err)
+	}
+	if enforced != 1 {
+		return fmt.Errorf("%w: the sqlite DSN must carry _pragma=foreign_keys(1)", credbound.ErrInvalidInput)
+	}
+	var probe time.Time
+	if err := database.QueryRow("SELECT CAST('2000-01-02 03:04:05' AS TEXT)").Scan(&probe); err != nil {
+		return fmt.Errorf("%w: the sqlite DSN must carry _texttotime=1", credbound.ErrInvalidInput)
+	}
+	return nil
+}
+`, "", 1)
 	code = strings.Replace(code, "sqlite database is required", "PostgreSQL database/sql and pgx row querier are required", 1)
 	code = strings.Replace(code, "&Store{db: database, queries: db.New(database),", "&Store{db: database, rows: rows, queries: db.New(database),", 1)
 	code = strings.ReplaceAll(code, "row.Active == 1", "row.Active")

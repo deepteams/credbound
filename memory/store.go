@@ -995,6 +995,51 @@ func (s *Store) DisableTOTP(ctx context.Context, userID string, commit credbound
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// ReplaceRecoveryCodes atomically deletes the user's recovery codes and
+// inserts the replacement set; without an active TOTP factor it reports
+// credbound.ErrNotFound.
+func (s *Store) ReplaceRecoveryCodes(ctx context.Context, userID string, codes []credbound.RecoveryCode, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	factor, ok := s.totp[userID]
+	if !ok || !factor.Active {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	s.recovery[userID] = cloneRecovery(codes)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+// ResetSecondFactor removes the user's TOTP factor with its recovery codes
+// and every passkey, and revokes the user's active sessions, in one
+// transaction. It succeeds even when no second factor exists; an unknown
+// user reports credbound.ErrNotFound.
+func (s *Store) ResetSecondFactor(ctx context.Context, userID string, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.users[userID]; !ok {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	delete(s.totp, userID)
+	delete(s.recovery, userID)
+	delete(s.passkeys, userID)
+	s.revokeUserSessionsLocked(userID, at)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
 // Passkeys streams the user's passkeys in creation order.
 func (s *Store) Passkeys(ctx context.Context, userID string) iter.Seq2[credbound.Passkey, error] {
 	return func(yield func(credbound.Passkey, error) bool) {

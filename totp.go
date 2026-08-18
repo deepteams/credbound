@@ -237,6 +237,53 @@ func (m *Manager) DisableTOTP(ctx context.Context, actor Authentication, code st
 	return nil
 }
 
+// RegenerateRecoveryCodes replaces the actor's recovery codes with a fresh
+// set returned exactly once; the previous codes stop working in the same
+// transaction, so a user who suspects their codes leaked — or has consumed
+// most of them — rotates the set without re-enrolling TOTP. It requires an
+// active TOTP factor and a fresh interactive AAL2 authentication. Returns
+// ErrNotSupported without Config.TOTP and ErrNotFound without an active
+// factor.
+func (m *Manager) RegenerateRecoveryCodes(ctx context.Context, actor Authentication) (_ []string, err error) {
+	if err := m.requireTOTPProvider(); err != nil {
+		return nil, err
+	}
+	started := m.now()
+	defer func() { m.observe(ctx, "auth.totp.recovery.regenerate", started, err) }()
+	if err := m.requireStepUp(ctx, actor, "auth.totp.recovery.regenerate"); err != nil {
+		return nil, err
+	}
+	factor, err := m.store.TOTPByUserID(ctx, actor.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if !factor.Active {
+		return nil, ErrNotFound
+	}
+	codes, records, err := m.generateRecoveryCodes(actor.UserID)
+	if err != nil {
+		return nil, err
+	}
+	event, err := m.newAudit(ctx, actor.UserID, "totp.recovery.regenerate", "user", actor.UserID, "", AuditSucceeded, "")
+	if err != nil {
+		return nil, err
+	}
+	meta, err := m.newEventMeta(EventRecoveryCodesRegenerated, "auth.totp.recovery.regenerate", actor.UserID, "", event)
+	if err != nil {
+		return nil, err
+	}
+	change := RecoveryCodeRegeneration{EventMeta: meta, UserID: actor.UserID, RecoveryCodeCount: len(records)}
+	commit := m.transactionalCommit(event, "totp.recovery.regeneration", func(ctx context.Context, tx Tx, hook TransactionHook) error {
+		return hook.ApplyRecoveryCodeRegeneration(ctx, tx, change)
+	})
+	if err := m.store.ReplaceRecoveryCodes(ctx, actor.UserID, records, commit); err != nil {
+		return nil, m.mapStoreError(ctx, "auth.totp.recovery.regenerate", err)
+	}
+	regenerated := RecoveryCodesRegeneratedEvent{EventMeta: meta, UserID: actor.UserID, RecoveryCodeCount: len(records)}
+	m.events.emit(ctx, EventRecoveryCodesRegenerated, func(listener EventListener) error { return listener.OnRecoveryCodesRegenerated(ctx, regenerated) })
+	return codes, nil
+}
+
 // TOTPStatus reports whether a user has a TOTP factor, whether it is active,
 // and how many recovery codes remain unused. It never exposes the secret.
 // Reading another user requires admin users read permission.

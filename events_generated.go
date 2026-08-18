@@ -94,6 +94,14 @@ func (UnimplementedTransactionHook) ApplyUserCredentialRevocation(context.Contex
 	return nil
 }
 
+func (UnimplementedTransactionHook) ApplySecondFactorReset(context.Context, Tx, SecondFactorReset) error {
+	return nil
+}
+
+func (UnimplementedTransactionHook) ApplyRecoveryCodeRegeneration(context.Context, Tx, RecoveryCodeRegeneration) error {
+	return nil
+}
+
 func (UnimplementedTransactionHook) ApplySessionCreation(context.Context, Tx, SessionCreation) error {
 	return nil
 }
@@ -295,6 +303,14 @@ func (UnimplementedEventListener) OnPATCreated(context.Context, PATCreatedEvent)
 func (UnimplementedEventListener) OnPATRevoked(context.Context, PATRevokedEvent) error { return nil }
 
 func (UnimplementedEventListener) OnUserCredentialsRevoked(context.Context, UserCredentialsRevokedEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnSecondFactorReset(context.Context, SecondFactorResetEvent) error {
+	return nil
+}
+
+func (UnimplementedEventListener) OnRecoveryCodesRegenerated(context.Context, RecoveryCodesRegeneratedEvent) error {
 	return nil
 }
 

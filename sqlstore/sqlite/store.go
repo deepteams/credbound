@@ -765,6 +765,52 @@ func (s *Store) DisableTOTP(ctx context.Context, userID string, commit credbound
 	})
 }
 
+// ReplaceRecoveryCodes atomically deletes the user's recovery codes and
+// inserts the replacement set; without an active TOTP factor it reports
+// credbound.ErrNotFound.
+func (s *Store) ReplaceRecoveryCodes(ctx context.Context, userID string, codes []credbound.RecoveryCode, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		row, err := q.GetTOTP(ctx, userID)
+		if err != nil {
+			return mapError(err)
+		}
+		if active := row.Active == 1; !active {
+			return credbound.ErrNotFound
+		}
+		if err := q.DeleteRecoveryCodes(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		for _, code := range codes {
+			if err := q.InsertRecoveryCode(ctx, db.InsertRecoveryCodeParams{UserID: code.UserID, Digest: code.Digest}); err != nil {
+				return mapError(err)
+			}
+		}
+		return nil
+	})
+}
+
+// ResetSecondFactor removes the user's TOTP factor with its recovery codes
+// and every passkey, and revokes the user's active sessions, in one
+// transaction. It succeeds even when no second factor exists; an unknown
+// user reports credbound.ErrNotFound.
+func (s *Store) ResetSecondFactor(ctx context.Context, userID string, at time.Time, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		if _, err := q.GetUserByID(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		if _, err := q.DeleteTOTP(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		if err := q.DeleteRecoveryCodes(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		if err := q.DeleteUserPasskeys(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		return mapError(q.RevokeUserSessions(ctx, db.RevokeUserSessionsParams{UserID: userID, RevokedAt: nullableTime(&at)}))
+	})
+}
+
 // Passkeys streams the user's passkeys in creation order.
 func (s *Store) Passkeys(ctx context.Context, userID string) iter.Seq2[credbound.Passkey, error] {
 	return func(yield func(credbound.Passkey, error) bool) {

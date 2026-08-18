@@ -1296,3 +1296,112 @@ func TestVerifyAuditChainDetectsTampering(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminResetSecondFactor(t *testing.T) {
+	f := newFixture(t)
+	authn, workspace := f.bootstrap(t)
+	ctx := context.Background()
+	root := aal2(authn.UserID, f.now)
+
+	member, err := f.manager.CreateUser(ctx, root, workspace.ID, credbound.CreateUserInput{
+		Email: "member@example.com", DisplayName: "Member", Password: "another strong password", Role: credbound.RoleMember,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberAuthn := aal2(member.ID, f.now)
+	if _, err := f.manager.BeginTOTPEnrollment(ctx, memberAuthn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.ConfirmTOTPEnrollment(ctx, memberAuthn, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	challenge, err := f.manager.BeginPasskeyRegistration(ctx, memberAuthn, "MacBook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishPasskeyRegistration(ctx, memberAuthn, challenge.Continuation, []byte("valid")); err != nil {
+		t.Fatal(err)
+	}
+	session, err := f.manager.CreateSession(ctx, memberAuthn, credbound.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Guards: self-reset, non-admin actor, invalid and unknown targets.
+	if err := f.manager.AdminResetSecondFactor(ctx, root, credbound.TrustedRequest{Local: true}, authn.UserID); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("self reset error = %v", err)
+	}
+	if err := f.manager.AdminResetSecondFactor(ctx, memberAuthn, credbound.TrustedRequest{}, authn.UserID); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("member reset error = %v", err)
+	}
+	if err := f.manager.AdminResetSecondFactor(ctx, root, credbound.TrustedRequest{Local: true}, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("invalid target error = %v", err)
+	}
+	if err := f.manager.AdminResetSecondFactor(ctx, root, credbound.TrustedRequest{Local: true}, "01890000-0000-7000-8000-000000000000"); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("unknown target error = %v", err)
+	}
+
+	if err := f.manager.AdminResetSecondFactor(ctx, root, credbound.TrustedRequest{Local: true}, member.ID); err != nil {
+		t.Fatalf("admin reset = %v", err)
+	}
+
+	// TOTP, recovery codes, passkeys and sessions are all gone atomically.
+	status, err := f.manager.TOTPStatus(ctx, root, member.ID)
+	if err != nil || status.Enrolled || status.Active || status.UnusedRecoveryCodes != 0 {
+		t.Fatalf("status after reset = %#v, %v", status, err)
+	}
+	passkeys, err := collectPasskeys(t, f.manager.Passkeys(ctx, root, member.ID))
+	if err != nil || len(passkeys) != 0 {
+		t.Fatalf("passkeys after reset = %#v, %v", passkeys, err)
+	}
+	if _, _, err := f.manager.AuthenticateSession(ctx, session.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("session after reset error = %v", err)
+	}
+	// The account falls back to its first factor without a pending 2FA step.
+	signin, err := f.manager.AuthenticatePassword(ctx, "member@example.com", "another strong password")
+	if err != nil || signin.SecondFactorRequired {
+		t.Fatalf("post-reset sign-in = %#v, %v", signin, err)
+	}
+	// Resetting an account that has no second factor left stays a success.
+	if err := f.manager.AdminResetSecondFactor(ctx, root, credbound.TrustedRequest{Local: true}, member.ID); err != nil {
+		t.Fatalf("idempotent reset = %v", err)
+	}
+}
+
+func TestRegenerateRecoveryCodes(t *testing.T) {
+	f := newFixture(t)
+	authn, _ := f.bootstrap(t)
+	ctx := context.Background()
+	stepUp := aal2(authn.UserID, f.now)
+
+	// Without an active factor the regeneration reports ErrNotFound.
+	if _, err := f.manager.RegenerateRecoveryCodes(ctx, stepUp); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("no factor error = %v", err)
+	}
+	if _, err := f.manager.BeginTOTPEnrollment(ctx, stepUp); err != nil {
+		t.Fatal(err)
+	}
+	original, err := f.manager.ConfirmTOTPEnrollment(ctx, stepUp, "123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.RegenerateRecoveryCodes(ctx, authn); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("AAL1 regeneration error = %v", err)
+	}
+	replacement, err := f.manager.RegenerateRecoveryCodes(ctx, stepUp)
+	if err != nil || len(replacement) != 10 {
+		t.Fatalf("regenerated codes = %d, %v", len(replacement), err)
+	}
+	// The previous set stopped working in the same transaction.
+	if _, err := f.manager.VerifyTOTP(ctx, authn, original[0]); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("old recovery code error = %v", err)
+	}
+	if _, err := f.manager.VerifyTOTP(ctx, authn, replacement[0]); err != nil {
+		t.Fatalf("new recovery code = %v", err)
+	}
+	status, err := f.manager.TOTPStatus(ctx, stepUp, "")
+	if err != nil || status.UnusedRecoveryCodes != 9 {
+		t.Fatalf("status after regeneration = %#v, %v", status, err)
+	}
+}
