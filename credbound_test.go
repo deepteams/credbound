@@ -504,3 +504,49 @@ func (r *counterReader) Read(value []byte) (int, error) {
 func bytesOf(value byte, size int) []byte { return []byte(strings.Repeat(string([]byte{value}), size)) }
 
 var _ io.Reader = (*counterReader)(nil)
+
+func TestExportUserData(t *testing.T) {
+	f := newFixture(t)
+	authn, workspace := f.bootstrap(t)
+	ctx := context.Background()
+	rootActor := aal2(authn.UserID, f.now)
+
+	if _, err := f.manager.CreatePAT(ctx, rootActor, credbound.CreatePATInput{
+		Name: "ci", WorkspaceID: workspace.ID, Scopes: []string{"read"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Self-export: profile, at least the primary email, the admin membership,
+	// and the PAT, with the digest scrubbed.
+	export, err := f.manager.ExportUserData(ctx, rootActor, "")
+	if err != nil {
+		t.Fatalf("self export = %v", err)
+	}
+	if export.User.ID != authn.UserID || len(export.Emails) == 0 {
+		t.Fatalf("export profile/emails = %#v", export)
+	}
+	if len(export.Workspaces) != 1 || export.Workspaces[0].Workspace.ID != workspace.ID ||
+		export.Workspaces[0].Membership.Role != credbound.RoleAdmin {
+		t.Fatalf("export workspaces = %#v", export.Workspaces)
+	}
+	if len(export.PATs) != 1 || export.PATs[0].Digest != nil {
+		t.Fatalf("export PATs = %#v", export.PATs)
+	}
+
+	// An administrator can export another user; a non-admin member cannot.
+	member, err := f.manager.CreateUser(ctx, rootActor, workspace.ID, credbound.CreateUserInput{
+		Email: "member@example.com", DisplayName: "Member", Password: "another secure password", Role: credbound.RoleMember,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminExport, err := f.manager.ExportUserData(ctx, rootActor, member.ID)
+	if err != nil || adminExport.User.ID != member.ID {
+		t.Fatalf("admin export = %#v, %v", adminExport, err)
+	}
+	memberActor := aal2(member.ID, f.now)
+	if _, err := f.manager.ExportUserData(ctx, memberActor, authn.UserID); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("member cross-user export = %v", err)
+	}
+}
