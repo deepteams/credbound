@@ -97,9 +97,12 @@ AdminUpdateUser(ctx, authn, TrustedRequest, userID, UpdateUserInput) (User, erro
 AddMembership(ctx, authn, workspaceID, userID, role) (Membership, error)
 SetMembershipStatus(ctx, authn, workspaceID, userID, status) (Membership, error)
 RemoveMembership(ctx, authn, workspaceID, userID) error
+User(ctx, authn, userID) (User, error)
 Users(ctx, authn, PageRequest) iter.Seq2[PageEvent[User], error]
+Workspace(ctx, authn, workspaceID) (Workspace, error)
 Workspaces(ctx, authn, PageRequest) iter.Seq2[PageEvent[Workspace], error]
 UserWorkspaces(ctx, authn, PageRequest) iter.Seq2[PageEvent[Workspace], error]
+Membership(ctx, authn, workspaceID, userID) (Membership, error)
 Memberships(ctx, authn, workspaceID, PageRequest) iter.Seq2[PageEvent[Membership], error]
 AuthenticatePassword(ctx, email, password) (Authentication, error)
 ChangePassword(ctx, authn, currentPassword, newPassword) error
@@ -155,14 +158,14 @@ BeginSSOLink(ctx, authn, providerConfigurationID) (SSOChallenge, error)
 BeginSSOStepUp(ctx, authn, providerConfigurationID) (SSOChallenge, error)
 FinishSSO(ctx, continuation, response) (Authentication, error)
 UnlinkSSO(ctx, authn, identityID) error
-SSOIdentities(ctx, authn, PageRequest) iter.Seq2[PageEvent[SSOIdentity], error]
+SSOIdentities(ctx, authn, userID, PageRequest) iter.Seq2[PageEvent[SSOIdentity], error]
 
 RequireStepUp(authn) error
 
 CreatePAT(ctx, authn, CreatePATInput) (IssuedPAT, error)
 AuthenticatePAT(ctx, rawToken) (Authentication, error)
 RevokePAT(ctx, authn, patID) error
-PATs(ctx, authn, PageRequest) iter.Seq2[PageEvent[PAT], error]
+PATs(ctx, authn, userID, PageRequest) iter.Seq2[PageEvent[PAT], error]
 
 GrantRole(ctx, authn, workspaceID, userID, role) error
 InviteToWorkspace(ctx, authn, workspaceID, InviteToWorkspaceInput) (IssuedWorkspaceInvitation, error)

@@ -432,7 +432,7 @@ func TestSSOJITProvisioningHappyPath(t *testing.T) {
 		membership.ProvisioningSource != "jit:"+domain.ID {
 		t.Fatalf("JIT membership = %#v, %v", membership, err)
 	}
-	identities := collectSSOIdentities(t, f.manager.SSOIdentities(ctx, provisioned, credbound.PageRequest{}))
+	identities := collectSSOIdentities(t, f.manager.SSOIdentities(ctx, provisioned, "", credbound.PageRequest{}))
 	if len(identities) != 1 || identities[0].Subject != "subject-jit" || identities[0].Email != "alice@corp.example.com" {
 		t.Fatalf("JIT identities = %#v", identities)
 	}

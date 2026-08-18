@@ -193,17 +193,29 @@ func (m *Manager) RevokePAT(ctx context.Context, actor Authentication, patID str
 	return nil
 }
 
-// PATs streams the actor's tokens — metadata, prefix and timestamps, never
-// the secret. It requires a recent interactive authentication.
-func (m *Manager) PATs(ctx context.Context, actor Authentication, page PageRequest) iter.Seq2[PageEvent[PAT], error] {
-	if err := m.requireRecentInteractive(ctx, actor); err != nil {
+// PATs streams a user's tokens — metadata, prefix and timestamps, never the
+// secret. An empty userID means the actor, which requires a recent
+// interactive authentication; reading another user requires admin users
+// read — the same scoping as Sessions, Emails and Passkeys.
+func (m *Manager) PATs(ctx context.Context, actor Authentication, userID string, page PageRequest) iter.Seq2[PageEvent[PAT], error] {
+	if actor.UserID == "" {
+		return errorSeq[PageEvent[PAT]](ErrUnauthorized)
+	}
+	if userID == "" {
+		userID = actor.UserID
+	}
+	if userID == actor.UserID {
+		if err := m.requireRecentInteractive(ctx, actor); err != nil {
+			return errorSeq[PageEvent[PAT]](err)
+		}
+	} else if err := m.AuthorizeAdmin(ctx, actor, PermissionUsersRead); err != nil {
 		return errorSeq[PageEvent[PAT]](err)
 	}
 	page, err := normalizePage(page)
 	if err != nil {
 		return errorSeq[PageEvent[PAT]](err)
 	}
-	return m.store.PATs(ctx, actor.UserID, page)
+	return m.store.PATs(ctx, userID, page)
 }
 
 func parsePAT(raw string) (string, bool) {

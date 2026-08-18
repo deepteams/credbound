@@ -459,6 +459,67 @@ func (m *Manager) RemoveMembership(ctx context.Context, actor Authentication, wo
 	return nil
 }
 
+// User returns one account by ID. An empty userID means the actor, which
+// requires a recent interactive authentication; reading another user
+// requires admin users read — the same scoping as Emails and Passkeys.
+func (m *Manager) User(ctx context.Context, actor Authentication, userID string) (User, error) {
+	if actor.UserID == "" {
+		return User{}, ErrUnauthorized
+	}
+	if userID == "" {
+		userID = actor.UserID
+	}
+	if userID == actor.UserID {
+		if err := m.requireRecentInteractive(ctx, actor); err != nil {
+			return User{}, err
+		}
+	} else {
+		if !validUUIDv7(userID) {
+			return User{}, fmt.Errorf("%w: invalid user id", ErrInvalidInput)
+		}
+		if err := m.AuthorizeAdmin(ctx, actor, PermissionUsersRead); err != nil {
+			return User{}, err
+		}
+	}
+	return m.store.UserByID(ctx, userID)
+}
+
+// Workspace returns one workspace by ID. The actor needs workspace access in
+// it; admin workspaces read reaches any workspace of the instance.
+func (m *Manager) Workspace(ctx context.Context, actor Authentication, workspaceID string) (Workspace, error) {
+	if !validUUIDv7(workspaceID) {
+		return Workspace{}, fmt.Errorf("%w: invalid workspace id", ErrInvalidInput)
+	}
+	if err := m.AuthorizePermission(ctx, actor, workspaceID, PermissionWorkspaceAccess); err != nil {
+		if adminErr := m.AuthorizeAdmin(ctx, actor, PermissionWorkspacesRead); adminErr != nil {
+			return Workspace{}, err
+		}
+	}
+	return m.store.WorkspaceByID(ctx, workspaceID)
+}
+
+// Membership returns one membership by workspace and user. An empty userID
+// means the actor's own membership, which needs workspace access; reading
+// another member requires workspace users read in that workspace.
+func (m *Manager) Membership(ctx context.Context, actor Authentication, workspaceID, userID string) (Membership, error) {
+	if !validUUIDv7(workspaceID) {
+		return Membership{}, fmt.Errorf("%w: invalid workspace id", ErrInvalidInput)
+	}
+	if userID == "" {
+		userID = actor.UserID
+	}
+	permission := PermissionWorkspaceUsersRead
+	if userID == actor.UserID {
+		permission = PermissionWorkspaceAccess
+	} else if !validUUIDv7(userID) {
+		return Membership{}, fmt.Errorf("%w: invalid user id", ErrInvalidInput)
+	}
+	if err := m.AuthorizePermission(ctx, actor, workspaceID, permission); err != nil {
+		return Membership{}, err
+	}
+	return m.store.Membership(ctx, workspaceID, userID)
+}
+
 // Users streams every global account. It requires admin users read; the
 // authorization itself is audited like every administrative access.
 func (m *Manager) Users(ctx context.Context, actor Authentication, page PageRequest) iter.Seq2[PageEvent[User], error] {

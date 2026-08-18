@@ -53,8 +53,9 @@
 //     GrantRole, RequireStepUp.
 //   - Lifecycle: Bootstrap, CreateUser, UpdateUser, Disable/EnableUser,
 //     CreateWorkspace, UpdateWorkspace, Disable/EnableWorkspace,
-//     AddMembership, SetMembershipStatus, RemoveMembership, and the Users,
-//     Workspaces, UserWorkspaces, Memberships listings.
+//     AddMembership, SetMembershipStatus, RemoveMembership, the User,
+//     Workspace, Membership getters, and the Users, Workspaces,
+//     UserWorkspaces, Memberships listings.
 //   - Invitations: InviteToWorkspace, AcceptInvitation,
 //     RegisterFromInvitation, RevokeInvitation, WorkspaceInvitations.
 //   - Privacy (data-subject requests): ExportUserData, AnonymizeUser.

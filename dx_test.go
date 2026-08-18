@@ -70,15 +70,15 @@ func TestCollectPageAndValidationError(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	pats, page, err := credbound.CollectPage(f.manager.PATs(ctx, authn, credbound.PageRequest{Limit: 1}))
+	pats, page, err := credbound.CollectPage(f.manager.PATs(ctx, authn, "", credbound.PageRequest{Limit: 1}))
 	if err != nil || len(pats) != 1 || !page.HasMore || page.NextCursor == "" {
 		t.Fatalf("first page = %d items, %#v, %v", len(pats), page, err)
 	}
-	rest, last, err := credbound.CollectPage(f.manager.PATs(ctx, authn, credbound.PageRequest{Cursor: page.NextCursor, Limit: 10}))
+	rest, last, err := credbound.CollectPage(f.manager.PATs(ctx, authn, "", credbound.PageRequest{Cursor: page.NextCursor, Limit: 10}))
 	if err != nil || len(rest) != 1 || last.HasMore {
 		t.Fatalf("second page = %d items, %#v, %v", len(rest), last, err)
 	}
-	if _, _, err := credbound.CollectPage(f.manager.PATs(ctx, credbound.Authentication{}, credbound.PageRequest{})); !errors.Is(err, credbound.ErrUnauthorized) {
+	if _, _, err := credbound.CollectPage(f.manager.PATs(ctx, credbound.Authentication{}, "", credbound.PageRequest{})); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("collect error passthrough = %v", err)
 	}
 

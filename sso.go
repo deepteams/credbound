@@ -414,17 +414,29 @@ func (m *Manager) UnlinkSSO(ctx context.Context, actor Authentication, identityI
 	return nil
 }
 
-// SSOIdentities streams the actor's linked external identities with their
-// latest uses. It requires a recent interactive authentication.
-func (m *Manager) SSOIdentities(ctx context.Context, actor Authentication, page PageRequest) iter.Seq2[PageEvent[SSOIdentity], error] {
-	if err := m.requireRecentInteractive(ctx, actor); err != nil {
+// SSOIdentities streams a user's linked external identities with their
+// latest uses. An empty userID means the actor, which requires a recent
+// interactive authentication; reading another user requires admin users
+// read — the same scoping as Sessions, Emails and Passkeys.
+func (m *Manager) SSOIdentities(ctx context.Context, actor Authentication, userID string, page PageRequest) iter.Seq2[PageEvent[SSOIdentity], error] {
+	if actor.UserID == "" {
+		return errorSeq[PageEvent[SSOIdentity]](ErrUnauthorized)
+	}
+	if userID == "" {
+		userID = actor.UserID
+	}
+	if userID == actor.UserID {
+		if err := m.requireRecentInteractive(ctx, actor); err != nil {
+			return errorSeq[PageEvent[SSOIdentity]](err)
+		}
+	} else if err := m.AuthorizeAdmin(ctx, actor, PermissionUsersRead); err != nil {
 		return errorSeq[PageEvent[SSOIdentity]](err)
 	}
 	page, err := normalizePage(page)
 	if err != nil {
 		return errorSeq[PageEvent[SSOIdentity]](err)
 	}
-	return m.store.SSOIdentities(ctx, actor.UserID, page)
+	return m.store.SSOIdentities(ctx, userID, page)
 }
 
 func (m *Manager) encodeSSOContinuation(state ssoContinuation) (string, error) {

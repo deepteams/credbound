@@ -295,8 +295,8 @@ func TestWorkspaceAuditAndErrorSequences(t *testing.T) {
 		t.Fatalf("workspace audit = %#v", page)
 	}
 	for _, sequence := range []func(func(credbound.PageEvent[credbound.PAT], error) bool){
-		f.manager.PATs(context.Background(), credbound.Authentication{}, credbound.PageRequest{}),
-		f.manager.PATs(context.Background(), authn, credbound.PageRequest{Limit: 101}),
+		f.manager.PATs(context.Background(), credbound.Authentication{}, "", credbound.PageRequest{}),
+		f.manager.PATs(context.Background(), authn, "", credbound.PageRequest{Limit: 101}),
 	} {
 		seen := false
 		for _, err := range sequence {

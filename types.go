@@ -918,7 +918,7 @@ type PageEvent[T any] struct {
 // the common case when a caller wants one page and a cursor rather than a
 // stream:
 //
-//	pats, page, err := credbound.CollectPage(manager.PATs(ctx, authn, credbound.PageRequest{Limit: 50}))
+//	pats, page, err := credbound.CollectPage(manager.PATs(ctx, authn, "", credbound.PageRequest{Limit: 50}))
 //
 // Streaming callers range over the sequence directly and forward each
 // PageEvent (for example as NDJSON) instead.

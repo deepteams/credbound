@@ -174,7 +174,7 @@ func TestSSOLinkLoginStepUpAndUnlink(t *testing.T) {
 	if _, err := f.manager.FinishSSO(ctx, duplicateLink.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("duplicate SSO link = %v", err)
 	}
-	identities := collectSSOIdentities(t, f.manager.SSOIdentities(ctx, linked, credbound.PageRequest{}))
+	identities := collectSSOIdentities(t, f.manager.SSOIdentities(ctx, linked, "", credbound.PageRequest{}))
 	if len(identities) != 1 || !uuidV7.MatchString(identities[0].ID) || identities[0].ProviderKind != credbound.SSOProviderOIDC {
 		t.Fatalf("SSO identities = %#v", identities)
 	}
@@ -327,8 +327,8 @@ func TestEmailAndSSOFailureBoundaries(t *testing.T) {
 	if err := ssoFixture.manager.UnlinkSSO(ctx, aal2(authn.UserID, ssoFixture.now), "invalid"); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid SSO identity id = %v", err)
 	}
-	assertSSOSequenceError(t, ssoFixture.manager.SSOIdentities(ctx, credbound.Authentication{}, credbound.PageRequest{}), credbound.ErrUnauthorized)
-	assertSSOSequenceError(t, ssoFixture.manager.SSOIdentities(ctx, aal2(authn.UserID, ssoFixture.now), credbound.PageRequest{Limit: 101}), credbound.ErrInvalidInput)
+	assertSSOSequenceError(t, ssoFixture.manager.SSOIdentities(ctx, credbound.Authentication{}, "", credbound.PageRequest{}), credbound.ErrUnauthorized)
+	assertSSOSequenceError(t, ssoFixture.manager.SSOIdentities(ctx, aal2(authn.UserID, ssoFixture.now), "", credbound.PageRequest{Limit: 101}), credbound.ErrInvalidInput)
 }
 
 func collectEmails(t *testing.T, sequence func(func(credbound.PageEvent[credbound.EmailAddress], error) bool)) []credbound.EmailAddress {

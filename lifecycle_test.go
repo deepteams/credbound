@@ -356,3 +356,85 @@ func TestUpdateUserProfile(t *testing.T) {
 func aal1(userID string, at time.Time) credbound.Authentication {
 	return credbound.Authentication{UserID: userID, Method: credbound.MethodPassword, Level: credbound.AAL1, AuthenticatedAt: at}
 }
+
+func TestByIDGetters(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	root, workspace := f.bootstrap(t)
+	stepUp := aal2(root.UserID, f.now)
+	member, err := f.manager.CreateUser(ctx, stepUp, workspace.ID, credbound.CreateUserInput{
+		Email: "member@example.com", DisplayName: "Member", Password: "another strong password", Role: credbound.RoleMember,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberAuthn := aal1(member.ID, f.now)
+
+	// User: empty id is the actor; another account needs admin users read.
+	if self, err := f.manager.User(ctx, memberAuthn, ""); err != nil || self.ID != member.ID {
+		t.Fatalf("self user = %#v, %v", self, err)
+	}
+	if fetched, err := f.manager.User(ctx, stepUp, member.ID); err != nil || fetched.ID != member.ID {
+		t.Fatalf("admin user read = %#v, %v", fetched, err)
+	}
+	if _, err := f.manager.User(ctx, memberAuthn, root.UserID); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("non-admin cross-user read = %v", err)
+	}
+	if _, err := f.manager.User(ctx, stepUp, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("invalid user id = %v", err)
+	}
+	if _, err := f.manager.User(ctx, credbound.Authentication{}, ""); !errors.Is(err, credbound.ErrUnauthorized) {
+		t.Fatalf("anonymous user read = %v", err)
+	}
+
+	// Workspace: workspace access or admin workspaces read.
+	if fetched, err := f.manager.Workspace(ctx, memberAuthn, workspace.ID); err != nil || fetched.ID != workspace.ID {
+		t.Fatalf("member workspace read = %#v, %v", fetched, err)
+	}
+	other, err := f.manager.CreateWorkspace(ctx, stepUp, credbound.CreateWorkspaceInput{Name: "Other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.Workspace(ctx, memberAuthn, other.ID); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("non-member workspace read = %v", err)
+	}
+	if fetched, err := f.manager.Workspace(ctx, stepUp, other.ID); err != nil || fetched.ID != other.ID {
+		t.Fatalf("admin workspace read = %#v, %v", fetched, err)
+	}
+	if _, err := f.manager.Workspace(ctx, memberAuthn, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("invalid workspace id = %v", err)
+	}
+
+	// Membership: own with workspace access, another member with users read.
+	if fetched, err := f.manager.Membership(ctx, memberAuthn, workspace.ID, ""); err != nil || fetched.UserID != member.ID || fetched.Role != credbound.RoleMember {
+		t.Fatalf("own membership = %#v, %v", fetched, err)
+	}
+	if fetched, err := f.manager.Membership(ctx, stepUp, workspace.ID, member.ID); err != nil || fetched.UserID != member.ID {
+		t.Fatalf("admin membership read = %#v, %v", fetched, err)
+	}
+	if _, err := f.manager.Membership(ctx, memberAuthn, workspace.ID, root.UserID); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("member cross-membership read = %v", err)
+	}
+	if _, err := f.manager.Membership(ctx, memberAuthn, workspace.ID, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("invalid membership user id = %v", err)
+	}
+	if _, err := f.manager.Membership(ctx, memberAuthn, "not-a-uuid", ""); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("invalid membership workspace id = %v", err)
+	}
+
+	// PATs and SSOIdentities share the same cross-user scoping as Sessions,
+	// Emails and Passkeys: admin users read reaches another account, a plain
+	// member does not.
+	if _, _, err := credbound.CollectPage(f.manager.PATs(ctx, stepUp, member.ID, credbound.PageRequest{})); err != nil {
+		t.Fatalf("admin PATs read = %v", err)
+	}
+	if _, _, err := credbound.CollectPage(f.manager.PATs(ctx, memberAuthn, root.UserID, credbound.PageRequest{})); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("non-admin cross-user PATs = %v", err)
+	}
+	if _, _, err := credbound.CollectPage(f.manager.SSOIdentities(ctx, stepUp, member.ID, credbound.PageRequest{})); err != nil {
+		t.Fatalf("admin SSO identities read = %v", err)
+	}
+	if _, _, err := credbound.CollectPage(f.manager.SSOIdentities(ctx, memberAuthn, root.UserID, credbound.PageRequest{})); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("non-admin cross-user SSO identities = %v", err)
+	}
+}

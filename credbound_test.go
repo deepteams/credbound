@@ -174,11 +174,11 @@ func TestPATLifecycleAndPagination(t *testing.T) {
 		t.Fatal("PAT unexpectedly satisfied step-up")
 	}
 
-	first := collectPage(t, f.manager.PATs(context.Background(), stepUp, credbound.PageRequest{Limit: 2}))
+	first := collectPage(t, f.manager.PATs(context.Background(), stepUp, "", credbound.PageRequest{Limit: 2}))
 	if len(first.items) != 2 || first.end == nil || !first.end.HasMore || first.end.NextCursor == "" {
 		t.Fatalf("first page = %#v", first)
 	}
-	second := collectPage(t, f.manager.PATs(context.Background(), stepUp, credbound.PageRequest{Limit: 2, Cursor: first.end.NextCursor}))
+	second := collectPage(t, f.manager.PATs(context.Background(), stepUp, "", credbound.PageRequest{Limit: 2, Cursor: first.end.NextCursor}))
 	if len(second.items) != 1 || second.end == nil || second.end.HasMore {
 		t.Fatalf("second page = %#v", second)
 	}
@@ -294,7 +294,7 @@ func TestAuditFailureFailsMutationClosed(t *testing.T) {
 		t.Fatalf("audit failure error = %v", err)
 	}
 	f.store.SetAuditFailure(nil)
-	page := collectPage(t, f.manager.PATs(context.Background(), authn, credbound.PageRequest{}))
+	page := collectPage(t, f.manager.PATs(context.Background(), authn, "", credbound.PageRequest{}))
 	if len(page.items) != 0 {
 		t.Fatalf("mutation committed despite audit failure: %#v", page.items)
 	}

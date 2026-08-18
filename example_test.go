@@ -102,12 +102,12 @@ func ExampleCollectPage() {
 		}
 		clock.Advance(time.Second) // distinct creation instants keep the page order stable
 	}
-	pats, page, err := credbound.CollectPage(manager.PATs(ctx, authn, credbound.PageRequest{Limit: 2}))
+	pats, page, err := credbound.CollectPage(manager.PATs(ctx, authn, "", credbound.PageRequest{Limit: 2}))
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println(len(pats), page.HasMore)
-	rest, page, err := credbound.CollectPage(manager.PATs(ctx, authn, credbound.PageRequest{Limit: 2, Cursor: page.NextCursor}))
+	rest, page, err := credbound.CollectPage(manager.PATs(ctx, authn, "", credbound.PageRequest{Limit: 2, Cursor: page.NextCursor}))
 	if err != nil {
 		log.Fatal(err)
 	}
