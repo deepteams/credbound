@@ -119,6 +119,16 @@ func New(database *sql.DB, options ...Option) (*Store, error) {
 	if store.streamTimeout <= 0 {
 		return nil, fmt.Errorf("%w: stream timeout must be positive", credbound.ErrInvalidInput)
 	}
+	// SQLite is a single-writer database and offers no row-level locking, so
+	// the invariant checks that read-then-write inside a mutation (last root
+	// administrator, sole workspace admin, the singleton audit chain head)
+	// stay correct only if write transactions are serialized. Capping the
+	// pool at one connection guarantees that: a second mutation cannot begin
+	// until the first commits, so it always reads the committed state instead
+	// of a stale snapshot. Reads do not open transactions, so streaming list
+	// operations are unaffected. This also removes the SQLITE_BUSY the driver
+	// would otherwise return when two mutations contend for the write lock.
+	database.SetMaxOpenConns(1)
 	if err := verifyConnection(database); err != nil {
 		return nil, err
 	}

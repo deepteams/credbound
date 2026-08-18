@@ -938,6 +938,17 @@ func (s *Store) AnonymizeUser(ctx context.Context, userID string, at time.Time, 
 		if _, err := q.GetUserByID(ctx, userID); err != nil {
 			return mapError(err)
 		}
+		// Take the same row locks as SetUserDisabled before counting: the
+		// scrub disables the account, so two concurrent anonymizations must
+		// not each read a stale "more than one root remains" (or unorphaned
+		// workspace) and then disable distinct rows, which would irreversibly
+		// erase the last root administrator or orphan a workspace.
+		if _, lockErr := q.LockRootAdministrators(ctx); lockErr != nil {
+			return mapError(lockErr)
+		}
+		if _, lockErr := q.LockUserAdminWorkspaces(ctx, userID); lockErr != nil {
+			return mapError(lockErr)
+		}
 		admin, adminErr := q.GetInstanceAdministrator(ctx, userID)
 		if adminErr != nil && !errors.Is(adminErr, sql.ErrNoRows) {
 			return mapError(adminErr)

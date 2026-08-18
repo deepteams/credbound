@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -270,6 +271,69 @@ func TestSessionCascadeOnDisableAndCredentialRevocation(t *testing.T) {
 	still, err := f.store.SessionByID(ctx, rootReplacement.ID)
 	if err != nil || still.RevokedAt != nil {
 		t.Fatalf("bulk revocation crossed users: %#v, %v", still, err)
+	}
+}
+
+// TestAnonymizeUserConcurrentRootGuard exercises the TOCTOU that would erase
+// the last root administrator: two concurrent anonymizations, each targeting a
+// distinct root, must not both succeed. SQLite has no row-level locking, so the
+// guard holds only because the store serializes write transactions (a single
+// pooled connection); the second anonymization then reads the first's
+// committed state and reports ErrConflict.
+func TestAnonymizeUserConcurrentRootGuard(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	users := f.bootstrapSessionUsers(t)
+	second := f.newSessionMember(t, users, "second-root@example.com")
+	if err := f.store.SetInstanceRole(ctx, credbound.InstanceAdministrator{UserID: second.ID, Role: credbound.InstanceRoleRoot, CreatedAt: f.now, UpdatedAt: f.now}, f.event(users.root.ID, "admin.set", second.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Build both commits before launching goroutines: the fixture's id/now
+	// counters are not safe for concurrent use.
+	firstCommit := f.event(users.root.ID, "user.anonymize", users.root.ID, "")
+	secondCommit := f.event(second.ID, "user.anonymize", second.ID, "")
+	targets := []struct {
+		userID string
+		commit credbound.Commit
+	}{{users.root.ID, firstCommit}, {second.ID, secondCommit}}
+
+	var wg sync.WaitGroup
+	errs := make([]error, len(targets))
+	wg.Add(len(targets))
+	for i, target := range targets {
+		go func(i int, userID string, commit credbound.Commit) {
+			defer wg.Done()
+			errs[i] = f.store.AnonymizeUser(ctx, userID, f.now, commit)
+		}(i, target.userID, target.commit)
+	}
+	wg.Wait()
+
+	succeeded, conflicted := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, credbound.ErrConflict):
+			conflicted++
+		default:
+			t.Fatalf("unexpected anonymize error = %v", err)
+		}
+	}
+	if succeeded != 1 || conflicted != 1 {
+		t.Fatalf("want exactly one success and one conflict, got %d success / %d conflict", succeeded, conflicted)
+	}
+	// A root administrator must remain enabled.
+	rootStill, err := f.store.UserByID(ctx, users.root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondStill, err := f.store.UserByID(ctx, second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rootStill.Disabled == secondStill.Disabled {
+		t.Fatalf("exactly one root must remain enabled: root disabled=%v second disabled=%v", rootStill.Disabled, secondStill.Disabled)
 	}
 }
 
