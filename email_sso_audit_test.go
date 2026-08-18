@@ -162,8 +162,9 @@ func TestClientAuditAPIControlsEnvelope(t *testing.T) {
 // and the link must be created from an existing interactive session
 // (SSO-002). The linked identity — keyed by the configuration, issuer, and
 // subject triplet and visible through the identities list — then signs the
-// user in at AAL2, and a step-up forces IdP reauthentication (SSO-003,
-// SSO-004).
+// user in at AAL2 under the fixture's trusting assurance policy (without one
+// SSO stays AAL1, per SSO-003 and TestSSOAAL1WithoutAssurance), and a
+// step-up forces IdP reauthentication (SSO-003, SSO-004).
 func TestSSOLinkLoginStepUpAndUnlink(t *testing.T) {
 	provider := &fakeSSOProvider{
 		configurationID: "0198b463-0000-7000-8000-0000000000aa", kind: credbound.SSOProviderOIDC,
