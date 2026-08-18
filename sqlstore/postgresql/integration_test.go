@@ -139,6 +139,63 @@ func TestPostgreSQLMigrationsAndStore(t *testing.T) {
 			return store.SetInstanceRole(ctx, value, pgCommit(now.Add(3*time.Second), pgID(15), user.ID, "admin.root.demote", second.ID, ""))
 		},
 	)
+
+	// Credential-currency guards: a finalization whose verified hash moved is
+	// refused, the current hash finalizes and clears the throttle, and session
+	// creation validates the credential fingerprint inside the transaction.
+	if _, err := store.RecordLoginFailure(ctx, second.ID, now, 5, now.Add(time.Hour), pgCommit(now, pgID(16), second.ID, "auth.failure", second.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordPasswordAuthentication(ctx, second.ID, "stale", now, pgCommit(now, pgID(17), second.ID, "auth.password.stale", second.ID, "")); !errors.Is(err, credbound.ErrConflict) {
+		t.Fatalf("stale finalization error = %v", err)
+	}
+	if _, err := store.LoginThrottleByUserID(ctx, second.ID); err != nil {
+		t.Fatalf("throttle vanished on refused finalization: %v", err)
+	}
+	if err := store.RecordPasswordAuthentication(ctx, second.ID, "hash", now, pgCommit(now, pgID(18), second.ID, "auth.password", second.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LoginThrottleByUserID(ctx, second.ID); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("throttle survived a completed sign-in: %v", err)
+	}
+	staleSession := credbound.Session{
+		ID: pgID(19), UserID: second.ID, Method: credbound.MethodPassword, Level: credbound.AAL1,
+		AuthenticatedAt: now, UserAgent: "agent", IPAddress: "203.0.113.7", Digest: []byte("digest"),
+		CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(24 * time.Hour),
+	}
+	if err := store.CreateSession(ctx, staleSession, credbound.CredentialFingerprint("previous"), pgCommit(now, pgID(20), second.ID, "session.create.stale", staleSession.ID, "")); !errors.Is(err, credbound.ErrConflict) {
+		t.Fatalf("stale session error = %v", err)
+	}
+
+	// The race the guard exists for: a password change and a session creation
+	// carrying the old credential's fingerprint run concurrently. Whatever the
+	// interleaving, the invariant holds — either the session is refused, or it
+	// was created before the change and the change's sweep revoked it.
+	raceSession := staleSession
+	raceSession.ID = pgID(21)
+	changeAt := now.Add(4 * time.Second)
+	results := make(chan error, 1)
+	go func() {
+		results <- store.ChangePassword(ctx, credbound.PasswordCredential{UserID: second.ID, Hash: "hash2", UpdatedAt: changeAt}, changeAt, pgCommit(changeAt, pgID(22), second.ID, "password.change", second.ID, ""))
+	}()
+	createErr := store.CreateSession(ctx, raceSession, credbound.CredentialFingerprint("hash"), pgCommit(now, pgID(23), second.ID, "session.create.race", raceSession.ID, ""))
+	if err := <-results; err != nil {
+		t.Fatalf("racing password change = %v", err)
+	}
+	switch {
+	case errors.Is(createErr, credbound.ErrConflict):
+		// The change won: the stale fingerprint was refused.
+	case createErr == nil:
+		created, err := store.SessionByID(ctx, raceSession.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if created.RevokedAt == nil {
+			t.Fatal("stale session survived the racing password change unrevoked")
+		}
+	default:
+		t.Fatalf("racing session creation = %v", createErr)
+	}
 }
 
 func assertPostgreSQLSequence[T any](t *testing.T, sequence func(func(credbound.PageEvent[T], error) bool)) int {

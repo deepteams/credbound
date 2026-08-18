@@ -90,7 +90,7 @@ func (m *Manager) Bootstrap(ctx context.Context, input BootstrapInput) (_ Authen
 	m.events.emit(ctx, EventUserCreated, func(listener EventListener) error { return listener.OnUserCreated(ctx, userEvent) })
 	m.events.emit(ctx, EventWorkspaceCreated, func(listener EventListener) error { return listener.OnWorkspaceCreated(ctx, workspaceEvent) })
 	m.events.emit(ctx, EventBootstrapCompleted, func(listener EventListener) error { return listener.OnBootstrapCompleted(ctx, bootstrapEvent) })
-	return Authentication{UserID: user.ID, Method: MethodPassword, Level: AAL1, AuthenticatedAt: now}, workspace, nil
+	return Authentication{UserID: user.ID, Method: MethodPassword, Level: AAL1, AuthenticatedAt: now, CredentialDigest: CredentialFingerprint(hash)}, workspace, nil
 }
 
 // CreateUser administratively creates an account with a verified primary
@@ -234,6 +234,10 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 		m.emitAuthenticationFailed(ctx, "auth.password.authenticate", audit, MethodPassword, user.ID, "invalid_credentials")
 		return Authentication{}, ErrInvalidCredentials
 	}
+	// currentHash tracks the stored hash this sign-in is entitled to finish
+	// against; the guarded finalization below refuses to complete once the
+	// credential moved to a different password.
+	currentHash := hash
 	if rehash {
 		newHash, hashErr := m.passwords.Hash(password)
 		if hashErr != nil {
@@ -250,13 +254,15 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 		replaceErr := m.store.RehashPassword(ctx, PasswordCredential{UserID: user.ID, Hash: newHash, UpdatedAt: m.now()}, hash, Commit{Audit: event})
 		switch {
 		case errors.Is(replaceErr, ErrConflict):
-			// A concurrent change or reset replaced the credential between
-			// the verification and the rehash: their newer password wins and
-			// the rehash is simply skipped, so this in-flight sign-in can
+			// Something replaced the credential between the verification and
+			// the rehash — either a concurrent rehash of the same password or
+			// a change/reset to a different one. The guarded finalization
+			// below distinguishes the two, so this in-flight sign-in can
 			// never resurrect the hash it verified against.
 		case replaceErr != nil:
 			return Authentication{}, m.mapStoreError(ctx, "auth.password.rehash", replaceErr)
 		default:
+			currentHash = newHash
 			rehashed := PasswordRehashedEvent{EventMeta: meta, UserID: user.ID}
 			m.events.emit(ctx, EventPasswordRehashed, func(listener EventListener) error { return listener.OnPasswordRehashed(ctx, rehashed) })
 		}
@@ -274,6 +280,15 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 	// nullifying the online-guessing defense for the second factor.
 	var audit AuditEvent
 	if requiresSecondFactor {
+		// The context stays pending until VerifyTOTP, which cannot clear the
+		// lockout or last_seen here, so the currency re-check is a plain read:
+		// the completing factor and the CreateSession fingerprint guard cover
+		// the window it leaves open.
+		refreshed, staleErr := m.confirmPasswordCurrent(ctx, user.ID, password, currentHash)
+		if staleErr != nil {
+			return Authentication{}, m.failStalePassword(ctx, user.ID, staleErr)
+		}
+		currentHash = refreshed
 		event, eventErr := m.newAudit(ctx, user.ID, "auth.password", "user", user.ID, "", AuditSucceeded, "")
 		if eventErr != nil {
 			return Authentication{}, eventErr
@@ -283,11 +298,29 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 		}
 		audit = event
 	} else {
-		recorded, auditErr := m.recordAuthenticationAudit(ctx, user.ID, "auth.password", AuditSucceeded, "")
-		if auditErr != nil {
-			return Authentication{}, auditErr
+		// The finalization is atomic: the store completes the sign-in only
+		// while currentHash is still the stored credential (ErrConflict
+		// otherwise). A conflict from a concurrent transparent rehash still
+		// encodes the same password, so the sign-in retries against the
+		// refreshed hash; a change or reset does not verify and fails.
+		for attempt := 0; ; attempt++ {
+			recorded, auditErr := m.recordPasswordAuthentication(ctx, user.ID, currentHash)
+			if auditErr == nil {
+				audit = recorded
+				break
+			}
+			if !errors.Is(auditErr, ErrConflict) {
+				return Authentication{}, auditErr
+			}
+			if attempt >= 2 {
+				return Authentication{}, m.failStalePassword(ctx, user.ID, ErrInvalidCredentials)
+			}
+			refreshed, staleErr := m.confirmPasswordCurrent(ctx, user.ID, password, currentHash)
+			if staleErr != nil {
+				return Authentication{}, m.failStalePassword(ctx, user.ID, staleErr)
+			}
+			currentHash = refreshed
 		}
-		audit = recorded
 	}
 	authentication := Authentication{
 		UserID:               user.ID,
@@ -295,9 +328,70 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 		Level:                AAL1,
 		AuthenticatedAt:      m.now(),
 		SecondFactorRequired: requiresSecondFactor,
+		CredentialDigest:     CredentialFingerprint(currentHash),
 	}
 	m.emitAuthenticationSucceeded(ctx, "auth.password.authenticate", audit, authentication)
 	return authentication, nil
+}
+
+// confirmPasswordCurrent re-reads the stored credential and returns the hash
+// the given password still verifies against. An unchanged hash short-circuits
+// on verifiedHash; a hash that moved under a concurrent transparent rehash of
+// the same password is adopted as the new current hash; a credential that
+// vanished or moved to a different password (a concurrent change or reset)
+// reports ErrInvalidCredentials.
+func (m *Manager) confirmPasswordCurrent(ctx context.Context, userID, password, verifiedHash string) (string, error) {
+	credential, err := m.store.PasswordByUserID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return "", ErrInvalidCredentials
+		}
+		return "", err
+	}
+	if credential.Hash == verifiedHash {
+		return verifiedHash, nil
+	}
+	match, _, verifyErr := m.passwords.Verify(password, credential.Hash)
+	if verifyErr != nil {
+		return "", fmt.Errorf("verify password: %w", verifyErr)
+	}
+	if !match {
+		return "", ErrInvalidCredentials
+	}
+	return credential.Hash, nil
+}
+
+// recordPasswordAuthentication finalizes a password sign-in atomically with
+// the credential-currency guard; ErrConflict reports that the stored
+// credential moved between the verification and the finalization.
+func (m *Manager) recordPasswordAuthentication(ctx context.Context, userID, currentHash string) (AuditEvent, error) {
+	event, err := m.newAudit(ctx, userID, "auth.password", "user", userID, "", AuditSucceeded, "")
+	if err != nil {
+		return AuditEvent{}, err
+	}
+	if storeErr := m.store.RecordPasswordAuthentication(ctx, userID, currentHash, m.now(), Commit{Audit: event}); storeErr != nil {
+		if errors.Is(storeErr, ErrConflict) {
+			return AuditEvent{}, ErrConflict
+		}
+		return AuditEvent{}, m.mapStoreError(ctx, "auth.password", storeErr)
+	}
+	return event, nil
+}
+
+// failStalePassword answers a sign-in whose verified password stopped being
+// current before it could finalize: the audit records the real reason while
+// the public error is indistinguishable from a wrong password. Infrastructure
+// errors pass through untouched.
+func (m *Manager) failStalePassword(ctx context.Context, userID string, cause error) error {
+	if !errors.Is(cause, ErrInvalidCredentials) {
+		return cause
+	}
+	audit, auditErr := m.recordAuthenticationAudit(ctx, userID, "auth.password", AuditFailed, "stale_credential")
+	if auditErr != nil {
+		return auditErr
+	}
+	m.emitAuthenticationFailed(ctx, "auth.password.authenticate", audit, MethodPassword, userID, "stale_credential")
+	return ErrInvalidCredentials
 }
 
 // ChangePassword replaces the actor's password after re-verifying the
@@ -313,7 +407,9 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 // SessionStore-capable) in the same transaction that installs the new
 // password, so a leaked session token cannot outlive it and a failure leaves
 // both untouched; this includes the actor's current session, so the host
-// re-establishes one afterwards. PATs and OAuth grants are deliberately
+// re-establishes one afterwards by re-authenticating with the new password —
+// a pre-change password Authentication can no longer mint sessions (see
+// CreateSession). PATs and OAuth grants are deliberately
 // preserved: they are integration credentials, not interactive sessions, and a
 // routine change should not break machine-to-machine access. A host managing
 // its own sessions must terminate them itself, and one treating the change as a

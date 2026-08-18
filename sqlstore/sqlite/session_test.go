@@ -49,7 +49,7 @@ func (f *fixture) newSession(t *testing.T, userID string) credbound.Session {
 		CreatedAt: f.now, LastSeenAt: f.now, ExpiresAt: f.now.Add(30 * 24 * time.Hour),
 	}
 	f.now = f.now.Add(time.Millisecond)
-	if err := f.store.CreateSession(context.Background(), session, f.event(userID, "session.create", session.ID, "")); err != nil {
+	if err := f.store.CreateSession(context.Background(), session, nil, f.event(userID, "session.create", session.ID, "")); err != nil {
 		t.Fatal(err)
 	}
 	return session
@@ -62,13 +62,13 @@ func TestSessionStoreLifecycle(t *testing.T) {
 	user := users.root
 	session := f.newSession(t, user.ID)
 
-	if err := f.store.CreateSession(ctx, session, f.event(user.ID, "session.duplicate", session.ID, "")); !errors.Is(err, credbound.ErrConflict) {
+	if err := f.store.CreateSession(ctx, session, nil, f.event(user.ID, "session.duplicate", session.ID, "")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("duplicate session error = %v", err)
 	}
 	orphan := session
 	orphan.ID = f.id()
 	orphan.UserID = f.id()
-	if err := f.store.CreateSession(ctx, orphan, f.event(user.ID, "session.orphan", orphan.ID, "")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.CreateSession(ctx, orphan, nil, f.event(user.ID, "session.orphan", orphan.ID, "")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("orphan session error = %v", err)
 	}
 

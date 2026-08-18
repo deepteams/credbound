@@ -9,6 +9,20 @@ breaking changes may land in any release and are called out explicitly.
 
 ### Security
 
+- A password sign-in can no longer complete after its password was
+  concurrently replaced. `AuthenticatePassword` finalizes through the new
+  `Store.RecordPasswordAuthentication`, which re-checks inside the
+  finalization transaction that the verified hash is still the stored
+  credential (a concurrent transparent rehash of the same password is
+  retried, not refused), and password-derived `Authentication` values now
+  carry a `CredentialDigest` fingerprint that `SessionStore.CreateSession`
+  (breaking: new `credentialDigest` parameter) re-validates inside the
+  session transaction — so a sign-in racing `ChangePassword` or
+  `CompletePasswordReset` can neither finish nor mint a session that the
+  replacement's revocation sweep should have killed. After a change the
+  host re-authenticates with the new password before creating the
+  follow-up session.
+
 - `githubadapter` now runs PKCE (S256) end to end: `Begin` sends a
   `code_challenge` and seals the verifier into the ceremony continuation,
   and the code exchange presents `code_verifier`. GitHub recommends PKCE

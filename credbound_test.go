@@ -551,20 +551,37 @@ type fakePasswords struct {
 	rehash      bool
 	verifyErr   error
 	hashErr     error
+	// onVerify, when set, runs at the start of every Verify call; tests use
+	// it to interleave a concurrent mutation inside a sign-in's verification
+	// window.
+	onVerify func()
+	// varyHashes makes every Hash call produce a distinct encoding of the
+	// same password, the way a real salted hasher does, so rehash races can
+	// be exercised.
+	varyHashes bool
+	hashCount  int
 }
 
 func (f *fakePasswords) Hash(password string) (string, error) {
 	if f.hashErr != nil {
 		return "", f.hashErr
 	}
+	if f.varyHashes {
+		f.hashCount++
+		return fmt.Sprintf("hash:%s#%d", password, f.hashCount), nil
+	}
 	return "hash:" + password, nil
 }
 func (f *fakePasswords) Verify(password, encoded string) (bool, bool, error) {
 	f.verifyCalls++
+	if f.onVerify != nil {
+		f.onVerify()
+	}
 	if f.verifyErr != nil {
 		return false, false, f.verifyErr
 	}
-	return encoded == "hash:"+password, f.rehash, nil
+	match := encoded == "hash:"+password || strings.HasPrefix(encoded, "hash:"+password+"#")
+	return match, f.rehash, nil
 }
 
 type fakeTOTP struct{}

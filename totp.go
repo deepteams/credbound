@@ -368,7 +368,10 @@ func normalizeRecoveryCode(code string) string {
 }
 
 func (m *Manager) promoteTOTP(actor Authentication) Authentication {
-	return Authentication{UserID: actor.UserID, Method: MethodTOTP, Level: AAL2, AuthenticatedAt: m.now()}
+	// The credential fingerprint of the first factor travels with the
+	// promotion, so a session minted after TOTP still refuses to outlive a
+	// password concurrently replaced between the two factors.
+	return Authentication{UserID: actor.UserID, Method: MethodTOTP, Level: AAL2, AuthenticatedAt: m.now(), CredentialDigest: actor.CredentialDigest}
 }
 
 // requireTOTPProvider gates the flows that need Config.TOTP; a manager built

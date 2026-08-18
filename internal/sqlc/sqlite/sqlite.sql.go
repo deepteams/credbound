@@ -1693,6 +1693,17 @@ func (q *Queries) LockLoginThrottle(ctx context.Context, arg LockLoginThrottlePa
 	return result.RowsAffected()
 }
 
+const lockPassword = `-- name: LockPassword :one
+SELECT user_id, hash, updated_at FROM credbound_password_credentials WHERE user_id = ?1
+`
+
+func (q *Queries) LockPassword(ctx context.Context, userID string) (CredboundPasswordCredential, error) {
+	row := q.db.QueryRowContext(ctx, lockPassword, userID)
+	var i CredboundPasswordCredential
+	err := row.Scan(&i.UserID, &i.Hash, &i.UpdatedAt)
+	return i, err
+}
+
 const oAuthAccessTokenJSONByID = `-- name: OAuthAccessTokenJSONByID :one
 SELECT data_json FROM credbound_oauth_access_tokens WHERE id = ?1
 `

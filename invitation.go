@@ -233,7 +233,7 @@ func (m *Manager) RegisterFromInvitation(ctx context.Context, raw string, input 
 	m.events.emit(ctx, EventUserCreated, func(listener EventListener) error { return listener.OnUserCreated(ctx, createdEvent) })
 	acceptedEvent := WorkspaceInvitationEvent{EventMeta: invitationMeta, Invitation: accepted}
 	m.events.emit(ctx, EventWorkspaceInvitationAccepted, func(listener EventListener) error { return listener.OnWorkspaceInvitationAccepted(ctx, acceptedEvent) })
-	authentication := Authentication{UserID: userID, Method: MethodPassword, Level: AAL1, AuthenticatedAt: now}
+	authentication := Authentication{UserID: userID, Method: MethodPassword, Level: AAL1, AuthenticatedAt: now, CredentialDigest: CredentialFingerprint(hash)}
 	m.emitAuthenticationSucceeded(ctx, "workspace.invitation.register", event, authentication)
 	return authentication, user, nil
 }

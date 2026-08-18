@@ -141,6 +141,9 @@ INSERT INTO credbound_password_credentials (user_id, hash, updated_at) VALUES (?
 -- name: GetPassword :one
 SELECT user_id, hash, updated_at FROM credbound_password_credentials WHERE user_id = ?1;
 
+-- name: LockPassword :one
+SELECT user_id, hash, updated_at FROM credbound_password_credentials WHERE user_id = ?1;
+
 -- name: ReplacePassword :execrows
 UPDATE credbound_password_credentials SET hash = ?2, updated_at = ?3 WHERE user_id = ?1;
 

@@ -451,6 +451,30 @@ func (s *Store) RecordAuthentication(ctx context.Context, userID string, seenAt 
 	})
 }
 
+// RecordPasswordAuthentication marks a successful password login like
+// RecordAuthentication, but only while currentHash is still the stored
+// credential; a credential that moved or vanished reports
+// credbound.ErrConflict and rolls the transaction back.
+func (s *Store) RecordPasswordAuthentication(ctx context.Context, userID, currentHash string, seenAt time.Time, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		credential, err := q.LockPassword(ctx, userID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return credbound.ErrConflict
+			}
+			return mapError(err)
+		}
+		if credential.Hash != currentHash {
+			return credbound.ErrConflict
+		}
+		count, err := q.TouchUserLastSeen(ctx, db.TouchUserLastSeenParams{ID: userID, LastSeenAt: nullableTime(&seenAt)})
+		if err := affected(count, err); err != nil {
+			return err
+		}
+		return mapError(q.ClearLoginThrottle(ctx, userID))
+	})
+}
+
 // CreatePasswordReset stores a single-use password reset credential.
 func (s *Store) CreatePasswordReset(ctx context.Context, credential credbound.PasswordResetCredential, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {

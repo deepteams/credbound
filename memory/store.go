@@ -14,6 +14,7 @@
 package memory
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"encoding/base64"
@@ -480,6 +481,32 @@ func (s *Store) RecordAuthentication(ctx context.Context, userID string, seenAt 
 	defer s.mu.Unlock()
 	if _, ok := s.users[userID]; !ok {
 		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	s.touchLastSeenLocked(userID, seenAt)
+	delete(s.throttles, userID)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+// RecordPasswordAuthentication marks a successful password login like
+// RecordAuthentication, but only while currentHash is still the stored
+// credential; a credential that moved or vanished reports
+// credbound.ErrConflict and leaves the store untouched.
+func (s *Store) RecordPasswordAuthentication(ctx context.Context, userID, currentHash string, seenAt time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.users[userID]; !ok {
+		return credbound.ErrNotFound
+	}
+	credential, ok := s.passwords[userID]
+	if !ok || credential.Hash != currentHash {
+		return credbound.ErrConflict
 	}
 	previous, err := s.prepareCommitLocked(commit)
 	if err != nil {
@@ -1495,8 +1522,11 @@ func (s *Store) PATs(ctx context.Context, userID string, page credbound.PageRequ
 }
 
 // CreateSession stores a server-side session; a duplicate ID reports
-// credbound.ErrConflict.
-func (s *Store) CreateSession(ctx context.Context, session credbound.Session, commit credbound.Commit) error {
+// credbound.ErrConflict. A non-empty credentialDigest must still fingerprint
+// the user's current password credential, so a session can never be minted
+// from an authentication whose password was concurrently replaced; a
+// mismatch (or a vanished credential) reports credbound.ErrConflict.
+func (s *Store) CreateSession(ctx context.Context, session credbound.Session, credentialDigest []byte, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1507,6 +1537,12 @@ func (s *Store) CreateSession(ctx context.Context, session credbound.Session, co
 	}
 	if _, ok := s.users[session.UserID]; !ok {
 		return credbound.ErrNotFound
+	}
+	if len(credentialDigest) > 0 {
+		credential, ok := s.passwords[session.UserID]
+		if !ok || !bytes.Equal(credbound.CredentialFingerprint(credential.Hash), credentialDigest) {
+			return credbound.ErrConflict
+		}
 	}
 	previous, err := s.prepareCommitLocked(commit)
 	if err != nil {

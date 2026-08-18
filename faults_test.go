@@ -472,6 +472,13 @@ func (s *faultStore) RecordAuthentication(ctx context.Context, userID string, se
 	return s.Store.RecordAuthentication(ctx, userID, seenAt, commit)
 }
 
+func (s *faultStore) RecordPasswordAuthentication(ctx context.Context, userID, currentHash string, seenAt time.Time, commit credbound.Commit) error {
+	if s.appendAuditErr != nil {
+		return s.appendAuditErr
+	}
+	return s.Store.RecordPasswordAuthentication(ctx, userID, currentHash, seenAt, commit)
+}
+
 func (s *faultStore) Membership(ctx context.Context, workspaceID, userID string) (credbound.Membership, error) {
 	if s.membershipErr != nil {
 		return credbound.Membership{}, s.membershipErr

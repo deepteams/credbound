@@ -23,14 +23,14 @@ func TestSessionStoreLifecycle(t *testing.T) {
 	f := newStoreFixture(t)
 	ctx := context.Background()
 	session := f.session(f.user.ID)
-	if err := f.store.CreateSession(ctx, session, f.event("session.create")); err != nil {
+	if err := f.store.CreateSession(ctx, session, nil, f.event("session.create")); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.CreateSession(ctx, session, f.event("session.create.duplicate")); !errors.Is(err, credbound.ErrConflict) {
+	if err := f.store.CreateSession(ctx, session, nil, f.event("session.create.duplicate")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("duplicate session error = %v", err)
 	}
 	orphan := f.session(f.id())
-	if err := f.store.CreateSession(ctx, orphan, f.event("session.create.orphan")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.CreateSession(ctx, orphan, nil, f.event("session.create.orphan")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("orphan session error = %v", err)
 	}
 	stored, err := f.store.SessionByID(ctx, session.ID)
@@ -94,7 +94,7 @@ func TestSessionStoreListingScrubsDigestsAndPaginates(t *testing.T) {
 	for range 3 {
 		session := f.session(f.user.ID)
 		session.CreatedAt = f.now
-		if err := f.store.CreateSession(ctx, session, f.event("session.create")); err != nil {
+		if err := f.store.CreateSession(ctx, session, nil, f.event("session.create")); err != nil {
 			t.Fatal(err)
 		}
 		ids = append(ids, session.ID)
@@ -159,7 +159,7 @@ func TestSessionCascadesAreAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := f.session(f.user.ID)
-	if err := f.store.CreateSession(ctx, session, f.event("session.create")); err != nil {
+	if err := f.store.CreateSession(ctx, session, nil, f.event("session.create")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -198,7 +198,7 @@ func TestSessionCascadeOnDisableAndCredentialRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	disableSession := f.session(other.ID)
-	if err := f.store.CreateSession(ctx, disableSession, f.event("session.create.disable")); err != nil {
+	if err := f.store.CreateSession(ctx, disableSession, nil, f.event("session.create.disable")); err != nil {
 		t.Fatal(err)
 	}
 	at := f.now
@@ -219,7 +219,7 @@ func TestSessionCascadeOnDisableAndCredentialRevocation(t *testing.T) {
 	}
 
 	credentialSession := f.session(other.ID)
-	if err := f.store.CreateSession(ctx, credentialSession, f.event("session.create.credentials")); err != nil {
+	if err := f.store.CreateSession(ctx, credentialSession, nil, f.event("session.create.credentials")); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.store.RevokeUserCredentials(ctx, other.ID, f.now, f.event("credentials.revoke")); err != nil {
@@ -241,10 +241,10 @@ func TestRevokeUserSessionsScopesToOneUser(t *testing.T) {
 	}
 	mine := f.session(f.user.ID)
 	theirs := f.session(other.ID)
-	if err := f.store.CreateSession(ctx, mine, f.event("session.create.mine")); err != nil {
+	if err := f.store.CreateSession(ctx, mine, nil, f.event("session.create.mine")); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.CreateSession(ctx, theirs, f.event("session.create.theirs")); err != nil {
+	if err := f.store.CreateSession(ctx, theirs, nil, f.event("session.create.theirs")); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.store.RevokeUserSessions(ctx, other.ID, f.now, f.event("session.revoke_all")); err != nil {

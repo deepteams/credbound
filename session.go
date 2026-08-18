@@ -24,6 +24,14 @@ const sessionTokenPrefix = "cbs"
 // Authentication and revokes the previous session, which doubles as fixation
 // protection. Expiry is absolute (CreatedAt plus Config.SessionTTL) and is
 // never extended by activity.
+//
+// A password-derived Authentication carries a fingerprint of the credential
+// it verified, and the store re-checks it inside the session transaction: an
+// Authentication whose password was replaced in the meantime — by
+// ChangePassword or CompletePasswordReset — fails with ErrInvalidCredentials
+// instead of minting a session the replacement's revocation sweep can no
+// longer reach. After a password change the host therefore re-authenticates
+// with the new password before creating the follow-up session.
 func (m *Manager) CreateSession(ctx context.Context, actor Authentication, _ CreateSessionInput) (_ IssuedSession, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.session.create", started, err) }()
@@ -71,7 +79,16 @@ func (m *Manager) CreateSession(ctx context.Context, actor Authentication, _ Cre
 	commit := m.transactionalCommit(event, "session.creation", func(ctx context.Context, tx Tx, hook TransactionHook) error {
 		return hook.ApplySessionCreation(ctx, tx, change)
 	})
-	if err := m.sessionStore.CreateSession(ctx, session, commit); err != nil {
+	if err := m.sessionStore.CreateSession(ctx, session, actor.CredentialDigest, commit); err != nil {
+		if errors.Is(err, ErrConflict) && len(actor.CredentialDigest) > 0 {
+			// The credential-currency guard fired: the password behind this
+			// Authentication was replaced after it verified. The session is
+			// refused so the change's revocation sweep stays exhaustive.
+			if auditErr := m.appendAuthenticationAudit(ctx, actor.UserID, "session.create", AuditFailed, "stale_credential"); auditErr != nil {
+				return IssuedSession{}, auditErr
+			}
+			return IssuedSession{}, ErrInvalidCredentials
+		}
 		return IssuedSession{}, m.mapStoreError(ctx, "auth.session.create", err)
 	}
 	created := SessionCreatedEvent{EventMeta: meta, Session: scrubbed, Request: metadata}

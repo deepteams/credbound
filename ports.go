@@ -37,6 +37,14 @@ type Store interface {
 	// RecordAuthentication updates last_seen_at and clears the user's login
 	// throttle in the same transaction as its audit event.
 	RecordAuthentication(context.Context, string, time.Time, Commit) error
+	// RecordPasswordAuthentication finalizes a password sign-in like
+	// RecordAuthentication, but only while currentHash is still the user's
+	// stored password credential; the comparison and the finalization happen
+	// in the same transaction. When a concurrent change or reset replaced the
+	// credential — or removed it — it returns ErrConflict and leaves the
+	// store untouched, so a sign-in that verified a password can never
+	// complete after that password stopped being current.
+	RecordPasswordAuthentication(ctx context.Context, userID, currentHash string, at time.Time, commit Commit) error
 	LoginThrottleByUserID(context.Context, string) (LoginThrottle, error)
 	// RecordLoginFailure atomically increments the failure counter and, once
 	// the counter reaches the threshold, persists the lockout deadline. It
@@ -213,7 +221,15 @@ type SignupStore interface {
 // Digest. SessionByID returns the digest for constant-time validation by the
 // Manager, which scrubs it before results leave the library.
 type SessionStore interface {
-	CreateSession(ctx context.Context, session Session, commit Commit) error
+	// CreateSession stores a server-side session. A non-empty
+	// credentialDigest is the currency guard: inside the same transaction the
+	// store recomputes CredentialFingerprint over the user's current password
+	// credential hash and returns ErrConflict when it no longer matches (or
+	// the credential vanished), so an Authentication whose password was
+	// concurrently replaced cannot mint a session that would survive the
+	// replacement's revocation sweep. An empty digest skips the guard — the
+	// context was not produced by a password.
+	CreateSession(ctx context.Context, session Session, credentialDigest []byte, commit Commit) error
 	SessionByID(ctx context.Context, id string) (Session, error)
 	// TouchSession refuses a session already revoked with ErrConflict, so an
 	// authentication racing a revocation can neither record activity on nor

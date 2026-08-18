@@ -142,7 +142,7 @@ func (m *Manager) SignUp(ctx context.Context, input SignUpInput) (_ SignUpResult
 	m.events.emit(ctx, EventSignUpCompleted, func(listener EventListener) error { return listener.OnSignUpCompleted(ctx, signupEvent) })
 	result := SignUpResult{User: user, Workspace: workspace}
 	if m.signup.AutoVerifyEmail {
-		result.Authentication = Authentication{UserID: userID, Method: MethodPassword, Level: AAL1, AuthenticatedAt: now}
+		result.Authentication = Authentication{UserID: userID, Method: MethodPassword, Level: AAL1, AuthenticatedAt: now, CredentialDigest: CredentialFingerprint(hash)}
 	} else {
 		result.EmailVerification = IssuedEmailVerification{Email: primaryEmail, Token: rawToken, Deliverable: true}
 	}

@@ -1,6 +1,7 @@
 package credbound
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"iter"
 	"time"
@@ -496,6 +497,26 @@ type Authentication struct {
 	// Scopes limits what the credential may do (PATs). Empty means the
 	// context carries no scope restriction of its own.
 	Scopes []string
+	// CredentialDigest fingerprints the password credential this context was
+	// verified against (CredentialFingerprint of the stored hash); it is empty
+	// for contexts that no password produced. CreateSession refuses, inside
+	// the session transaction, a context whose fingerprint no longer matches
+	// the stored credential, so an authentication that verified a password
+	// concurrently replaced by ChangePassword or CompletePasswordReset can
+	// never mint a session the replacement should have killed.
+	CredentialDigest []byte
+}
+
+// CredentialFingerprint condenses a stored password hash into the opaque,
+// unkeyed digest carried by Authentication.CredentialDigest. Stores implement
+// the SessionStore currency guard by recomputing it from the credential row
+// inside the session-creation transaction and comparing it byte-for-byte with
+// the fingerprint the sign-in observed. It reveals nothing useful about the
+// hash (itself already a one-way derivation), so an Authentication remains
+// safe to hold in host session state.
+func CredentialFingerprint(hash string) []byte {
+	sum := sha256.Sum256([]byte("credbound-credential-v1:" + hash))
+	return sum[:]
 }
 
 // Interactive reports whether the context was produced by a user-present

@@ -1,8 +1,10 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"iter"
 	"time"
 
@@ -11,11 +13,26 @@ import (
 )
 
 // CreateSession stores a server-side session; a duplicate ID reports
-// credbound.ErrConflict.
-func (s *Store) CreateSession(ctx context.Context, session credbound.Session, commit credbound.Commit) error {
+// credbound.ErrConflict. A non-empty credentialDigest must still fingerprint
+// the user's current password credential, so a session can never be minted
+// from an authentication whose password was concurrently replaced; a
+// mismatch (or a vanished credential) reports credbound.ErrConflict.
+func (s *Store) CreateSession(ctx context.Context, session credbound.Session, credentialDigest []byte, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		if _, err := q.GetUserByID(ctx, session.UserID); err != nil {
 			return mapError(err)
+		}
+		if len(credentialDigest) > 0 {
+			credential, err := q.LockPassword(ctx, session.UserID)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return credbound.ErrConflict
+				}
+				return mapError(err)
+			}
+			if !bytes.Equal(credbound.CredentialFingerprint(credential.Hash), credentialDigest) {
+				return credbound.ErrConflict
+			}
 		}
 		return mapError(q.InsertSession(ctx, db.InsertSessionParams{
 			ID: session.ID, UserID: session.UserID, Method: string(session.Method), Level: int64(session.Level),
