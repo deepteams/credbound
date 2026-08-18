@@ -175,7 +175,12 @@ func (m *Manager) CompleteEmailOTP(ctx context.Context, continuation, code strin
 	if err != nil {
 		return Authentication{}, err
 	}
-	if err := m.store.ConsumeEmailAuthentication(ctx, credential.ID, user.ID, now, Commit{Audit: event}); err != nil {
+	// Like a password success, the consumption completes the sign-in only
+	// when no second factor is pending: while one is, the code is spent but
+	// the lockout and last_seen stay untouched, so redeeming fresh codes
+	// cannot reset the counter between TOTP guesses — VerifyTOTP clears them
+	// atomically on success.
+	if err := m.store.ConsumeEmailAuthentication(ctx, credential.ID, user.ID, now, !requiresSecondFactor, Commit{Audit: event}); err != nil {
 		if errors.Is(err, ErrConflict) {
 			return Authentication{}, ErrInvalidCredentials
 		}

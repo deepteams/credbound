@@ -134,6 +134,12 @@ func (m *Manager) CompleteEmailAuthentication(ctx context.Context, raw string) (
 		}
 		return Authentication{}, ErrInvalidCredentials
 	}
+	// Redeeming the link proves control of the mailbox, so — exactly like
+	// CompleteEmailOTP — a locked account answers ErrLocked here without
+	// becoming an enumeration oracle.
+	if err := m.requireUnlocked(ctx, user.ID, "auth.email_link"); err != nil {
+		return Authentication{}, err
+	}
 	factor, factorErr := m.store.TOTPByUserID(ctx, user.ID)
 	requiresSecondFactor := factorErr == nil && factor.Active
 	if factorErr != nil && !errors.Is(factorErr, ErrNotFound) {
@@ -144,7 +150,12 @@ func (m *Manager) CompleteEmailAuthentication(ctx context.Context, raw string) (
 	if err != nil {
 		return Authentication{}, err
 	}
-	if err := m.store.ConsumeEmailAuthentication(ctx, tokenID, user.ID, now, Commit{Audit: event}); err != nil {
+	// Like a password success, the consumption completes the sign-in only
+	// when no second factor is pending: while one is, the token is spent but
+	// the lockout and last_seen stay untouched, so redeeming fresh links
+	// cannot reset the counter between TOTP guesses — VerifyTOTP clears them
+	// atomically on success.
+	if err := m.store.ConsumeEmailAuthentication(ctx, tokenID, user.ID, now, !requiresSecondFactor, Commit{Audit: event}); err != nil {
 		if errors.Is(err, ErrConflict) {
 			return Authentication{}, ErrInvalidCredentials
 		}

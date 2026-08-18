@@ -565,10 +565,10 @@ func (s *Store) EmailAuthenticationByID(ctx context.Context, tokenID string) (cr
 	}, nil
 }
 
-// ConsumeEmailAuthentication marks the user's credential used, updating
-// last-seen and clearing the login throttle; reuse reports
-// credbound.ErrConflict.
-func (s *Store) ConsumeEmailAuthentication(ctx context.Context, tokenID, userID string, at time.Time, commit credbound.Commit) error {
+// ConsumeEmailAuthentication marks the user's credential used and, when the
+// consumption completes the sign-in, updates last-seen and clears the login
+// throttle; reuse reports credbound.ErrConflict.
+func (s *Store) ConsumeEmailAuthentication(ctx context.Context, tokenID, userID string, at time.Time, completesLogin bool, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		count, err := q.ConsumeEmailAuthentication(ctx, db.ConsumeEmailAuthenticationParams{ID: tokenID, UserID: userID, UsedAt: nullableTime(&at)})
 		if err != nil {
@@ -576,6 +576,9 @@ func (s *Store) ConsumeEmailAuthentication(ctx context.Context, tokenID, userID 
 		}
 		if count != 1 {
 			return credbound.ErrConflict
+		}
+		if !completesLogin {
+			return nil
 		}
 		touched, err := q.TouchUserLastSeen(ctx, db.TouchUserLastSeenParams{ID: userID, LastSeenAt: nullableTime(&at)})
 		if err := affected(touched, err); err != nil {

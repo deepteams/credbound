@@ -138,11 +138,27 @@ func TestHardeningStoreContract(t *testing.T) {
 	if got, err := f.store.EmailAuthenticationByID(ctx, link.ID); err != nil || got.EmailID != emails[0] {
 		t.Fatalf("link lookup = %#v, %v", got, err)
 	}
-	if err := f.store.ConsumeEmailAuthentication(ctx, link.ID, user.ID, f.now, f.event(user.ID, "link.use", link.ID, "")); err != nil {
+	if err := f.store.ConsumeEmailAuthentication(ctx, link.ID, user.ID, f.now, true, f.event(user.ID, "link.use", link.ID, "")); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.ConsumeEmailAuthentication(ctx, link.ID, user.ID, f.now, f.event(user.ID, "link.use", link.ID, "")); !errors.Is(err, credbound.ErrConflict) {
+	if err := f.store.ConsumeEmailAuthentication(ctx, link.ID, user.ID, f.now, true, f.event(user.ID, "link.use", link.ID, "")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("reused link = %v", err)
+	}
+
+	// A consumption that leaves a second factor pending spends the token
+	// without clearing the login throttle.
+	pendingLink := credbound.EmailAuthenticationCredential{ID: f.id(), UserID: user.ID, EmailID: emails[0], Digest: []byte("m2"), CreatedAt: f.now, ExpiresAt: f.now.Add(15 * time.Minute)}
+	if err := f.store.CreateEmailAuthentication(ctx, pendingLink, f.event(user.ID, "link.create", pendingLink.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.RecordLoginFailure(ctx, user.ID, f.now, 3, f.now.Add(15*time.Minute), f.event(user.ID, "auth.fail", user.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.ConsumeEmailAuthentication(ctx, pendingLink.ID, user.ID, f.now, false, f.event(user.ID, "link.use", pendingLink.ID, "")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := f.store.LoginThrottleByUserID(ctx, user.ID); err != nil || got.FailedAttempts != 1 {
+		t.Fatalf("throttle after pending consumption = %#v, %v", got, err)
 	}
 
 	// RevokeUserCredentials revokes the user's PATs.

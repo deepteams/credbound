@@ -331,6 +331,64 @@ func TestPasswordSuccessDoesNotResetSecondFactorLockout(t *testing.T) {
 	}
 }
 
+// TestEmailFlowsDoNotResetSecondFactorLockout extends the online-guessing
+// defense to the email flows: while a second factor is pending, redeeming a
+// magic link or an email OTP spends the token but must not clear the lockout
+// counter accumulated by TOTP failures — otherwise an attacker holding the
+// mailbox could reset the budget between guesses indefinitely.
+func TestEmailFlowsDoNotResetSecondFactorLockout(t *testing.T) {
+	f := newLockoutFixture(t, 3, 15*time.Minute)
+	authn := f.bootstrap(t)
+	ctx := context.Background()
+	if _, err := f.manager.BeginTOTPEnrollment(ctx, authn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.ConfirmTOTPEnrollment(ctx, authn, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	// Two wrong codes: counter at 2 of 3, not yet locked.
+	for range 2 {
+		if _, err := f.manager.VerifyTOTP(ctx, authn, "000000"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+			t.Fatalf("TOTP failure error = %v", err)
+		}
+	}
+	// A redeemed magic link mid-2FA must not reset the counter.
+	link, err := f.manager.BeginEmailAuthentication(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := f.manager.CompleteEmailAuthentication(ctx, link.Token)
+	if err != nil || !pending.SecondFactorRequired {
+		t.Fatalf("magic-link re-auth = %#v, %v", pending, err)
+	}
+	// Neither must a redeemed email OTP.
+	issued, err := f.manager.BeginEmailOTP(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pendingOTP, err := f.manager.CompleteEmailOTP(ctx, issued.Continuation, issued.Code); err != nil || !pendingOTP.SecondFactorRequired {
+		t.Fatalf("OTP re-auth = %#v, %v", pendingOTP, err)
+	}
+	// The third wrong code therefore locks the account; had either email
+	// flow cleared the counter this would still be attempt one of three.
+	if _, err := f.manager.VerifyTOTP(ctx, authn, "000000"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("third TOTP failure error = %v", err)
+	}
+	if _, err := f.manager.VerifyTOTP(ctx, authn, "123456"); !errors.Is(err, credbound.ErrLocked) {
+		t.Fatalf("account not locked after counter carried over: %v", err)
+	}
+	// A locked account refuses the magic link outright: redeeming it proves
+	// mailbox control, so — like CompleteEmailOTP — ErrLocked opens no
+	// enumeration oracle here.
+	locked, err := f.manager.BeginEmailAuthentication(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.CompleteEmailAuthentication(ctx, locked.Token); !errors.Is(err, credbound.ErrLocked) {
+		t.Fatalf("locked magic-link completion = %v", err)
+	}
+}
+
 func TestLockoutDisabled(t *testing.T) {
 	f := newLockoutFixture(t, -1, 0)
 	f.bootstrap(t)
@@ -977,11 +1035,11 @@ func (s *hardeningFaultStore) WorkspaceByID(ctx context.Context, workspaceID str
 	return s.Store.WorkspaceByID(ctx, workspaceID)
 }
 
-func (s *hardeningFaultStore) ConsumeEmailAuthentication(ctx context.Context, tokenID, userID string, at time.Time, commit credbound.Commit) error {
+func (s *hardeningFaultStore) ConsumeEmailAuthentication(ctx context.Context, tokenID, userID string, at time.Time, completesLogin bool, commit credbound.Commit) error {
 	if s.consumeLinkErr != nil {
 		return s.consumeLinkErr
 	}
-	return s.Store.ConsumeEmailAuthentication(ctx, tokenID, userID, at, commit)
+	return s.Store.ConsumeEmailAuthentication(ctx, tokenID, userID, at, completesLogin, commit)
 }
 
 func (s *hardeningFaultStore) CompletePasswordReset(ctx context.Context, resetID string, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {

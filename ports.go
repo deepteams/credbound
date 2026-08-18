@@ -57,9 +57,12 @@ type Store interface {
 	CreateEmailAuthentication(context.Context, EmailAuthenticationCredential, Commit) error
 	EmailAuthenticationByID(context.Context, string) (EmailAuthenticationCredential, error)
 	// ConsumeEmailAuthentication atomically marks the single-use magic-link
-	// token as used, updates last_seen_at and clears the login throttle. It
-	// returns ErrConflict when the token was already consumed.
-	ConsumeEmailAuthentication(ctx context.Context, tokenID, userID string, at time.Time, commit Commit) error
+	// or email OTP token as used. When completesLogin is true it also
+	// updates last_seen_at and clears the login throttle; a consumption
+	// that leaves a second factor pending passes false so the completing
+	// factor clears them on success. It returns ErrConflict when the token
+	// was already consumed.
+	ConsumeEmailAuthentication(ctx context.Context, tokenID, userID string, at time.Time, completesLogin bool, commit Commit) error
 
 	SaveEmail(context.Context, EmailAddress, EmailVerificationCredential, Commit) error
 	EmailVerificationByID(context.Context, string) (EmailAddress, EmailVerificationCredential, error)

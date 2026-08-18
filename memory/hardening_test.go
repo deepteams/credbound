@@ -24,7 +24,7 @@ func TestHardeningCanceledOperations(t *testing.T) {
 		f.store.CreatePasswordReset(ctx, reset, event),
 		f.store.CompletePasswordReset(ctx, reset.ID, credbound.PasswordCredential{UserID: f.user.ID}, f.now, event),
 		f.store.CreateEmailAuthentication(ctx, link, event),
-		f.store.ConsumeEmailAuthentication(ctx, link.ID, f.user.ID, f.now, event),
+		f.store.ConsumeEmailAuthentication(ctx, link.ID, f.user.ID, f.now, true, event),
 		f.store.CreateWorkspaceInvitation(ctx, invitation, event),
 		f.store.AcceptWorkspaceInvitation(ctx, invitation.ID, f.user.ID, f.now, membership, event),
 		f.store.RegisterInvitedUser(ctx, invitation.ID, f.user, f.email(f.user), credbound.PasswordCredential{UserID: f.user.ID}, membership, f.now, event),
@@ -170,7 +170,7 @@ func TestHardeningNotFoundAndConflictBranches(t *testing.T) {
 	if err := f.store.CreateEmailAuthentication(ctx, link, f.event("link")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("duplicate link = %v", err)
 	}
-	if err := f.store.ConsumeEmailAuthentication(ctx, link.ID, unknown, f.now, f.event("consume")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.ConsumeEmailAuthentication(ctx, link.ID, unknown, f.now, true, f.event("consume")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("consume with wrong user = %v", err)
 	}
 
