@@ -121,6 +121,15 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
 SELECT id, user_id, address, is_primary, verified_at, verification_digest, verification_expires_at, created_at, updated_at
 FROM credbound.user_emails WHERE id = $1;
 
+-- name: GetEmailByAddress :one
+SELECT id, user_id, address, is_primary, verified_at, verification_digest, verification_expires_at, created_at, updated_at
+FROM credbound.user_emails WHERE address = $1;
+
+-- name: ReissueEmailVerification :execrows
+UPDATE credbound.user_emails
+SET verification_digest = $2, verification_expires_at = $3, updated_at = $4
+WHERE id = $1 AND verified_at IS NULL;
+
 -- name: VerifyEmail :execrows
 UPDATE credbound.user_emails
 SET verified_at = $2, verification_digest = NULL, verification_expires_at = NULL, updated_at = $2

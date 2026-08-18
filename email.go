@@ -61,6 +61,73 @@ func (m *Manager) BeginEmailAddition(ctx context.Context, actor Authentication, 
 	return IssuedEmailVerification{Email: email, Token: raw}, nil
 }
 
+// ResendEmailVerification re-issues a verification token for an unverified
+// address without requiring authentication, so a user whose signup token
+// expired or was lost is not locked out of their own account. The host answers
+// the end user identically whether or not the address exists or is already
+// verified: the call succeeds with a zero IssuedEmailVerification (empty Token)
+// in those cases, so the error path is not an enumeration oracle — send the
+// email only when Token is non-empty. It performs the same cryptographic work
+// and a comparable store write in every case so timing does not reveal the
+// difference. Re-issuing a token invalidates the previous one (the stored
+// digest is replaced). An address under a confirmed EnforceSSO domain is
+// refused before any lookup, exactly like signup.
+func (m *Manager) ResendEmailVerification(ctx context.Context, address string) (_ IssuedEmailVerification, err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "auth.email.verification.resend", started, err) }()
+	normalized := normalizeEmail(address)
+	if err := m.domainRequiresSSO(ctx, normalized, "email.verification.resend"); err != nil {
+		return IssuedEmailVerification{}, err
+	}
+	email, lookupErr := m.store.EmailByAddress(ctx, normalized)
+	// Derive a fresh identifier and secret before deciding the outcome so an
+	// unknown or already-verified address performs the same work as a pending
+	// one and timing reveals nothing.
+	decoyID, err := m.newID()
+	if err != nil {
+		return IssuedEmailVerification{}, err
+	}
+	secret, err := randomBytes(m.random, 32)
+	if err != nil {
+		return IssuedEmailVerification{}, err
+	}
+	emailID := decoyID
+	pending := lookupErr == nil && email.VerifiedAt == nil
+	if pending {
+		emailID = email.ID
+	}
+	raw := emailVerificationPrefix + "_" + emailID + "_" + base64.RawURLEncoding.EncodeToString(secret)
+	tokenDigest := m.tokenDigest("email-verification:" + raw)
+	if lookupErr != nil {
+		if !errors.Is(lookupErr, ErrNotFound) {
+			return IssuedEmailVerification{}, lookupErr
+		}
+		if auditErr := m.appendAuthenticationAudit(ctx, "", "email.verification.resend", AuditFailed, "unknown_email"); auditErr != nil {
+			return IssuedEmailVerification{}, auditErr
+		}
+		return IssuedEmailVerification{}, nil
+	}
+	if !pending {
+		if auditErr := m.appendAuthenticationAudit(ctx, email.UserID, "email.verification.resend", AuditFailed, "already_verified"); auditErr != nil {
+			return IssuedEmailVerification{}, auditErr
+		}
+		return IssuedEmailVerification{}, nil
+	}
+	now := m.now()
+	verification := EmailVerificationCredential{
+		EmailID: email.ID, Digest: tokenDigest, ExpiresAt: now.Add(m.emailVerificationTTL),
+	}
+	event, err := m.newAudit(ctx, email.UserID, "email.verification.resend", "email", email.ID, "", AuditSucceeded, "")
+	if err != nil {
+		return IssuedEmailVerification{}, err
+	}
+	if err := m.store.ReissueEmailVerification(ctx, email.ID, verification, Commit{Audit: event}); err != nil {
+		return IssuedEmailVerification{}, m.mapStoreError(ctx, "auth.email.verification.resend", err)
+	}
+	email.UpdatedAt = now
+	return IssuedEmailVerification{Email: email, Token: raw}, nil
+}
+
 // ConfirmEmail marks the pending address verified by proving possession of
 // the verification token. Possession of the token is the authorization — no
 // actor is required. An unknown or mismatched token fails with

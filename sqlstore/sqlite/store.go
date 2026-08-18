@@ -552,6 +552,30 @@ func (s *Store) EmailVerificationByID(ctx context.Context, emailID string) (cred
 	}, nil
 }
 
+// EmailByAddress returns the address record for a canonical address, without
+// its verification credential. It reports credbound.ErrNotFound when no address
+// matches.
+func (s *Store) EmailByAddress(ctx context.Context, address string) (credbound.EmailAddress, error) {
+	row, err := s.queries.GetEmailByAddress(ctx, address)
+	if err != nil {
+		return credbound.EmailAddress{}, mapError(err)
+	}
+	return emailFromRow(row), nil
+}
+
+// ReissueEmailVerification replaces the pending verification credential of an
+// unverified address (a fresh digest and expiry); an already-verified or
+// missing address reports credbound.ErrConflict.
+func (s *Store) ReissueEmailVerification(ctx context.Context, emailID string, verification credbound.EmailVerificationCredential, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		count, err := q.ReissueEmailVerification(ctx, db.ReissueEmailVerificationParams{
+			ID: emailID, VerificationDigest: verification.Digest,
+			VerificationExpiresAt: nullableTime(&verification.ExpiresAt), UpdatedAt: commit.Audit.OccurredAt,
+		})
+		return affected(count, err)
+	})
+}
+
 // VerifyEmail marks the address verified, makes it usable for sign-in and
 // discards the verification credential; an already-verified address reports
 // credbound.ErrConflict.

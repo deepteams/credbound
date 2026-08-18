@@ -48,6 +48,14 @@ type Store interface {
 
 	SaveEmail(context.Context, EmailAddress, EmailVerificationCredential, Commit) error
 	EmailVerificationByID(context.Context, string) (EmailAddress, EmailVerificationCredential, error)
+	// EmailByAddress resolves an address to its record without the verification
+	// credential; ErrNotFound when no address matches. ResendEmailVerification
+	// uses it to find the pending address to re-issue.
+	EmailByAddress(context.Context, string) (EmailAddress, error)
+	// ReissueEmailVerification replaces the pending verification credential of
+	// an unverified address; an already-verified or missing address reports
+	// ErrConflict.
+	ReissueEmailVerification(context.Context, string, EmailVerificationCredential, Commit) error
 	VerifyEmail(context.Context, string, time.Time, Commit) error
 	SetPrimaryEmail(context.Context, string, string, Commit) error
 	RemoveEmail(context.Context, string, string, Commit) error

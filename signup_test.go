@@ -182,6 +182,53 @@ func TestSignUpVerificationFlow(t *testing.T) {
 	}
 }
 
+func TestResendEmailVerification(t *testing.T) {
+	f := newSignupFixture(t, false, nil)
+	ctx := context.Background()
+	result, err := f.manager.SignUp(ctx, signUpInput("visitor@example.com"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := result.EmailVerification.Token
+
+	// The original token expires before the user acts: the account would be
+	// permanently unreachable without a resend path.
+	f.now = f.now.Add(48 * time.Hour)
+	if _, err := f.manager.ConfirmEmail(ctx, original); !errors.Is(err, credbound.ErrExpired) {
+		t.Fatalf("expired original token = %v", err)
+	}
+
+	// Unknown and already-verified addresses answer with an empty-token decoy,
+	// never an error, so the call is not an enumeration oracle.
+	if reissued, err := f.manager.ResendEmailVerification(ctx, "ghost@example.com"); err != nil || reissued.Token != "" {
+		t.Fatalf("unknown-address resend = %#v, %v", reissued, err)
+	}
+
+	// The pending address gets a fresh, working token.
+	reissued, err := f.manager.ResendEmailVerification(ctx, "Visitor@Example.com ")
+	if err != nil || reissued.Token == "" || reissued.Email.ID != result.EmailVerification.Email.ID {
+		t.Fatalf("resend = %#v, %v", reissued, err)
+	}
+	if reissued.Token == original {
+		t.Fatal("resend returned the same token")
+	}
+	// The superseded token no longer works; the new one does.
+	if _, err := f.manager.ConfirmEmail(ctx, original); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("superseded token = %v", err)
+	}
+	confirmed, err := f.manager.ConfirmEmail(ctx, reissued.Token)
+	if err != nil || confirmed.VerifiedAt == nil {
+		t.Fatalf("confirm reissued = %#v, %v", confirmed, err)
+	}
+	// Once verified, a resend is a no-op decoy.
+	if again, err := f.manager.ResendEmailVerification(ctx, "visitor@example.com"); err != nil || again.Token != "" {
+		t.Fatalf("verified-address resend = %#v, %v", again, err)
+	}
+	if _, err := f.manager.AuthenticatePassword(ctx, "visitor@example.com", "correct horse battery"); err != nil {
+		t.Fatalf("post-resend login = %v", err)
+	}
+}
+
 func TestSignUpAutoVerifyEmail(t *testing.T) {
 	f := newSignupFixture(t, true, nil)
 	ctx := context.Background()

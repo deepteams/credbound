@@ -705,6 +705,48 @@ func (s *Store) EmailVerificationByID(ctx context.Context, emailID string) (cred
 	return cloneEmail(email), cloneEmailVerification(verification), nil
 }
 
+// EmailByAddress returns the address record without its verification
+// credential; ErrNotFound when no address matches.
+func (s *Store) EmailByAddress(ctx context.Context, address string) (credbound.EmailAddress, error) {
+	if err := ctx.Err(); err != nil {
+		return credbound.EmailAddress{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	emailID, ok := s.emailIDs[address]
+	if !ok {
+		return credbound.EmailAddress{}, credbound.ErrNotFound
+	}
+	email, ok := s.emailAddresses[emailID]
+	if !ok {
+		return credbound.EmailAddress{}, credbound.ErrNotFound
+	}
+	return cloneEmail(email), nil
+}
+
+// ReissueEmailVerification replaces the pending verification credential of an
+// unverified address; an already-verified or missing address reports
+// credbound.ErrConflict.
+func (s *Store) ReissueEmailVerification(ctx context.Context, emailID string, verification credbound.EmailVerificationCredential, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	email, ok := s.emailAddresses[emailID]
+	if !ok || email.VerifiedAt != nil {
+		return credbound.ErrConflict
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	email.UpdatedAt = commit.Audit.OccurredAt
+	s.emailAddresses[emailID] = email
+	s.emailVerifications[emailID] = cloneEmailVerification(verification)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
 // VerifyEmail marks the address verified, makes it usable for sign-in and
 // discards the verification credential; an already-verified address reports
 // credbound.ErrConflict.

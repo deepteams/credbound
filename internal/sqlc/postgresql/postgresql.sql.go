@@ -475,6 +475,28 @@ func (q *Queries) GetEmailAuthentication(ctx context.Context, id string) (Credbo
 	return i, err
 }
 
+const getEmailByAddress = `-- name: GetEmailByAddress :one
+SELECT id, user_id, address, is_primary, verified_at, verification_digest, verification_expires_at, created_at, updated_at
+FROM credbound.user_emails WHERE address = $1
+`
+
+func (q *Queries) GetEmailByAddress(ctx context.Context, address string) (CredboundUserEmail, error) {
+	row := q.db.QueryRowContext(ctx, getEmailByAddress, address)
+	var i CredboundUserEmail
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Address,
+		&i.IsPrimary,
+		&i.VerifiedAt,
+		&i.VerificationDigest,
+		&i.VerificationExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getEmailVerification = `-- name: GetEmailVerification :one
 SELECT id, user_id, address, is_primary, verified_at, verification_digest, verification_expires_at, created_at, updated_at
 FROM credbound.user_emails WHERE id = $1
@@ -2585,6 +2607,32 @@ DELETE FROM credbound.consumed_ceremonies WHERE expires_at < $1
 func (q *Queries) PruneConsumedCeremonies(ctx context.Context, expiresAt time.Time) error {
 	_, err := q.db.ExecContext(ctx, pruneConsumedCeremonies, expiresAt)
 	return err
+}
+
+const reissueEmailVerification = `-- name: ReissueEmailVerification :execrows
+UPDATE credbound.user_emails
+SET verification_digest = $2, verification_expires_at = $3, updated_at = $4
+WHERE id = $1 AND verified_at IS NULL
+`
+
+type ReissueEmailVerificationParams struct {
+	ID                    string       `json:"id"`
+	VerificationDigest    []byte       `json:"verification_digest"`
+	VerificationExpiresAt sql.NullTime `json:"verification_expires_at"`
+	UpdatedAt             time.Time    `json:"updated_at"`
+}
+
+func (q *Queries) ReissueEmailVerification(ctx context.Context, arg ReissueEmailVerificationParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, reissueEmailVerification,
+		arg.ID,
+		arg.VerificationDigest,
+		arg.VerificationExpiresAt,
+		arg.UpdatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const replacePassword = `-- name: ReplacePassword :execrows
