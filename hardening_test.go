@@ -208,8 +208,10 @@ func TestPasswordLockout(t *testing.T) {
 			t.Fatalf("failure error = %v", err)
 		}
 	}
-	// The account is locked: even the correct password is rejected.
-	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrLocked) {
+	// The account is locked: even the correct password is rejected, and the
+	// public answer stays ErrInvalidCredentials so the lockout never
+	// confirms that the address exists.
+	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrInvalidCredentials) || errors.Is(err, credbound.ErrLocked) {
 		t.Fatalf("locked login error = %v", err)
 	}
 	// Unknown accounts keep answering ErrInvalidCredentials, never ErrLocked.
@@ -253,7 +255,7 @@ func TestTOTPLockout(t *testing.T) {
 	if _, err := f.manager.VerifyTOTP(ctx, authn, "123456"); !errors.Is(err, credbound.ErrLocked) {
 		t.Fatalf("locked TOTP error = %v", err)
 	}
-	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrLocked) {
+	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("locked password error = %v", err)
 	}
 	f.now = f.now.Add(16 * time.Minute)
@@ -385,7 +387,7 @@ func TestPasswordResetUnlocksAccount(t *testing.T) {
 			t.Fatalf("failure error = %v", err)
 		}
 	}
-	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrLocked) {
+	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("locked error = %v", err)
 	}
 	reset, err := f.manager.BeginPasswordReset(ctx, "root@example.com")

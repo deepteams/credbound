@@ -73,7 +73,8 @@ hooks, and append-only audit behavior against a real PostgreSQL service.
 - A PAT can never satisfy an interactive step-up request.
 - Completing a password reset atomically revokes the account's PATs and OAuth
   grants and clears its lockout; a locked account still performs the same
-  password derivation and never confirms whether an address exists.
+  password derivation and answers with the same public error as a wrong
+  password, so it never confirms whether an address exists.
 - Every audit event is hash-chained to its predecessor inside the commit
   transaction; tampering is detectable with `VerifyAuditChain`.
 - Access to application resources must always provide a `workspace_id`.

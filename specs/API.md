@@ -236,10 +236,13 @@ zero-value result (empty `Token`) when the address does not belong to an
 eligible account, so the host's error path never distinguishes the two cases.
 The host answers the end user identically, and delivers the returned token
 itself only when `Token` is non-empty. `AuthenticatePassword` treats an account
-without a password credential exactly like a wrong password. `ErrLocked` is
-returned only for an existing account; a host that relays it verbatim to an
-unauthenticated caller reveals that the account exists — prefer a neutral
-"try again later" message on that path.
+without a password credential exactly like a wrong password, and answers
+`ErrInvalidCredentials` for a locked account too: `ErrLocked` only exists for
+accounts that exist, so returning it from the unauthenticated entry point
+would be an existence oracle the host could relay by accident. The lockout is
+still audited with reason `locked` and surfaces through `UserLockedEvent` and
+`AuthenticationFailureEvent`. Flows that run after a proof of possession
+(`VerifyTOTP`, `CompleteEmailOTP`) keep reporting `ErrLocked`.
 
 `BeginEmailOTP` issues an 8-digit single-use code bound to a sealed
 continuation that the host keeps on its side of the exchange and passes back

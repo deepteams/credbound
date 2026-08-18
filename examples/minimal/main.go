@@ -95,10 +95,11 @@ func main() {
 	mux.HandleFunc("POST /signin", func(w http.ResponseWriter, r *http.Request) {
 		authn, err := manager.AuthenticatePassword(r.Context(), r.FormValue("email"), r.FormValue("password"))
 		switch {
-		case errors.Is(err, credbound.ErrInvalidCredentials), errors.Is(err, credbound.ErrLocked):
+		case errors.Is(err, credbound.ErrInvalidCredentials):
 			// One answer for unknown address, wrong password and locked
-			// account: the library is enumeration-resistant, the host should
-			// not undo that in its responses.
+			// account — the library itself folds a lockout into
+			// ErrInvalidCredentials on this unauthenticated path, so there is
+			// no distinct case for the host to leak by accident.
 			http.Error(w, "invalid credentials", http.StatusUnauthorized)
 			return
 		case err != nil:

@@ -86,7 +86,7 @@ func TestEmailOTPWrongCodesLockAccount(t *testing.T) {
 	if _, err := f.manager.CompleteEmailOTP(ctx, issued.Continuation, issued.Code); !errors.Is(err, credbound.ErrLocked) {
 		t.Fatalf("locked OTP completion = %v", err)
 	}
-	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrLocked) {
+	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("locked password login = %v", err)
 	}
 	_ = authn

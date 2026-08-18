@@ -158,13 +158,16 @@ func (m *Manager) CreateUser(ctx context.Context, actor Authentication, workspac
 
 // AuthenticatePassword verifies an email and password and returns an AAL1
 // interactive authentication whose SecondFactorRequired flag reports an
-// active TOTP factor. An unknown address, a wrong password, a disabled user
-// and an account without a password credential all perform the same hash
-// derivation and fail identically with ErrInvalidCredentials, so the caller
-// learns nothing about account existence. Consecutive failures on an
-// existing enabled account count toward the lockout; a locked account fails
-// with ErrLocked, which the host should relay as a neutral "try again later"
-// to unauthenticated callers.
+// active TOTP factor. An unknown address, a wrong password, a disabled user,
+// an account without a password credential and a locked account all perform
+// the same hash derivation and fail identically with ErrInvalidCredentials,
+// so the caller learns nothing about account existence — ErrLocked would be
+// an existence oracle here and is never returned to this unauthenticated
+// entry point. The lockout is still audited (reason "locked") and hosts
+// observe it through UserLockedEvent and AuthenticationFailureEvent; flows
+// that follow a proof of possession (VerifyTOTP, CompleteEmailOTP) keep
+// reporting ErrLocked. Consecutive failures on an existing enabled account
+// count toward the lockout.
 func (m *Manager) AuthenticatePassword(ctx context.Context, email, password string) (_ Authentication, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.password.authenticate", started, err) }()
@@ -217,7 +220,10 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 			return Authentication{}, auditErr
 		}
 		m.emitAuthenticationFailed(ctx, "auth.password.authenticate", audit, MethodPassword, user.ID, "locked")
-		return Authentication{}, ErrLocked
+		// ErrLocked only exists for accounts that exist: returning it from
+		// an unauthenticated entry point would be an enumeration oracle, so
+		// the public answer is the same as for a wrong password.
+		return Authentication{}, ErrInvalidCredentials
 	}
 	if lookupErr != nil || !match || user.Disabled {
 		countFailure := lookupErr == nil && !user.Disabled && !match
