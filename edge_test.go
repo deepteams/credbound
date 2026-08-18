@@ -150,6 +150,14 @@ func TestStepUpAuthorizationAndRBACFailures(t *testing.T) {
 	if err := f.manager.Authorize(ctx, authn, workspace.ID, credbound.Role("owner")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("unknown role = %v", err)
 	}
+	pending := authn
+	pending.SecondFactorRequired = true
+	if err := f.manager.Authorize(ctx, pending, workspace.ID, credbound.RoleMember); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("TOTP-pending role authorization = %v", err)
+	}
+	if err := f.manager.AuthorizePermission(ctx, pending, workspace.ID, credbound.PermissionWorkspaceAccess); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("TOTP-pending permission authorization = %v", err)
+	}
 	bound := authn
 	bound.WorkspaceID = "0198b463-0000-7000-8000-ffffffffffff"
 	if err := f.manager.Authorize(ctx, bound, workspace.ID, credbound.RoleMember); !errors.Is(err, credbound.ErrForbidden) {

@@ -11,13 +11,18 @@ import (
 // workspace. Missing or insufficient memberships, disabled users or
 // workspaces, and workspace-bound credentials used elsewhere fail with
 // ErrForbidden; a workspace requiring MFA rejects interactive AAL1 contexts
-// with ErrStepUpRequired. A scoped credential (a PAT) passes this coarse
+// with ErrStepUpRequired, and a TOTP-pending context (SecondFactorRequired)
+// is rejected the same way in every workspace — the first factor alone never
+// authorizes anything. A scoped credential (a PAT) passes this coarse
 // role check only with the "*" wildcard scope — a narrowed token has no
 // role-shaped privilege, so route it through AuthorizePermission, the
 // canonical, finer check.
 func (m *Manager) Authorize(ctx context.Context, authn Authentication, workspaceID string, minimumRole Role) error {
 	if authn.UserID == "" {
 		return ErrUnauthorized
+	}
+	if authn.SecondFactorRequired {
+		return ErrStepUpRequired
 	}
 	if workspaceID == "" {
 		return fmt.Errorf("%w: workspace id is required", ErrInvalidInput)
@@ -73,12 +78,17 @@ func (m *Manager) Authorize(ctx context.Context, authn Authentication, workspace
 // a scope: scopes are the least privilege the owner chose at creation, and
 // without this check the role lookup would silently widen a narrow token
 // back to the member's full permission set. Failures behave exactly like
-// Authorize — ErrForbidden fails closed, and a workspace requiring MFA
+// Authorize — ErrForbidden fails closed, a workspace requiring MFA
 // rejects interactive AAL1 contexts with ErrStepUpRequired while
-// non-interactive credentials such as PATs are unaffected.
+// non-interactive credentials such as PATs are unaffected, and a
+// TOTP-pending context (SecondFactorRequired) is rejected with
+// ErrStepUpRequired in every workspace.
 func (m *Manager) AuthorizePermission(ctx context.Context, authn Authentication, workspaceID string, permission WorkspacePermission) error {
 	if authn.UserID == "" {
 		return ErrUnauthorized
+	}
+	if authn.SecondFactorRequired {
+		return ErrStepUpRequired
 	}
 	if workspaceID == "" || !workspacePermissionPattern.MatchString(string(permission)) {
 		return fmt.Errorf("%w: workspace id and permission are required", ErrInvalidInput)

@@ -486,7 +486,9 @@ type Authentication struct {
 	AuthenticatedAt time.Time
 	// SecondFactorRequired reports that the account has an active TOTP
 	// factor which has not been verified yet. The host should defer creating
-	// the final session until VerifyTOTP upgrades the context.
+	// the final session until VerifyTOTP upgrades the context; Authorize and
+	// AuthorizePermission reject a pending context with ErrStepUpRequired, so
+	// the first factor alone never authorizes workspace operations.
 	SecondFactorRequired bool
 	// WorkspaceID restricts the context to one workspace. It is set for
 	// workspace-bound PATs; authorization in any other workspace fails.
