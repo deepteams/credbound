@@ -370,7 +370,7 @@ func TestPasswordResetFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if issued, err := f.manager.BeginPasswordReset(ctx, "ghost@example.com"); err != nil || issued.Token != "" {
+	if issued, err := f.manager.BeginPasswordReset(ctx, "ghost@example.com"); err != nil || issued.Token != "" || issued.Deliverable {
 		t.Fatalf("unknown email reset = %#v, %v", issued, err)
 	}
 	reset, err := f.manager.BeginPasswordReset(ctx, "ROOT@example.com")
@@ -444,11 +444,11 @@ func TestMagicLinkAuthentication(t *testing.T) {
 	authn, _ := f.bootstrap(t)
 	ctx := context.Background()
 
-	if issued, err := f.manager.BeginEmailAuthentication(ctx, "ghost@example.com"); err != nil || issued.Token != "" {
+	if issued, err := f.manager.BeginEmailAuthentication(ctx, "ghost@example.com"); err != nil || issued.Token != "" || issued.Deliverable {
 		t.Fatalf("unknown email link = %#v, %v", issued, err)
 	}
 	link, err := f.manager.BeginEmailAuthentication(ctx, "Root@example.com")
-	if err != nil || link.UserID != authn.UserID || !strings.HasPrefix(link.Token, "cbl_") || link.EmailID == "" {
+	if err != nil || link.UserID != authn.UserID || !strings.HasPrefix(link.Token, "cbl_") || link.EmailID == "" || !link.Deliverable {
 		t.Fatalf("magic link = %#v, %v", link, err)
 	}
 	login, err := f.manager.CompleteEmailAuthentication(ctx, link.Token)

@@ -22,9 +22,10 @@ const emailOTPOperation = "email_otp"
 //
 // The call answers identically whether or not the address is eligible: for an
 // unknown, disabled, or unverified address it still returns a well-formed
-// continuation with an empty Code, so the host sends no email but responds to
-// the end user exactly as in the success case, and the later completion fails
-// like any wrong code.
+// continuation with an empty Code and Deliverable false, so the host sends no
+// email but responds to the end user exactly as in the success case, and the
+// later completion fails like any wrong code. Send the email only when
+// Deliverable is true.
 func (m *Manager) BeginEmailOTP(ctx context.Context, email string) (_ IssuedEmailOTP, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.email_otp.begin", started, err) }()
@@ -108,7 +109,7 @@ func (m *Manager) BeginEmailOTP(ctx context.Context, email string) (_ IssuedEmai
 	}
 	requested := EmailAuthenticationRequestedEvent{EventMeta: meta, UserID: user.ID, EmailID: emailID, ExpiresAt: expiresAt}
 	m.events.emit(ctx, EventEmailAuthenticationRequested, func(listener EventListener) error { return listener.OnEmailAuthenticationRequested(ctx, requested) })
-	return IssuedEmailOTP{UserID: user.ID, EmailID: emailID, Code: code, Continuation: continuation, ExpiresAt: expiresAt}, nil
+	return IssuedEmailOTP{UserID: user.ID, EmailID: emailID, Code: code, Continuation: continuation, ExpiresAt: expiresAt, Deliverable: true}, nil
 }
 
 // CompleteEmailOTP consumes an email OTP and returns an AAL1 interactive

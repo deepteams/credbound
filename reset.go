@@ -13,8 +13,8 @@ const passwordResetPrefix = "cbr"
 // account owning the address. The host delivers the token to that address and
 // answers the end user identically whether or not the account exists. When the
 // address does not belong to an enabled account, the call succeeds with a zero
-// IssuedPasswordReset (empty Token) so the host's error path never becomes an
-// enumeration oracle: send the email only when Token is non-empty. The library
+// IssuedPasswordReset so the host's error path never becomes an enumeration
+// oracle: send the email only when Deliverable is true. The library
 // performs the same cryptographic work and a comparable store write in both
 // cases so timing does not reveal the difference either.
 func (m *Manager) BeginPasswordReset(ctx context.Context, email string) (_ IssuedPasswordReset, err error) {
@@ -81,7 +81,7 @@ func (m *Manager) BeginPasswordReset(ctx context.Context, email string) (_ Issue
 	}
 	requested := PasswordResetRequestedEvent{EventMeta: meta, UserID: user.ID, ResetID: id, ExpiresAt: credential.ExpiresAt}
 	m.events.emit(ctx, EventPasswordResetRequested, func(listener EventListener) error { return listener.OnPasswordResetRequested(ctx, requested) })
-	return IssuedPasswordReset{UserID: user.ID, Token: raw, ExpiresAt: credential.ExpiresAt}, nil
+	return IssuedPasswordReset{UserID: user.ID, Token: raw, ExpiresAt: credential.ExpiresAt, Deliverable: true}, nil
 }
 
 // CompletePasswordReset consumes a reset token and installs the new password.

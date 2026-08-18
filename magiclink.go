@@ -12,9 +12,9 @@ const emailAuthenticationPrefix = "cbl"
 // for the account owning the verified address. The host delivers the token to
 // that address and answers the end user identically whether or not the account
 // exists. When the address does not belong to a verified email of an enabled
-// account, the call succeeds with a zero IssuedEmailAuthentication (empty
-// Token) so the host's error path never becomes an enumeration oracle: send
-// the email only when Token is non-empty.
+// account, the call succeeds with a zero IssuedEmailAuthentication so the
+// host's error path never becomes an enumeration oracle: send the email only
+// when Deliverable is true.
 func (m *Manager) BeginEmailAuthentication(ctx context.Context, email string) (_ IssuedEmailAuthentication, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.email_link.begin", started, err) }()
@@ -89,7 +89,7 @@ func (m *Manager) BeginEmailAuthentication(ctx context.Context, email string) (_
 	}
 	requested := EmailAuthenticationRequestedEvent{EventMeta: meta, UserID: user.ID, EmailID: emailID, ExpiresAt: credential.ExpiresAt}
 	m.events.emit(ctx, EventEmailAuthenticationRequested, func(listener EventListener) error { return listener.OnEmailAuthenticationRequested(ctx, requested) })
-	return IssuedEmailAuthentication{UserID: user.ID, EmailID: emailID, Token: raw, ExpiresAt: credential.ExpiresAt}, nil
+	return IssuedEmailAuthentication{UserID: user.ID, EmailID: emailID, Token: raw, ExpiresAt: credential.ExpiresAt, Deliverable: true}, nil
 }
 
 // CompleteEmailAuthentication consumes a magic-link token and returns an AAL1

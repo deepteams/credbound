@@ -87,6 +87,12 @@ breaking changes may land in any release and are called out explicitly.
   email carries GitHub's own verified flag, and the adapter is AAL1-only:
   GitHub cannot force re-authentication, so `Begin` refuses step-up
   ceremonies (`ErrStepUpUnsupported`) instead of pretending one happened.
+- `Deliverable bool` on `IssuedPasswordReset`, `IssuedEmailAuthentication`,
+  `IssuedEmailOTP`, and `IssuedEmailVerification` makes the
+  enumeration-decoy contract explicit: send the email only when it is true,
+  instead of inferring the decoy from an empty `Token`/`Code` — a naive
+  host can no longer mail an empty token or branch differently on the
+  decoy by accident.
 - `AnyEventListener`: an `EventListener` that also implements the single
   `OnAnyEvent(ctx, name, event)` method receives every event through it —
   analytics feeds, outbox relays, and webhook dispatchers no longer

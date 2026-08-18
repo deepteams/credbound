@@ -58,16 +58,16 @@ func (m *Manager) BeginEmailAddition(ctx context.Context, actor Authentication, 
 	}
 	added := EmailAddedEvent{EventMeta: meta, Email: email}
 	m.events.emit(ctx, EventEmailAdded, func(listener EventListener) error { return listener.OnEmailAdded(ctx, added) })
-	return IssuedEmailVerification{Email: email, Token: raw}, nil
+	return IssuedEmailVerification{Email: email, Token: raw, Deliverable: true}, nil
 }
 
 // ResendEmailVerification re-issues a verification token for an unverified
 // address without requiring authentication, so a user whose signup token
 // expired or was lost is not locked out of their own account. The host answers
 // the end user identically whether or not the address exists or is already
-// verified: the call succeeds with a zero IssuedEmailVerification (empty Token)
-// in those cases, so the error path is not an enumeration oracle — send the
-// email only when Token is non-empty. It performs the same cryptographic work
+// verified: the call succeeds with a zero IssuedEmailVerification in those
+// cases, so the error path is not an enumeration oracle — send the email only
+// when Deliverable is true. It performs the same cryptographic work
 // and a comparable store write in every case so timing does not reveal the
 // difference. Re-issuing a token invalidates the previous one (the stored
 // digest is replaced). An address under a confirmed EnforceSSO domain is
@@ -139,7 +139,7 @@ func (m *Manager) ResendEmailVerification(ctx context.Context, address string) (
 	email.UpdatedAt = now
 	resent := EmailVerificationResentEvent{EventMeta: meta, Email: email}
 	m.events.emit(ctx, EventEmailVerificationResent, func(listener EventListener) error { return listener.OnEmailVerificationResent(ctx, resent) })
-	return IssuedEmailVerification{Email: email, Token: raw}, nil
+	return IssuedEmailVerification{Email: email, Token: raw, Deliverable: true}, nil
 }
 
 // ConfirmEmail marks the pending address verified by proving possession of

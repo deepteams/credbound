@@ -168,11 +168,16 @@ type EmailVerificationCredential struct {
 }
 
 // IssuedEmailVerification carries the raw verification token exactly once,
-// from BeginEmailAddition. The host delivers it to the new address and never
-// stores it.
+// from BeginEmailAddition or ResendEmailVerification. The host delivers it to
+// the new address and never stores it.
 type IssuedEmailVerification struct {
 	Email EmailAddress
 	Token string
+	// Deliverable reports whether this is a real issuance to email. A zero
+	// value (false, empty Token) is the enumeration-resistant decoy answer
+	// of ResendEmailVerification: send nothing, but answer the end user
+	// exactly as if a message had been sent.
+	Deliverable bool
 }
 
 // PasswordResetCredential is the persisted single-use reset proof. Only the
@@ -193,6 +198,11 @@ type IssuedPasswordReset struct {
 	UserID    string
 	Token     string
 	ExpiresAt time.Time
+	// Deliverable reports whether this is a real issuance to email. A zero
+	// value (false, empty Token) is the enumeration-resistant decoy answer
+	// for an unknown, disabled, or throttled address: send nothing, but
+	// answer the end user exactly as if a message had been sent.
+	Deliverable bool
 }
 
 // EmailAuthenticationCredential is the persisted single-use proof behind a
@@ -216,6 +226,11 @@ type IssuedEmailAuthentication struct {
 	EmailID   string
 	Token     string
 	ExpiresAt time.Time
+	// Deliverable reports whether this is a real issuance to email. A zero
+	// value (false, empty Token) is the enumeration-resistant decoy answer
+	// for an ineligible address: send nothing, but answer the end user
+	// exactly as if a message had been sent.
+	Deliverable bool
 }
 
 // IssuedEmailOTP carries the single-use numeric code exactly once, with the
@@ -228,6 +243,11 @@ type IssuedEmailOTP struct {
 	Code         string
 	Continuation string
 	ExpiresAt    time.Time
+	// Deliverable reports whether this is a real issuance to email. A zero
+	// value (false, empty Code) is the enumeration-resistant decoy answer
+	// for an ineligible address: send nothing, but answer the end user
+	// exactly as if a message had been sent.
+	Deliverable bool
 }
 
 // Workspace is a tenant. A workspace with DisabledAt set denies every
