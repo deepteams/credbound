@@ -26,7 +26,7 @@ func (m *Manager) ExchangeOAuthAuthorizationCode(ctx context.Context, input Exch
 	if err != nil {
 		return OAuthTokenResponse{}, err
 	}
-	issuer, client, err := m.authenticateOAuthClient(ctx, input.Issuer, input.ClientID, input.ClientSecret, input.ClientAssertion, input.ClientAssertionType)
+	issuer, client, err := m.authenticateOAuthClient(ctx, input.Issuer, input.ClientID, input.ClientSecret, input.ClientSecretInBody, input.ClientAssertion, input.ClientAssertionType)
 	if err != nil {
 		return OAuthTokenResponse{}, err
 	}
@@ -102,7 +102,7 @@ func (m *Manager) IssueOAuthClientCredentials(ctx context.Context, input OAuthCl
 	if err != nil {
 		return OAuthTokenResponse{}, err
 	}
-	issuer, client, err := m.authenticateOAuthClient(ctx, input.Issuer, input.ClientID, input.ClientSecret, input.ClientAssertion, input.ClientAssertionType)
+	issuer, client, err := m.authenticateOAuthClient(ctx, input.Issuer, input.ClientID, input.ClientSecret, input.ClientSecretInBody, input.ClientAssertion, input.ClientAssertionType)
 	if err != nil {
 		return OAuthTokenResponse{}, err
 	}
@@ -203,7 +203,7 @@ func (m *Manager) RefreshOAuthToken(ctx context.Context, input RefreshOAuthToken
 	if err != nil {
 		return OAuthTokenResponse{}, err
 	}
-	issuer, client, err := m.authenticateOAuthClient(ctx, input.Issuer, input.ClientID, input.ClientSecret, input.ClientAssertion, input.ClientAssertionType)
+	issuer, client, err := m.authenticateOAuthClient(ctx, input.Issuer, input.ClientID, input.ClientSecret, input.ClientSecretInBody, input.ClientAssertion, input.ClientAssertionType)
 	if err != nil {
 		return OAuthTokenResponse{}, err
 	}
@@ -281,7 +281,7 @@ func (m *Manager) RevokeOAuthToken(ctx context.Context, input RevokeOAuthTokenIn
 	if err != nil {
 		return err
 	}
-	_, client, err := m.authenticateOAuthClient(ctx, input.Issuer, input.ClientID, input.ClientSecret, input.ClientAssertion, input.ClientAssertionType)
+	_, client, err := m.authenticateOAuthClient(ctx, input.Issuer, input.ClientID, input.ClientSecret, input.ClientSecretInBody, input.ClientAssertion, input.ClientAssertionType)
 	if err != nil {
 		return err
 	}
@@ -565,7 +565,7 @@ func (m *Manager) OAuthJWKS(ctx context.Context, issuerURL string) ([]byte, erro
 	return config.OIDCSigner.JWKS(ctx)
 }
 
-func (m *Manager) authenticateOAuthClient(ctx context.Context, issuerURL, clientID, secret, assertion, assertionType string) (OAuthIssuer, OAuthClient, error) {
+func (m *Manager) authenticateOAuthClient(ctx context.Context, issuerURL, clientID, secret string, secretInBody bool, assertion, assertionType string) (OAuthIssuer, OAuthClient, error) {
 	const jwtBearerAssertionType = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
 	if assertion != "" && assertionType != jwtBearerAssertionType || assertion == "" && assertionType != "" {
 		return OAuthIssuer{}, OAuthClient{}, ErrInvalidCredentials
@@ -588,7 +588,12 @@ func (m *Manager) authenticateOAuthClient(ctx context.Context, issuerURL, client
 			return OAuthIssuer{}, OAuthClient{}, ErrInvalidCredentials
 		}
 	case OAuthAuthClientSecretBasic:
-		if assertion != "" || secret == "" || !hmac.Equal(client.SecretDigest, m.oauthDigest("client-secret", secret)) {
+		// The registration named the transport, not just the secret:
+		// client_secret_basic means the Authorization header, so a secret
+		// arriving as a client_secret form field (client_secret_post, which
+		// neither the registration nor the discovery document offers) is
+		// refused even when it is correct.
+		if assertion != "" || secret == "" || secretInBody || !hmac.Equal(client.SecretDigest, m.oauthDigest("client-secret", secret)) {
 			return OAuthIssuer{}, OAuthClient{}, ErrInvalidCredentials
 		}
 	case OAuthAuthPrivateKeyJWT:

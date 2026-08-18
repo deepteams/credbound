@@ -476,9 +476,16 @@ type BeginOAuthAuthorizationInput struct {
 // Scopes may be empty to receive every non-reserved scope the client is
 // registered for that the resource defines.
 type OAuthClientCredentialsInput struct {
-	Issuer              string
-	ClientID            string
-	ClientSecret        string
+	Issuer       string
+	ClientID     string
+	ClientSecret string
+	// ClientSecretInBody reports that ClientSecret arrived as a
+	// client_secret form field rather than an Authorization: Basic header.
+	// The registered client_secret_basic method accepts only the header
+	// (RFC 6749 section 2.3.1 discourages the form transport and the
+	// discovery document does not announce client_secret_post), so a
+	// body-borne secret fails authentication.
+	ClientSecretInBody  bool
 	ClientAssertion     string
 	ClientAssertionType string
 	Resource            string
@@ -530,9 +537,16 @@ type OAuthAuthorizationResult struct {
 // the authorization_code grant, including the client credentials or
 // assertion and the PKCE verifier.
 type ExchangeOAuthAuthorizationCodeInput struct {
-	Issuer              string
-	ClientID            string
-	ClientSecret        string
+	Issuer       string
+	ClientID     string
+	ClientSecret string
+	// ClientSecretInBody reports that ClientSecret arrived as a
+	// client_secret form field rather than an Authorization: Basic header.
+	// The registered client_secret_basic method accepts only the header
+	// (RFC 6749 section 2.3.1 discourages the form transport and the
+	// discovery document does not announce client_secret_post), so a
+	// body-borne secret fails authentication.
+	ClientSecretInBody  bool
 	ClientAssertion     string
 	ClientAssertionType string
 	Code                string
@@ -545,9 +559,16 @@ type ExchangeOAuthAuthorizationCodeInput struct {
 // refresh_token grant. Scopes optionally narrows the issue to a subset of
 // the granted scopes.
 type RefreshOAuthTokenInput struct {
-	Issuer              string
-	ClientID            string
-	ClientSecret        string
+	Issuer       string
+	ClientID     string
+	ClientSecret string
+	// ClientSecretInBody reports that ClientSecret arrived as a
+	// client_secret form field rather than an Authorization: Basic header.
+	// The registered client_secret_basic method accepts only the header
+	// (RFC 6749 section 2.3.1 discourages the form transport and the
+	// discovery document does not announce client_secret_post), so a
+	// body-borne secret fails authentication.
+	ClientSecretInBody  bool
 	ClientAssertion     string
 	ClientAssertionType string
 	RefreshToken        string
@@ -558,9 +579,16 @@ type RefreshOAuthTokenInput struct {
 // RevokeOAuthTokenInput is a parsed RFC 7009 revocation request; Token may
 // be an access or refresh token.
 type RevokeOAuthTokenInput struct {
-	Issuer              string
-	ClientID            string
-	ClientSecret        string
+	Issuer       string
+	ClientID     string
+	ClientSecret string
+	// ClientSecretInBody reports that ClientSecret arrived as a
+	// client_secret form field rather than an Authorization: Basic header.
+	// The registered client_secret_basic method accepts only the header
+	// (RFC 6749 section 2.3.1 discourages the form transport and the
+	// discovery document does not announce client_secret_post), so a
+	// body-borne secret fails authentication.
+	ClientSecretInBody  bool
 	ClientAssertion     string
 	ClientAssertionType string
 	Token               string

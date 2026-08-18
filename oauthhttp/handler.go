@@ -244,25 +244,29 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, err)
 		return
 	}
-	clientID, secret := clientCredentials(r, form)
+	clientID, secret, secretInBody, err := clientCredentials(r, form)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
 	grantType := form.Get("grant_type")
 	var result credbound.OAuthTokenResponse
 	switch grantType {
 	case "authorization_code":
 		result, err = h.manager.ExchangeOAuthAuthorizationCode(r.Context(), credbound.ExchangeOAuthAuthorizationCodeInput{
-			Issuer: h.config.Issuer, ClientID: clientID, ClientSecret: secret, ClientAssertion: form.Get("client_assertion"),
+			Issuer: h.config.Issuer, ClientID: clientID, ClientSecret: secret, ClientSecretInBody: secretInBody, ClientAssertion: form.Get("client_assertion"),
 			ClientAssertionType: form.Get("client_assertion_type"),
 			Code:                form.Get("code"), RedirectURI: form.Get("redirect_uri"), CodeVerifier: form.Get("code_verifier"), Resource: form.Get("resource"),
 		})
 	case "refresh_token":
 		result, err = h.manager.RefreshOAuthToken(r.Context(), credbound.RefreshOAuthTokenInput{
-			Issuer: h.config.Issuer, ClientID: clientID, ClientSecret: secret, ClientAssertion: form.Get("client_assertion"),
+			Issuer: h.config.Issuer, ClientID: clientID, ClientSecret: secret, ClientSecretInBody: secretInBody, ClientAssertion: form.Get("client_assertion"),
 			ClientAssertionType: form.Get("client_assertion_type"),
 			RefreshToken:        form.Get("refresh_token"), Resource: form.Get("resource"), Scopes: strings.Fields(form.Get("scope")),
 		})
 	case "client_credentials":
 		result, err = h.manager.IssueOAuthClientCredentials(r.Context(), credbound.OAuthClientCredentialsInput{
-			Issuer: h.config.Issuer, ClientID: clientID, ClientSecret: secret, ClientAssertion: form.Get("client_assertion"),
+			Issuer: h.config.Issuer, ClientID: clientID, ClientSecret: secret, ClientSecretInBody: secretInBody, ClientAssertion: form.Get("client_assertion"),
 			ClientAssertionType: form.Get("client_assertion_type"),
 			Resource:            form.Get("resource"), Scopes: strings.Fields(form.Get("scope")),
 		})
@@ -289,9 +293,13 @@ func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, err)
 		return
 	}
-	clientID, secret := clientCredentials(r, form)
+	clientID, secret, secretInBody, err := clientCredentials(r, form)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
 	err = h.manager.RevokeOAuthToken(r.Context(), credbound.RevokeOAuthTokenInput{
-		Issuer: h.config.Issuer, ClientID: clientID, ClientSecret: secret,
+		Issuer: h.config.Issuer, ClientID: clientID, ClientSecret: secret, ClientSecretInBody: secretInBody,
 		ClientAssertion: form.Get("client_assertion"), ClientAssertionType: form.Get("client_assertion_type"), Token: form.Get("token"),
 	})
 	if err != nil {
@@ -429,12 +437,22 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, destination any) error {
 	return nil
 }
 
-func clientCredentials(r *http.Request, form url.Values) (string, string) {
-	clientID, secret, ok := r.BasicAuth()
-	if ok {
-		return clientID, secret
+// clientCredentials extracts the client authentication a token-endpoint
+// request carries and reports which transport delivered the secret, so the
+// core can hold the client to its registered token_endpoint_auth_method — a
+// client_secret form field is not client_secret_basic. A request presenting
+// both an Authorization header and a form secret uses two authentication
+// methods at once, which RFC 6749 §2.3 forbids, and is refused outright.
+func clientCredentials(r *http.Request, form url.Values) (clientID, secret string, secretInBody bool, err error) {
+	basicID, basicSecret, ok := r.BasicAuth()
+	if !ok {
+		secret = form.Get("client_secret")
+		return form.Get("client_id"), secret, secret != "", nil
 	}
-	return form.Get("client_id"), form.Get("client_secret")
+	if form.Get("client_secret") != "" {
+		return "", "", false, fmt.Errorf("%w: multiple client authentication methods", credbound.ErrInvalidCredentials)
+	}
+	return basicID, basicSecret, false, nil
 }
 
 func bearerToken(r *http.Request) string {

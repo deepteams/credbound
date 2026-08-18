@@ -1168,6 +1168,13 @@ func TestOAuthClientCredentials(t *testing.T) {
 	}); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("wrong secret = %v", err)
 	}
+	// The correct secret on the wrong transport is refused too: the client
+	// registered client_secret_basic, not client_secret_post.
+	if _, err := f.manager.IssueOAuthClientCredentials(ctx, credbound.OAuthClientCredentialsInput{
+		Issuer: issuer.Issuer, ClientID: client.Client.ClientID, ClientSecret: client.ClientSecret, ClientSecretInBody: true, Resource: resource.Resource,
+	}); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("body-borne secret = %v", err)
+	}
 	// A pure machine client is not registered for authorization_code and
 	// cannot begin a user-delegated consent ceremony.
 	if _, err := f.manager.BeginOAuthAuthorization(ctx, root, credbound.BeginOAuthAuthorizationInput{

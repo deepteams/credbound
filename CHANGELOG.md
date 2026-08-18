@@ -9,6 +9,17 @@ breaking changes may land in any release and are called out explicitly.
 
 ### Security
 
+- The token and revocation endpoints now hold clients to their registered
+  `token_endpoint_auth_method`. A client registered `client_secret_basic`
+  is refused a correct secret delivered as a `client_secret` form field
+  (`client_secret_post`, which neither registration nor the discovery
+  document offers — RFC 6749 §2.3.1 discourages the body transport), and a
+  request presenting Basic and a form secret at once uses two
+  authentication methods (forbidden by RFC 6749 §2.3) and is refused
+  outright. Breaking: the token-endpoint inputs gain `ClientSecretInBody`,
+  which hosts with their own transport must set when the secret arrived in
+  the body.
+
 - A password sign-in can no longer complete after its password was
   concurrently replaced. `AuthenticatePassword` finalizes through the new
   `Store.RecordPasswordAuthentication`, which re-checks inside the

@@ -295,8 +295,16 @@ func TestHandlerProtocolErrorsAndDCR(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("client_id=form&client_secret=form-secret"))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.SetBasicAuth("basic", "basic-secret")
-	if id, secret := clientCredentials(request, url.Values{}); id != "basic" || secret != "basic-secret" {
-		t.Fatalf("basic credentials = %q, %q", id, secret)
+	if id, secret, inBody, err := clientCredentials(request, url.Values{}); err != nil || id != "basic" || secret != "basic-secret" || inBody {
+		t.Fatalf("basic credentials = %q, %q, %v, %v", id, secret, inBody, err)
+	}
+	// Presenting both transports at once is two authentication methods.
+	if _, _, _, err := clientCredentials(request, url.Values{"client_secret": {"form-secret"}}); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("dual-method credentials error = %v", err)
+	}
+	formOnly := httptest.NewRequest(http.MethodPost, "/", nil)
+	if id, secret, inBody, err := clientCredentials(formOnly, url.Values{"client_id": {"form"}, "client_secret": {"form-secret"}}); err != nil || id != "form" || secret != "form-secret" || !inBody {
+		t.Fatalf("form credentials = %q, %q, %v, %v", id, secret, inBody, err)
 	}
 	contextRequest := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(WithAuthentication(context.Background(), credbound.OAuthAuthentication{UserID: "user"}))
 	if value, ok := AuthenticationFromContext(contextRequest); !ok || value.UserID != "user" {
@@ -481,11 +489,37 @@ func TestHandlerClientCredentials(t *testing.T) {
 	if err != nil || client.ClientSecret == "" {
 		t.Fatalf("client = %#v, %v", client, err)
 	}
+	// The client registered client_secret_basic: the same correct secret in
+	// the form body (client_secret_post, which neither the registration nor
+	// the discovery document offers) must be refused.
 	form := url.Values{
 		"grant_type": {"client_credentials"}, "client_id": {client.Client.ClientID}, "client_secret": {client.ClientSecret},
 		"resource": {testResource}, "scope": {"documents.read"},
 	}
 	response := f.request(http.MethodPost, "/tenant/token", form.Encode(), "application/x-www-form-urlencoded")
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("body-borne client_secret = %d %s", response.Code, response.Body.String())
+	}
+	// Presenting Basic and a form secret at once is two authentication
+	// methods and is refused before reaching the core — on both endpoints
+	// that authenticate clients.
+	for _, target := range []string{"/tenant/token", "/tenant/revoke"} {
+		dualRequest := httptest.NewRequest(http.MethodPost, target, strings.NewReader(form.Encode()))
+		dualRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		dualRequest.SetBasicAuth(client.Client.ClientID, client.ClientSecret)
+		response = httptest.NewRecorder()
+		f.handler.ServeHTTP(response, dualRequest)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("dual-method %s = %d %s", target, response.Code, response.Body.String())
+		}
+	}
+	form.Del("client_id")
+	form.Del("client_secret")
+	basicRequest := httptest.NewRequest(http.MethodPost, "/tenant/token", strings.NewReader(form.Encode()))
+	basicRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	basicRequest.SetBasicAuth(client.Client.ClientID, client.ClientSecret)
+	response = httptest.NewRecorder()
+	f.handler.ServeHTTP(response, basicRequest)
 	if response.Code != http.StatusOK {
 		t.Fatalf("client_credentials token = %d %s", response.Code, response.Body.String())
 	}
