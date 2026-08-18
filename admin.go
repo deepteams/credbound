@@ -65,14 +65,23 @@ func buildAdminPermissions(overrides map[InstanceRole][]Permission) (map[Instanc
 // — appends an audit event and fails with ErrAuditUnavailable when that
 // audit cannot be persisted; a missing role or permission fails with
 // ErrForbidden. Instance roles never grant workspace data access by
-// themselves.
+// themselves, and a scope-narrowed or workspace-bound credential (a PAT or
+// OAuth token) is refused outright — instance administration is not a
+// delegable, workspace-scoped capability.
 func (m *Manager) AuthorizeAdmin(ctx context.Context, actor Authentication, permission Permission) error {
 	if actor.UserID == "" {
 		return ErrUnauthorized
 	}
+	// Instance administration is neither workspace-scoped nor delegable to a
+	// narrowed token: a workspace-bound or scope-limited credential (a PAT or
+	// OAuth token) can never exercise it, even when its owner holds an
+	// instance role. Without this the scope ceiling and workspace binding that
+	// Authorize/AuthorizePermission enforce would be bypassed for every admin
+	// read. A "*"-scoped credential is unrestricted and still allowed.
+	instanceCredential := actor.WorkspaceID == "" && (len(actor.Scopes) == 0 || actor.HasScope("*"))
 	user, userErr := m.store.UserByID(ctx, actor.UserID)
 	admin, err := m.store.InstanceAdministrator(ctx, actor.UserID)
-	allowed := userErr == nil && !user.Disabled && err == nil && m.hasAdminPermission(admin.Role, permission)
+	allowed := instanceCredential && userErr == nil && !user.Disabled && err == nil && m.hasAdminPermission(admin.Role, permission)
 	outcome := AuditFailed
 	reason := "forbidden"
 	if allowed {

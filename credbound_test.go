@@ -241,6 +241,21 @@ func TestAdministrationRolesAndAudit(t *testing.T) {
 	if err := f.manager.AuthorizeAdmin(context.Background(), developer, credbound.PermissionInstanceRolesWrite); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("developer role-write error = %v", err)
 	}
+	// A scope-narrowed or workspace-bound credential can never exercise
+	// instance administration, even when its owner is the root user; a
+	// "*"-scoped credential is unrestricted and still passes.
+	scoped := credbound.Authentication{UserID: root.UserID, Method: credbound.MethodPAT, Scopes: []string{"settings.write"}, AuthenticatedAt: f.now}
+	if err := f.manager.AuthorizeAdmin(context.Background(), scoped, credbound.PermissionAdminAccess); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("scoped PAT admin access = %v", err)
+	}
+	bound := credbound.Authentication{UserID: root.UserID, Method: credbound.MethodPAT, WorkspaceID: workspace.ID, AuthenticatedAt: f.now}
+	if err := f.manager.AuthorizeAdmin(context.Background(), bound, credbound.PermissionAdminAccess); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("workspace-bound PAT admin access = %v", err)
+	}
+	wildcard := credbound.Authentication{UserID: root.UserID, Method: credbound.MethodPAT, Scopes: []string{"*"}, AuthenticatedAt: f.now}
+	if err := f.manager.AuthorizeAdmin(context.Background(), wildcard, credbound.PermissionAdminAccess); err != nil {
+		t.Fatalf("wildcard PAT admin access = %v", err)
+	}
 	if err := f.manager.SetInstanceRole(context.Background(), developer, credbound.TrustedRequest{}, root.UserID, credbound.InstanceRoleSales); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("developer elevated role error = %v", err)
 	}
