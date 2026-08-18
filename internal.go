@@ -164,11 +164,25 @@ func (m *Manager) open(ciphertext []byte) ([]byte, error) {
 }
 
 type ceremonyContinuation struct {
+	// ID is the single-use ceremony identity consumed by the success
+	// commit; continuations sealed before ceremony ids existed carry none
+	// and stay bounded by the TTL alone.
+	ID        string    `json:"id,omitempty"`
 	UserID    string    `json:"uid"`
 	Operation string    `json:"op"`
 	Name      string    `json:"name,omitempty"`
 	ExpiresAt time.Time `json:"exp"`
 	Session   []byte    `json:"session"`
+}
+
+// consumption reports the single-use ceremony this continuation carries,
+// or nil for a continuation sealed before ceremony ids existed, which stays
+// bounded by its TTL alone.
+func (c ceremonyContinuation) consumption() *CeremonyConsumption {
+	if c.ID == "" {
+		return nil
+	}
+	return &CeremonyConsumption{ID: c.ID, ExpiresAt: c.ExpiresAt}
 }
 
 func (m *Manager) encodeContinuation(value ceremonyContinuation) (string, error) {

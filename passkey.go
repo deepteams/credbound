@@ -39,8 +39,12 @@ func (m *Manager) BeginPasskeyRegistration(ctx context.Context, actor Authentica
 	if err != nil {
 		return PasskeyChallenge{}, fmt.Errorf("begin passkey registration: %w", err)
 	}
+	ceremonyID, err := m.newID()
+	if err != nil {
+		return PasskeyChallenge{}, err
+	}
 	continuation, err := m.encodeContinuation(ceremonyContinuation{
-		UserID: actor.UserID, Operation: passkeyRegistration, Name: name,
+		ID: ceremonyID, UserID: actor.UserID, Operation: passkeyRegistration, Name: name,
 		ExpiresAt: m.now().Add(m.ceremonyTTL), Session: session,
 	})
 	if err != nil {
@@ -110,6 +114,9 @@ func (m *Manager) FinishPasskeyRegistration(ctx context.Context, actor Authentic
 	commit := m.transactionalCommit(event, "passkey.registration", func(ctx context.Context, tx Tx, hook TransactionHook) error {
 		return hook.ApplyPasskeyRegistration(ctx, tx, change)
 	})
+	// The ceremony is single use: the success commit consumes its id, so a
+	// replayed continuation can never register a second credential.
+	commit.Ceremony = state.consumption()
 	if err := m.store.SavePasskey(ctx, passkey, commit); err != nil {
 		return Passkey{}, m.mapStoreError(ctx, "auth.passkey.registration.finish", err)
 	}
@@ -167,8 +174,12 @@ func (m *Manager) BeginPasskeyAuthentication(ctx context.Context, email string) 
 		}
 		return PasskeyChallenge{}, ErrInvalidCredentials
 	}
+	ceremonyID, err := m.newID()
+	if err != nil {
+		return PasskeyChallenge{}, err
+	}
 	continuation, err := m.encodeContinuation(ceremonyContinuation{
-		UserID: userRecord.ID, Operation: passkeyAuthentication,
+		ID: ceremonyID, UserID: userRecord.ID, Operation: passkeyAuthentication,
 		ExpiresAt: m.now().Add(m.ceremonyTTL), Session: session,
 	})
 	if err != nil {
@@ -205,8 +216,11 @@ func (m *Manager) decoyPasskeyChallenge(ctx context.Context, normalizedEmail str
 // FinishPasskeyAuthentication validates the browser response against the
 // sealed continuation and returns an AAL2 interactive authentication — a
 // user-verified passkey ceremony needs no second factor. The passkey's
-// last-use timestamp is updated atomically with the audit event; a failed
-// ceremony is audited and returns ErrInvalidCredentials.
+// last-use timestamp is updated atomically with the audit event, and the
+// same commit consumes the single-use ceremony, so a captured response can
+// never be replayed — WebAuthn signature counters alone cannot guarantee
+// that, since many authenticators legitimately report a constant zero. A
+// failed or replayed ceremony is audited and returns ErrInvalidCredentials.
 func (m *Manager) FinishPasskeyAuthentication(ctx context.Context, continuation string, response []byte) (_ Authentication, err error) {
 	if err := m.requirePasskeyProvider(); err != nil {
 		return Authentication{}, err
@@ -253,7 +267,14 @@ func (m *Manager) FinishPasskeyAuthentication(ctx context.Context, continuation 
 		return Authentication{}, err
 	}
 	passkeyID := m.passkeyIDByCredential(ctx, state.UserID, credentialID)
-	if err := m.store.TouchPasskey(ctx, state.UserID, credentialID, sealedCredential, now, Commit{Audit: event}); err != nil {
+	if err := m.store.TouchPasskey(ctx, state.UserID, credentialID, sealedCredential, now, Commit{Audit: event, Ceremony: state.consumption()}); err != nil {
+		if errors.Is(err, ErrConflict) {
+			// The ceremony was already consumed: a replayed response can
+			// never mint a second authentication — even for authenticators
+			// whose signature counter stays at zero — and answers like any
+			// invalid credential.
+			return Authentication{}, ErrInvalidCredentials
+		}
 		return Authentication{}, m.mapStoreError(ctx, "auth.passkey.authentication.finish", err)
 	}
 	authentication := Authentication{UserID: state.UserID, Method: MethodPasskey, Level: AAL2, AuthenticatedAt: now}

@@ -201,6 +201,11 @@ func TestPasskeyCeremoniesEncryptStoredCredential(t *testing.T) {
 	if err != nil || passkey.CredentialJSON != nil || !uuidV7.MatchString(passkey.ID) {
 		t.Fatalf("passkey = %#v, %v", passkey, err)
 	}
+	// The registration ceremony is single use: replaying the continuation
+	// and captured response can never register a second credential.
+	if _, err := f.manager.FinishPasskeyRegistration(context.Background(), authn, challenge.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrConflict) {
+		t.Fatalf("replayed passkey registration = %v", err)
+	}
 	stored := firstPasskey(t, f.store.Passkeys(context.Background(), authn.UserID))
 	if string(stored.CredentialJSON) == string(f.passkeys.credentialJSON) {
 		t.Fatal("WebAuthn credential was stored in plaintext")
@@ -212,6 +217,13 @@ func TestPasskeyCeremoniesEncryptStoredCredential(t *testing.T) {
 	passkeyAuth, err := f.manager.FinishPasskeyAuthentication(context.Background(), login.Continuation, []byte("valid"))
 	if err != nil || passkeyAuth.Level != credbound.AAL2 || !f.passkeys.sawDecryptedCredential {
 		t.Fatalf("passkey auth = %#v, %v, decrypted=%v", passkeyAuth, err, f.passkeys.sawDecryptedCredential)
+	}
+	// The authentication ceremony is single use: replaying the continuation
+	// and captured response can never mint a second authentication, even
+	// though the fake authenticator (like many real ones) would verify the
+	// same response again.
+	if _, err := f.manager.FinishPasskeyAuthentication(context.Background(), login.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("replayed passkey ceremony = %v", err)
 	}
 	if err := f.manager.DeletePasskey(context.Background(), passkeyAuth, passkey.ID); err != nil {
 		t.Fatal(err)
