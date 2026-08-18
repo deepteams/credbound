@@ -381,7 +381,10 @@ func (m *Manager) finishSSOLink(ctx context.Context, provider SSOProvider, state
 }
 
 // UnlinkSSO removes one of the actor's linked external identities,
-// atomically with the audit event. It requires a fresh AAL2 step-up.
+// atomically with the audit event. It requires a fresh AAL2 step-up, and
+// fails with ErrConflict when the identity is the actor's last remaining
+// authentication method (no password, no passkey, no other SSO identity), so
+// a JIT-provisioned passwordless member cannot lock themselves out.
 func (m *Manager) UnlinkSSO(ctx context.Context, actor Authentication, identityID string) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.sso.unlink", started, err) }()

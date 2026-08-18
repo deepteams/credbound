@@ -204,6 +204,19 @@ func (q *Queries) CountUnusedRecoveryCodes(ctx context.Context, userID string) (
 	return count, err
 }
 
+const countUserAuthenticationMethods = `-- name: CountUserAuthenticationMethods :one
+SELECT (SELECT COUNT(*) FROM credbound_password_credentials p WHERE p.user_id = ?1)
+     + (SELECT COUNT(*) FROM credbound_passkeys k WHERE k.user_id = ?1)
+     + (SELECT COUNT(*) FROM credbound_sso_identities i WHERE i.user_id = ?1) AS methods
+`
+
+func (q *Queries) CountUserAuthenticationMethods(ctx context.Context, userID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countUserAuthenticationMethods, userID)
+	var methods int64
+	err := row.Scan(&methods)
+	return methods, err
+}
+
 const countVerifiedEmails = `-- name: CountVerifiedEmails :one
 SELECT count(*) FROM credbound_user_emails WHERE user_id = ?1 AND verified_at IS NOT NULL
 `

@@ -436,6 +436,11 @@ func TestSSOJITProvisioningHappyPath(t *testing.T) {
 	if len(identities) != 1 || identities[0].Subject != "subject-jit" || identities[0].Email != "alice@corp.example.com" {
 		t.Fatalf("JIT identities = %#v", identities)
 	}
+	// The passwordless member cannot unlink their only authentication method
+	// and lock themselves out.
+	if err := f.manager.UnlinkSSO(ctx, provisioned, identities[0].ID); !errors.Is(err, credbound.ErrConflict) {
+		t.Fatalf("last-method unlink = %v", err)
+	}
 	if len(recorder.usersCreated) != 1 || recorder.usersCreated[0].Email.VerifiedAt == nil || !recorder.usersCreated[0].Email.Primary {
 		t.Fatalf("user.created event = %#v", recorder.usersCreated)
 	}

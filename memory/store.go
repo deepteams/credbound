@@ -2425,6 +2425,20 @@ func (s *Store) UnlinkSSO(ctx context.Context, userID, identityID string, commit
 	if !ok || identity.UserID != userID {
 		return credbound.ErrNotFound
 	}
+	// The last authentication method cannot be unlinked: a passwordless,
+	// passkey-less user removing their only SSO identity would be locked out.
+	methods := len(s.passkeys[userID])
+	if _, ok := s.passwords[userID]; ok {
+		methods++
+	}
+	for _, other := range s.ssoIdentities {
+		if other.UserID == userID {
+			methods++
+		}
+	}
+	if methods <= 1 {
+		return credbound.ErrConflict
+	}
 	previous, err := s.prepareCommitLocked(commit)
 	if err != nil {
 		return err

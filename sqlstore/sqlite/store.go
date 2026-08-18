@@ -1600,6 +1600,16 @@ func (s *Store) TouchSSO(ctx context.Context, userID, identityID string, usedAt 
 // UnlinkSSO removes the user's SSO identity link.
 func (s *Store) UnlinkSSO(ctx context.Context, userID, identityID string, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		// The last authentication method cannot be unlinked: a passwordless,
+		// passkey-less user removing their only SSO identity would be locked
+		// out.
+		methods, err := q.CountUserAuthenticationMethods(ctx, userID)
+		if err != nil {
+			return mapError(err)
+		}
+		if methods <= 1 {
+			return credbound.ErrConflict
+		}
 		count, err := q.DeleteSSOIdentity(ctx, db.DeleteSSOIdentityParams{UserID: userID, ID: identityID})
 		return affected(count, err)
 	})

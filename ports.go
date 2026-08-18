@@ -143,6 +143,10 @@ type Store interface {
 	SSOIdentity(context.Context, string, string, string) (SSOIdentity, error)
 	LinkSSO(context.Context, SSOIdentity, Commit) error
 	TouchSSO(context.Context, string, string, time.Time, Commit) error
+	// UnlinkSSO removes one linked identity, refusing with ErrConflict when
+	// it is the user's last remaining authentication method (no password
+	// credential, no passkey, no other SSO identity) — a JIT-provisioned,
+	// passwordless member must not be able to lock themselves out.
 	UnlinkSSO(context.Context, string, string, Commit) error
 	SSOIdentities(context.Context, string, PageRequest) iter.Seq2[PageEvent[SSOIdentity], error]
 
