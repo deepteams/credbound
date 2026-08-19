@@ -10,6 +10,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"time"
+
+	"github.com/deepteams/credbound/internal/dbtype"
 )
 
 const acceptWorkspaceInvitation = `-- name: AcceptWorkspaceInvitation :execrows
@@ -17,9 +19,9 @@ UPDATE credbound.workspace_invitations SET accepted_at = $2, accepted_user_id = 
 `
 
 type AcceptWorkspaceInvitationParams struct {
-	ID             string         `json:"id"`
-	AcceptedAt     sql.NullTime   `json:"accepted_at"`
-	AcceptedUserID sql.NullString `json:"accepted_user_id"`
+	ID             dbtype.UUID  `json:"id"`
+	AcceptedAt     sql.NullTime `json:"accepted_at"`
+	AcceptedUserID dbtype.UUID  `json:"accepted_user_id"`
 }
 
 func (q *Queries) AcceptWorkspaceInvitation(ctx context.Context, arg AcceptWorkspaceInvitationParams) (int64, error) {
@@ -35,10 +37,10 @@ UPDATE credbound.totp_factors SET encrypted_secret = $2, active = true, last_use
 `
 
 type ActivateTOTPParams struct {
-	UserID          string    `json:"user_id"`
-	EncryptedSecret []byte    `json:"encrypted_secret"`
-	LastUsedStep    int64     `json:"last_used_step"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	UserID          dbtype.UUID `json:"user_id"`
+	EncryptedSecret []byte      `json:"encrypted_secret"`
+	LastUsedStep    int64       `json:"last_used_step"`
+	UpdatedAt       time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) ActivateTOTP(ctx context.Context, arg ActivateTOTPParams) (int64, error) {
@@ -67,7 +69,7 @@ const clearLoginThrottle = `-- name: ClearLoginThrottle :exec
 DELETE FROM credbound.login_throttles WHERE user_id = $1
 `
 
-func (q *Queries) ClearLoginThrottle(ctx context.Context, userID string) error {
+func (q *Queries) ClearLoginThrottle(ctx context.Context, userID dbtype.UUID) error {
 	_, err := q.db.ExecContext(ctx, clearLoginThrottle, userID)
 	return err
 }
@@ -77,8 +79,8 @@ UPDATE credbound.user_emails SET is_primary = false, updated_at = $2 WHERE user_
 `
 
 type ClearPrimaryEmailsParams struct {
-	UserID    string    `json:"user_id"`
-	UpdatedAt time.Time `json:"updated_at"`
+	UserID    dbtype.UUID `json:"user_id"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) ClearPrimaryEmails(ctx context.Context, arg ClearPrimaryEmailsParams) error {
@@ -91,7 +93,7 @@ UPDATE credbound.workspace_domains SET confirmed_at = $2, updated_at = $2 WHERE 
 `
 
 type ConfirmWorkspaceDomainParams struct {
-	ID          string       `json:"id"`
+	ID          dbtype.UUID  `json:"id"`
 	ConfirmedAt sql.NullTime `json:"confirmed_at"`
 }
 
@@ -108,8 +110,8 @@ UPDATE credbound.email_authentications SET used_at = $3 WHERE id = $1 AND user_i
 `
 
 type ConsumeEmailAuthenticationParams struct {
-	ID     string       `json:"id"`
-	UserID string       `json:"user_id"`
+	ID     dbtype.UUID  `json:"id"`
+	UserID dbtype.UUID  `json:"user_id"`
 	UsedAt sql.NullTime `json:"used_at"`
 }
 
@@ -126,7 +128,7 @@ UPDATE credbound.password_resets SET used_at = $2 WHERE id = $1 AND used_at IS N
 `
 
 type ConsumePasswordResetParams struct {
-	ID     string       `json:"id"`
+	ID     dbtype.UUID  `json:"id"`
 	UsedAt sql.NullTime `json:"used_at"`
 }
 
@@ -143,7 +145,7 @@ UPDATE credbound.recovery_codes SET used_at = $3 WHERE user_id = $1 AND digest =
 `
 
 type ConsumeRecoveryCodeParams struct {
-	UserID string       `json:"user_id"`
+	UserID dbtype.UUID  `json:"user_id"`
 	Digest []byte       `json:"digest"`
 	UsedAt sql.NullTime `json:"used_at"`
 }
@@ -163,7 +165,7 @@ JOIN credbound.users u ON u.id = m.user_id
 WHERE m.workspace_id = $1 AND m.role = 'admin' AND m.status = 'active' AND NOT u.disabled
 `
 
-func (q *Queries) CountActiveWorkspaceAdministrators(ctx context.Context, workspaceID string) (int64, error) {
+func (q *Queries) CountActiveWorkspaceAdministrators(ctx context.Context, workspaceID dbtype.UUID) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countActiveWorkspaceAdministrators, workspaceID)
 	var count int64
 	err := row.Scan(&count)
@@ -198,7 +200,7 @@ const countUnusedRecoveryCodes = `-- name: CountUnusedRecoveryCodes :one
 SELECT COUNT(*) FROM credbound.recovery_codes WHERE user_id = $1 AND used_at IS NULL
 `
 
-func (q *Queries) CountUnusedRecoveryCodes(ctx context.Context, userID string) (int64, error) {
+func (q *Queries) CountUnusedRecoveryCodes(ctx context.Context, userID dbtype.UUID) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countUnusedRecoveryCodes, userID)
 	var count int64
 	err := row.Scan(&count)
@@ -211,7 +213,7 @@ SELECT CAST((SELECT COUNT(*) FROM credbound.password_credentials p WHERE p.user_
      + (SELECT COUNT(*) FROM credbound.sso_identities i WHERE i.user_id = $1) AS bigint) AS methods
 `
 
-func (q *Queries) CountUserAuthenticationMethods(ctx context.Context, userID string) (int64, error) {
+func (q *Queries) CountUserAuthenticationMethods(ctx context.Context, userID dbtype.UUID) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countUserAuthenticationMethods, userID)
 	var methods int64
 	err := row.Scan(&methods)
@@ -222,7 +224,7 @@ const countVerifiedEmails = `-- name: CountVerifiedEmails :one
 SELECT count(*) FROM credbound.user_emails WHERE user_id = $1 AND verified_at IS NOT NULL
 `
 
-func (q *Queries) CountVerifiedEmails(ctx context.Context, userID string) (int64, error) {
+func (q *Queries) CountVerifiedEmails(ctx context.Context, userID dbtype.UUID) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countVerifiedEmails, userID)
 	var count int64
 	err := row.Scan(&count)
@@ -245,7 +247,7 @@ WHERE target.user_id = $1 AND target.role = 'admin' AND target.status = 'active'
   )
 `
 
-func (q *Queries) CountWorkspacesOrphanedByUserDisable(ctx context.Context, userID string) (int64, error) {
+func (q *Queries) CountWorkspacesOrphanedByUserDisable(ctx context.Context, userID dbtype.UUID) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countWorkspacesOrphanedByUserDisable, userID)
 	var count int64
 	err := row.Scan(&count)
@@ -257,8 +259,8 @@ DELETE FROM credbound.user_emails WHERE id = $2 AND user_id = $1 AND NOT is_prim
 `
 
 type DeleteEmailParams struct {
-	UserID string `json:"user_id"`
-	ID     string `json:"id"`
+	UserID dbtype.UUID `json:"user_id"`
+	ID     dbtype.UUID `json:"id"`
 }
 
 func (q *Queries) DeleteEmail(ctx context.Context, arg DeleteEmailParams) (int64, error) {
@@ -273,7 +275,7 @@ const deleteInstanceAdministrator = `-- name: DeleteInstanceAdministrator :execr
 DELETE FROM credbound.instance_administrators WHERE user_id = $1
 `
 
-func (q *Queries) DeleteInstanceAdministrator(ctx context.Context, userID string) (int64, error) {
+func (q *Queries) DeleteInstanceAdministrator(ctx context.Context, userID dbtype.UUID) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteInstanceAdministrator, userID)
 	if err != nil {
 		return 0, err
@@ -286,8 +288,8 @@ DELETE FROM credbound.memberships WHERE workspace_id = $1 AND user_id = $2
 `
 
 type DeleteMembershipParams struct {
-	WorkspaceID string `json:"workspace_id"`
-	UserID      string `json:"user_id"`
+	WorkspaceID dbtype.UUID `json:"workspace_id"`
+	UserID      dbtype.UUID `json:"user_id"`
 }
 
 func (q *Queries) DeleteMembership(ctx context.Context, arg DeleteMembershipParams) (int64, error) {
@@ -303,8 +305,8 @@ DELETE FROM credbound.password_resets WHERE user_id = $1 AND id != $2
 `
 
 type DeleteOtherPasswordResetsParams struct {
-	UserID string `json:"user_id"`
-	ID     string `json:"id"`
+	UserID dbtype.UUID `json:"user_id"`
+	ID     dbtype.UUID `json:"id"`
 }
 
 func (q *Queries) DeleteOtherPasswordResets(ctx context.Context, arg DeleteOtherPasswordResetsParams) error {
@@ -317,8 +319,8 @@ DELETE FROM credbound.passkeys WHERE user_id = $1 AND id = $2
 `
 
 type DeletePasskeyParams struct {
-	UserID string `json:"user_id"`
-	ID     string `json:"id"`
+	UserID dbtype.UUID `json:"user_id"`
+	ID     dbtype.UUID `json:"id"`
 }
 
 func (q *Queries) DeletePasskey(ctx context.Context, arg DeletePasskeyParams) (int64, error) {
@@ -333,7 +335,7 @@ const deleteRecoveryCodes = `-- name: DeleteRecoveryCodes :exec
 DELETE FROM credbound.recovery_codes WHERE user_id = $1
 `
 
-func (q *Queries) DeleteRecoveryCodes(ctx context.Context, userID string) error {
+func (q *Queries) DeleteRecoveryCodes(ctx context.Context, userID dbtype.UUID) error {
 	_, err := q.db.ExecContext(ctx, deleteRecoveryCodes, userID)
 	return err
 }
@@ -343,8 +345,8 @@ UPDATE credbound.scim_groups SET deleted_at = $3, updated_at = $4 WHERE configur
 `
 
 type DeleteSCIMGroupParams struct {
-	ConfigurationID string       `json:"configuration_id"`
-	ID              string       `json:"id"`
+	ConfigurationID dbtype.UUID  `json:"configuration_id"`
+	ID              dbtype.UUID  `json:"id"`
 	DeletedAt       sql.NullTime `json:"deleted_at"`
 	UpdatedAt       time.Time    `json:"updated_at"`
 }
@@ -367,8 +369,8 @@ DELETE FROM credbound.sso_identities WHERE id = $2 AND user_id = $1
 `
 
 type DeleteSSOIdentityParams struct {
-	UserID string `json:"user_id"`
-	ID     string `json:"id"`
+	UserID dbtype.UUID `json:"user_id"`
+	ID     dbtype.UUID `json:"id"`
 }
 
 func (q *Queries) DeleteSSOIdentity(ctx context.Context, arg DeleteSSOIdentityParams) (int64, error) {
@@ -400,7 +402,7 @@ const deleteTOTP = `-- name: DeleteTOTP :execrows
 DELETE FROM credbound.totp_factors WHERE user_id = $1
 `
 
-func (q *Queries) DeleteTOTP(ctx context.Context, userID string) (int64, error) {
+func (q *Queries) DeleteTOTP(ctx context.Context, userID dbtype.UUID) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteTOTP, userID)
 	if err != nil {
 		return 0, err
@@ -412,7 +414,7 @@ const deleteUserPasskeys = `-- name: DeleteUserPasskeys :exec
 DELETE FROM credbound.passkeys WHERE user_id = $1
 `
 
-func (q *Queries) DeleteUserPasskeys(ctx context.Context, userID string) error {
+func (q *Queries) DeleteUserPasskeys(ctx context.Context, userID dbtype.UUID) error {
 	_, err := q.db.ExecContext(ctx, deleteUserPasskeys, userID)
 	return err
 }
@@ -421,7 +423,7 @@ const deleteWorkspaceDomain = `-- name: DeleteWorkspaceDomain :execrows
 DELETE FROM credbound.workspace_domains WHERE id = $1
 `
 
-func (q *Queries) DeleteWorkspaceDomain(ctx context.Context, id string) (int64, error) {
+func (q *Queries) DeleteWorkspaceDomain(ctx context.Context, id dbtype.UUID) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteWorkspaceDomain, id)
 	if err != nil {
 		return 0, err
@@ -434,8 +436,8 @@ UPDATE credbound.scim_configurations SET enabled = false, updated_at = $2 WHERE 
 `
 
 type DisableSCIMConfigurationParams struct {
-	ID        string    `json:"id"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        dbtype.UUID `json:"id"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) DisableSCIMConfiguration(ctx context.Context, arg DisableSCIMConfigurationParams) (int64, error) {
@@ -490,7 +492,7 @@ const getEmailAuthentication = `-- name: GetEmailAuthentication :one
 SELECT id, user_id, email_id, digest, created_at, expires_at, used_at FROM credbound.email_authentications WHERE id = $1
 `
 
-func (q *Queries) GetEmailAuthentication(ctx context.Context, id string) (CredboundEmailAuthentication, error) {
+func (q *Queries) GetEmailAuthentication(ctx context.Context, id dbtype.UUID) (CredboundEmailAuthentication, error) {
 	row := q.db.QueryRowContext(ctx, getEmailAuthentication, id)
 	var i CredboundEmailAuthentication
 	err := row.Scan(
@@ -532,7 +534,7 @@ SELECT id, user_id, address, is_primary, verified_at, verification_digest, verif
 FROM credbound.user_emails WHERE id = $1
 `
 
-func (q *Queries) GetEmailVerification(ctx context.Context, id string) (CredboundUserEmail, error) {
+func (q *Queries) GetEmailVerification(ctx context.Context, id dbtype.UUID) (CredboundUserEmail, error) {
 	row := q.db.QueryRowContext(ctx, getEmailVerification, id)
 	var i CredboundUserEmail
 	err := row.Scan(
@@ -553,7 +555,7 @@ const getInstanceAdministrator = `-- name: GetInstanceAdministrator :one
 SELECT user_id, role, created_at, updated_at FROM credbound.instance_administrators WHERE user_id = $1
 `
 
-func (q *Queries) GetInstanceAdministrator(ctx context.Context, userID string) (CredboundInstanceAdministrator, error) {
+func (q *Queries) GetInstanceAdministrator(ctx context.Context, userID dbtype.UUID) (CredboundInstanceAdministrator, error) {
 	row := q.db.QueryRowContext(ctx, getInstanceAdministrator, userID)
 	var i CredboundInstanceAdministrator
 	err := row.Scan(
@@ -569,7 +571,7 @@ const getLoginThrottle = `-- name: GetLoginThrottle :one
 SELECT user_id, failed_attempts, locked_until, updated_at FROM credbound.login_throttles WHERE user_id = $1
 `
 
-func (q *Queries) GetLoginThrottle(ctx context.Context, userID string) (CredboundLoginThrottle, error) {
+func (q *Queries) GetLoginThrottle(ctx context.Context, userID dbtype.UUID) (CredboundLoginThrottle, error) {
 	row := q.db.QueryRowContext(ctx, getLoginThrottle, userID)
 	var i CredboundLoginThrottle
 	err := row.Scan(
@@ -586,8 +588,8 @@ SELECT workspace_id, user_id, role, status, provisioning_source, created_at, upd
 `
 
 type GetMembershipParams struct {
-	WorkspaceID string `json:"workspace_id"`
-	UserID      string `json:"user_id"`
+	WorkspaceID dbtype.UUID `json:"workspace_id"`
+	UserID      dbtype.UUID `json:"user_id"`
 }
 
 func (q *Queries) GetMembership(ctx context.Context, arg GetMembershipParams) (CredboundMembership, error) {
@@ -610,7 +612,7 @@ SELECT id, user_id, name, prefix, digest, workspace_id, scopes_json, created_at,
 FROM credbound.personal_access_tokens WHERE id = $1
 `
 
-func (q *Queries) GetPATByID(ctx context.Context, id string) (CredboundPersonalAccessToken, error) {
+func (q *Queries) GetPATByID(ctx context.Context, id dbtype.UUID) (CredboundPersonalAccessToken, error) {
 	row := q.db.QueryRowContext(ctx, getPATByID, id)
 	var i CredboundPersonalAccessToken
 	err := row.Scan(
@@ -676,7 +678,7 @@ const getPassword = `-- name: GetPassword :one
 SELECT user_id, hash, updated_at FROM credbound.password_credentials WHERE user_id = $1
 `
 
-func (q *Queries) GetPassword(ctx context.Context, userID string) (CredboundPasswordCredential, error) {
+func (q *Queries) GetPassword(ctx context.Context, userID dbtype.UUID) (CredboundPasswordCredential, error) {
 	row := q.db.QueryRowContext(ctx, getPassword, userID)
 	var i CredboundPasswordCredential
 	err := row.Scan(&i.UserID, &i.Hash, &i.UpdatedAt)
@@ -687,7 +689,7 @@ const getPasswordReset = `-- name: GetPasswordReset :one
 SELECT id, user_id, digest, created_at, expires_at, used_at FROM credbound.password_resets WHERE id = $1
 `
 
-func (q *Queries) GetPasswordReset(ctx context.Context, id string) (CredboundPasswordReset, error) {
+func (q *Queries) GetPasswordReset(ctx context.Context, id dbtype.UUID) (CredboundPasswordReset, error) {
 	row := q.db.QueryRowContext(ctx, getPasswordReset, id)
 	var i CredboundPasswordReset
 	err := row.Scan(
@@ -707,8 +709,8 @@ FROM credbound.workspace_invitations WHERE workspace_id = $1 AND email = $2 AND 
 `
 
 type GetPendingWorkspaceInvitationParams struct {
-	WorkspaceID string `json:"workspace_id"`
-	Email       string `json:"email"`
+	WorkspaceID dbtype.UUID `json:"workspace_id"`
+	Email       string      `json:"email"`
 }
 
 func (q *Queries) GetPendingWorkspaceInvitation(ctx context.Context, arg GetPendingWorkspaceInvitationParams) (CredboundWorkspaceInvitation, error) {
@@ -735,7 +737,7 @@ SELECT id, workspace_id, enabled, default_role, trust_directory_emails, group_ro
 FROM credbound.scim_configurations WHERE id = $1
 `
 
-func (q *Queries) GetSCIMConfiguration(ctx context.Context, id string) (CredboundScimConfiguration, error) {
+func (q *Queries) GetSCIMConfiguration(ctx context.Context, id dbtype.UUID) (CredboundScimConfiguration, error) {
 	row := q.db.QueryRowContext(ctx, getSCIMConfiguration, id)
 	var i CredboundScimConfiguration
 	err := row.Scan(
@@ -760,16 +762,16 @@ WHERE k.prefix = $1
 `
 
 type GetSCIMConfigurationByCredentialPrefixRow struct {
-	ID                    string          `json:"id"`
-	WorkspaceID           string          `json:"workspace_id"`
+	ID                    dbtype.UUID     `json:"id"`
+	WorkspaceID           dbtype.UUID     `json:"workspace_id"`
 	Enabled               bool            `json:"enabled"`
 	DefaultRole           string          `json:"default_role"`
 	TrustDirectoryEmails  bool            `json:"trust_directory_emails"`
 	GroupRoleMappingsJson json.RawMessage `json:"group_role_mappings_json"`
 	CreatedAt             time.Time       `json:"created_at"`
 	UpdatedAt             time.Time       `json:"updated_at"`
-	CredentialID          string          `json:"credential_id"`
-	ConfigurationID       string          `json:"configuration_id"`
+	CredentialID          dbtype.UUID     `json:"credential_id"`
+	ConfigurationID       dbtype.UUID     `json:"configuration_id"`
 	Prefix                string          `json:"prefix"`
 	Digest                []byte          `json:"digest"`
 	CredentialCreatedAt   time.Time       `json:"credential_created_at"`
@@ -808,8 +810,8 @@ FROM credbound.scim_groups WHERE configuration_id = $1 AND id = $2 AND deleted_a
 `
 
 type GetSCIMGroupParams struct {
-	ConfigurationID string `json:"configuration_id"`
-	ID              string `json:"id"`
+	ConfigurationID dbtype.UUID `json:"configuration_id"`
+	ID              dbtype.UUID `json:"id"`
 }
 
 func (q *Queries) GetSCIMGroup(ctx context.Context, arg GetSCIMGroupParams) (CredboundScimGroup, error) {
@@ -834,7 +836,7 @@ FROM credbound.scim_groups WHERE configuration_id = $1 AND external_id = $2 AND 
 `
 
 type GetSCIMGroupByExternalIDParams struct {
-	ConfigurationID string         `json:"configuration_id"`
+	ConfigurationID dbtype.UUID    `json:"configuration_id"`
 	ExternalID      sql.NullString `json:"external_id"`
 }
 
@@ -860,8 +862,8 @@ FROM credbound.scim_users WHERE configuration_id = $1 AND id = $2
 `
 
 type GetSCIMUserParams struct {
-	ConfigurationID string `json:"configuration_id"`
-	ID              string `json:"id"`
+	ConfigurationID dbtype.UUID `json:"configuration_id"`
+	ID              dbtype.UUID `json:"id"`
 }
 
 func (q *Queries) GetSCIMUser(ctx context.Context, arg GetSCIMUserParams) (CredboundScimUser, error) {
@@ -890,7 +892,7 @@ FROM credbound.scim_users WHERE configuration_id = $1 AND external_id = $2
 `
 
 type GetSCIMUserByExternalIDParams struct {
-	ConfigurationID string         `json:"configuration_id"`
+	ConfigurationID dbtype.UUID    `json:"configuration_id"`
 	ExternalID      sql.NullString `json:"external_id"`
 }
 
@@ -920,8 +922,8 @@ FROM credbound.scim_users WHERE configuration_id = $1 AND normalized_user_name =
 `
 
 type GetSCIMUserByUserNameParams struct {
-	ConfigurationID    string `json:"configuration_id"`
-	NormalizedUserName string `json:"normalized_user_name"`
+	ConfigurationID    dbtype.UUID `json:"configuration_id"`
+	NormalizedUserName string      `json:"normalized_user_name"`
 }
 
 func (q *Queries) GetSCIMUserByUserName(ctx context.Context, arg GetSCIMUserByUserNameParams) (CredboundScimUser, error) {
@@ -950,9 +952,9 @@ FROM credbound.sso_identities WHERE provider_configuration_id = $1 AND issuer = 
 `
 
 type GetSSOIdentityParams struct {
-	ProviderConfigurationID string `json:"provider_configuration_id"`
-	Issuer                  string `json:"issuer"`
-	Subject                 string `json:"subject"`
+	ProviderConfigurationID dbtype.UUID `json:"provider_configuration_id"`
+	Issuer                  string      `json:"issuer"`
+	Subject                 string      `json:"subject"`
 }
 
 func (q *Queries) GetSSOIdentity(ctx context.Context, arg GetSSOIdentityParams) (CredboundSsoIdentity, error) {
@@ -977,7 +979,7 @@ SELECT id, user_id, provider_configuration_id, provider_kind, issuer, subject, e
 FROM credbound.sso_identities WHERE id = $1
 `
 
-func (q *Queries) GetSSOIdentityByID(ctx context.Context, id string) (CredboundSsoIdentity, error) {
+func (q *Queries) GetSSOIdentityByID(ctx context.Context, id dbtype.UUID) (CredboundSsoIdentity, error) {
 	row := q.db.QueryRowContext(ctx, getSSOIdentityByID, id)
 	var i CredboundSsoIdentity
 	err := row.Scan(
@@ -999,7 +1001,7 @@ SELECT id, user_id, method, level, authenticated_at, second_factor_required, use
 FROM credbound.sessions WHERE id = $1
 `
 
-func (q *Queries) GetSession(ctx context.Context, id string) (CredboundSession, error) {
+func (q *Queries) GetSession(ctx context.Context, id dbtype.UUID) (CredboundSession, error) {
 	row := q.db.QueryRowContext(ctx, getSession, id)
 	var i CredboundSession
 	err := row.Scan(
@@ -1024,7 +1026,7 @@ const getTOTP = `-- name: GetTOTP :one
 SELECT user_id, encrypted_secret, active, last_used_step, created_at, updated_at FROM credbound.totp_factors WHERE user_id = $1
 `
 
-func (q *Queries) GetTOTP(ctx context.Context, userID string) (CredboundTotpFactor, error) {
+func (q *Queries) GetTOTP(ctx context.Context, userID dbtype.UUID) (CredboundTotpFactor, error) {
 	row := q.db.QueryRowContext(ctx, getTOTP, userID)
 	var i CredboundTotpFactor
 	err := row.Scan(
@@ -1047,7 +1049,7 @@ WHERE login_email.address = $1 AND login_email.verified_at IS NOT NULL
 `
 
 type GetUserByEmailRow struct {
-	ID          string       `json:"id"`
+	ID          dbtype.UUID  `json:"id"`
 	Email       string       `json:"email"`
 	DisplayName string       `json:"display_name"`
 	Disabled    bool         `json:"disabled"`
@@ -1079,7 +1081,7 @@ WHERE u.id = $1
 `
 
 type GetUserByIDRow struct {
-	ID          string       `json:"id"`
+	ID          dbtype.UUID  `json:"id"`
 	Email       string       `json:"email"`
 	DisplayName string       `json:"display_name"`
 	Disabled    bool         `json:"disabled"`
@@ -1088,7 +1090,7 @@ type GetUserByIDRow struct {
 	UpdatedAt   time.Time    `json:"updated_at"`
 }
 
-func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, error) {
+func (q *Queries) GetUserByID(ctx context.Context, id dbtype.UUID) (GetUserByIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getUserByID, id)
 	var i GetUserByIDRow
 	err := row.Scan(
@@ -1107,7 +1109,7 @@ const getWorkspace = `-- name: GetWorkspace :one
 SELECT id, name, created_at, updated_at, disabled_at, require_mfa FROM credbound.workspaces WHERE id = $1
 `
 
-func (q *Queries) GetWorkspace(ctx context.Context, id string) (CredboundWorkspace, error) {
+func (q *Queries) GetWorkspace(ctx context.Context, id dbtype.UUID) (CredboundWorkspace, error) {
 	row := q.db.QueryRowContext(ctx, getWorkspace, id)
 	var i CredboundWorkspace
 	err := row.Scan(
@@ -1126,7 +1128,7 @@ SELECT id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_r
 FROM credbound.workspace_domains WHERE id = $1
 `
 
-func (q *Queries) GetWorkspaceDomain(ctx context.Context, id string) (CredboundWorkspaceDomain, error) {
+func (q *Queries) GetWorkspaceDomain(ctx context.Context, id dbtype.UUID) (CredboundWorkspaceDomain, error) {
 	row := q.db.QueryRowContext(ctx, getWorkspaceDomain, id)
 	var i CredboundWorkspaceDomain
 	err := row.Scan(
@@ -1150,7 +1152,7 @@ SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at
 FROM credbound.workspace_invitations WHERE id = $1
 `
 
-func (q *Queries) GetWorkspaceInvitation(ctx context.Context, id string) (CredboundWorkspaceInvitation, error) {
+func (q *Queries) GetWorkspaceInvitation(ctx context.Context, id dbtype.UUID) (CredboundWorkspaceInvitation, error) {
 	row := q.db.QueryRowContext(ctx, getWorkspaceInvitation, id)
 	var i CredboundWorkspaceInvitation
 	err := row.Scan(
@@ -1175,21 +1177,21 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 `
 
 type InsertAuditParams struct {
-	ID           string         `json:"id"`
-	OccurredAt   time.Time      `json:"occurred_at"`
-	ActorKind    string         `json:"actor_kind"`
-	ActorID      sql.NullString `json:"actor_id"`
-	Action       string         `json:"action"`
-	ResourceType string         `json:"resource_type"`
-	ResourceID   string         `json:"resource_id"`
-	WorkspaceID  sql.NullString `json:"workspace_id"`
-	Outcome      string         `json:"outcome"`
-	Reason       string         `json:"reason"`
-	IpAddress    string         `json:"ip_address"`
-	UserAgent    string         `json:"user_agent"`
-	Sequence     sql.NullInt64  `json:"sequence"`
-	PreviousHash []byte         `json:"previous_hash"`
-	Hash         []byte         `json:"hash"`
+	ID           dbtype.UUID   `json:"id"`
+	OccurredAt   time.Time     `json:"occurred_at"`
+	ActorKind    string        `json:"actor_kind"`
+	ActorID      dbtype.UUID   `json:"actor_id"`
+	Action       string        `json:"action"`
+	ResourceType string        `json:"resource_type"`
+	ResourceID   string        `json:"resource_id"`
+	WorkspaceID  dbtype.UUID   `json:"workspace_id"`
+	Outcome      string        `json:"outcome"`
+	Reason       string        `json:"reason"`
+	IpAddress    string        `json:"ip_address"`
+	UserAgent    string        `json:"user_agent"`
+	Sequence     sql.NullInt64 `json:"sequence"`
+	PreviousHash []byte        `json:"previous_hash"`
+	Hash         []byte        `json:"hash"`
 }
 
 func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error {
@@ -1218,8 +1220,8 @@ INSERT INTO credbound.consumed_ceremonies (id, expires_at) VALUES ($1, $2)
 `
 
 type InsertConsumedCeremonyParams struct {
-	ID        string    `json:"id"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ID        dbtype.UUID `json:"id"`
+	ExpiresAt time.Time   `json:"expires_at"`
 }
 
 func (q *Queries) InsertConsumedCeremony(ctx context.Context, arg InsertConsumedCeremonyParams) error {
@@ -1232,12 +1234,12 @@ INSERT INTO credbound.email_authentications (id, user_id, email_id, digest, crea
 `
 
 type InsertEmailAuthenticationParams struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	EmailID   string    `json:"email_id"`
-	Digest    []byte    `json:"digest"`
-	CreatedAt time.Time `json:"created_at"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ID        dbtype.UUID `json:"id"`
+	UserID    dbtype.UUID `json:"user_id"`
+	EmailID   dbtype.UUID `json:"email_id"`
+	Digest    []byte      `json:"digest"`
+	CreatedAt time.Time   `json:"created_at"`
+	ExpiresAt time.Time   `json:"expires_at"`
 }
 
 func (q *Queries) InsertEmailAuthentication(ctx context.Context, arg InsertEmailAuthenticationParams) error {
@@ -1258,12 +1260,12 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, NULL)
 `
 
 type InsertPATParams struct {
-	ID          string          `json:"id"`
-	UserID      string          `json:"user_id"`
+	ID          dbtype.UUID     `json:"id"`
+	UserID      dbtype.UUID     `json:"user_id"`
 	Name        string          `json:"name"`
 	Prefix      string          `json:"prefix"`
 	Digest      []byte          `json:"digest"`
-	WorkspaceID sql.NullString  `json:"workspace_id"`
+	WorkspaceID dbtype.UUID     `json:"workspace_id"`
 	ScopesJson  json.RawMessage `json:"scopes_json"`
 	CreatedAt   time.Time       `json:"created_at"`
 	ExpiresAt   sql.NullTime    `json:"expires_at"`
@@ -1289,12 +1291,12 @@ INSERT INTO credbound.passkeys (id, user_id, name, credential_id, credential_jso
 `
 
 type InsertPasskeyParams struct {
-	ID             string    `json:"id"`
-	UserID         string    `json:"user_id"`
-	Name           string    `json:"name"`
-	CredentialID   []byte    `json:"credential_id"`
-	CredentialJson []byte    `json:"credential_json"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             dbtype.UUID `json:"id"`
+	UserID         dbtype.UUID `json:"user_id"`
+	Name           string      `json:"name"`
+	CredentialID   []byte      `json:"credential_id"`
+	CredentialJson []byte      `json:"credential_json"`
+	CreatedAt      time.Time   `json:"created_at"`
 }
 
 func (q *Queries) InsertPasskey(ctx context.Context, arg InsertPasskeyParams) error {
@@ -1314,9 +1316,9 @@ INSERT INTO credbound.password_credentials (user_id, hash, updated_at) VALUES ($
 `
 
 type InsertPasswordParams struct {
-	UserID    string    `json:"user_id"`
-	Hash      string    `json:"hash"`
-	UpdatedAt time.Time `json:"updated_at"`
+	UserID    dbtype.UUID `json:"user_id"`
+	Hash      string      `json:"hash"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) InsertPassword(ctx context.Context, arg InsertPasswordParams) error {
@@ -1329,11 +1331,11 @@ INSERT INTO credbound.password_resets (id, user_id, digest, created_at, expires_
 `
 
 type InsertPasswordResetParams struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Digest    []byte    `json:"digest"`
-	CreatedAt time.Time `json:"created_at"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ID        dbtype.UUID `json:"id"`
+	UserID    dbtype.UUID `json:"user_id"`
+	Digest    []byte      `json:"digest"`
+	CreatedAt time.Time   `json:"created_at"`
+	ExpiresAt time.Time   `json:"expires_at"`
 }
 
 func (q *Queries) InsertPasswordReset(ctx context.Context, arg InsertPasswordResetParams) error {
@@ -1352,8 +1354,8 @@ INSERT INTO credbound.recovery_codes (user_id, digest, used_at) VALUES ($1, $2, 
 `
 
 type InsertRecoveryCodeParams struct {
-	UserID string `json:"user_id"`
-	Digest []byte `json:"digest"`
+	UserID dbtype.UUID `json:"user_id"`
+	Digest []byte      `json:"digest"`
 }
 
 func (q *Queries) InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCodeParams) error {
@@ -1367,8 +1369,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type InsertSCIMConfigurationParams struct {
-	ID                    string          `json:"id"`
-	WorkspaceID           string          `json:"workspace_id"`
+	ID                    dbtype.UUID     `json:"id"`
+	WorkspaceID           dbtype.UUID     `json:"workspace_id"`
 	Enabled               bool            `json:"enabled"`
 	DefaultRole           string          `json:"default_role"`
 	TrustDirectoryEmails  bool            `json:"trust_directory_emails"`
@@ -1397,8 +1399,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type InsertSCIMCredentialParams struct {
-	ID              string       `json:"id"`
-	ConfigurationID string       `json:"configuration_id"`
+	ID              dbtype.UUID  `json:"id"`
+	ConfigurationID dbtype.UUID  `json:"configuration_id"`
 	Prefix          string       `json:"prefix"`
 	Digest          []byte       `json:"digest"`
 	CreatedAt       time.Time    `json:"created_at"`
@@ -1427,9 +1429,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 `
 
 type InsertSCIMUserParams struct {
-	ID                 string          `json:"id"`
-	ConfigurationID    string          `json:"configuration_id"`
-	UserID             string          `json:"user_id"`
+	ID                 dbtype.UUID     `json:"id"`
+	ConfigurationID    dbtype.UUID     `json:"configuration_id"`
+	UserID             dbtype.UUID     `json:"user_id"`
 	ExternalID         sql.NullString  `json:"external_id"`
 	NormalizedUserName string          `json:"normalized_user_name"`
 	DisplayName        string          `json:"display_name"`
@@ -1465,9 +1467,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `
 
 type InsertSSOIdentityParams struct {
-	ID                      string       `json:"id"`
-	UserID                  string       `json:"user_id"`
-	ProviderConfigurationID string       `json:"provider_configuration_id"`
+	ID                      dbtype.UUID  `json:"id"`
+	UserID                  dbtype.UUID  `json:"user_id"`
+	ProviderConfigurationID dbtype.UUID  `json:"provider_configuration_id"`
 	ProviderKind            string       `json:"provider_kind"`
 	Issuer                  string       `json:"issuer"`
 	Subject                 string       `json:"subject"`
@@ -1497,18 +1499,18 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULL)
 `
 
 type InsertSessionParams struct {
-	ID                   string    `json:"id"`
-	UserID               string    `json:"user_id"`
-	Method               string    `json:"method"`
-	Level                int16     `json:"level"`
-	AuthenticatedAt      time.Time `json:"authenticated_at"`
-	SecondFactorRequired bool      `json:"second_factor_required"`
-	UserAgent            string    `json:"user_agent"`
-	IpAddress            string    `json:"ip_address"`
-	Digest               []byte    `json:"digest"`
-	CreatedAt            time.Time `json:"created_at"`
-	LastSeenAt           time.Time `json:"last_seen_at"`
-	ExpiresAt            time.Time `json:"expires_at"`
+	ID                   dbtype.UUID `json:"id"`
+	UserID               dbtype.UUID `json:"user_id"`
+	Method               string      `json:"method"`
+	Level                int16       `json:"level"`
+	AuthenticatedAt      time.Time   `json:"authenticated_at"`
+	SecondFactorRequired bool        `json:"second_factor_required"`
+	UserAgent            string      `json:"user_agent"`
+	IpAddress            string      `json:"ip_address"`
+	Digest               []byte      `json:"digest"`
+	CreatedAt            time.Time   `json:"created_at"`
+	LastSeenAt           time.Time   `json:"last_seen_at"`
+	ExpiresAt            time.Time   `json:"expires_at"`
 }
 
 func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) error {
@@ -1534,7 +1536,7 @@ INSERT INTO credbound.users (id, display_name, disabled, last_seen_at, created_a
 `
 
 type InsertUserParams struct {
-	ID          string       `json:"id"`
+	ID          dbtype.UUID  `json:"id"`
 	DisplayName string       `json:"display_name"`
 	Disabled    bool         `json:"disabled"`
 	LastSeenAt  sql.NullTime `json:"last_seen_at"`
@@ -1560,8 +1562,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `
 
 type InsertUserEmailParams struct {
-	ID                    string       `json:"id"`
-	UserID                string       `json:"user_id"`
+	ID                    dbtype.UUID  `json:"id"`
+	UserID                dbtype.UUID  `json:"user_id"`
 	Address               string       `json:"address"`
 	IsPrimary             bool         `json:"is_primary"`
 	VerifiedAt            sql.NullTime `json:"verified_at"`
@@ -1591,7 +1593,7 @@ INSERT INTO credbound.workspaces (id, name, created_at, updated_at, disabled_at,
 `
 
 type InsertWorkspaceParams struct {
-	ID         string       `json:"id"`
+	ID         dbtype.UUID  `json:"id"`
 	Name       string       `json:"name"`
 	CreatedAt  time.Time    `json:"created_at"`
 	UpdatedAt  time.Time    `json:"updated_at"`
@@ -1617,14 +1619,14 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 `
 
 type InsertWorkspaceDomainParams struct {
-	ID                         string       `json:"id"`
-	WorkspaceID                string       `json:"workspace_id"`
+	ID                         dbtype.UUID  `json:"id"`
+	WorkspaceID                dbtype.UUID  `json:"workspace_id"`
 	Domain                     string       `json:"domain"`
 	Challenge                  string       `json:"challenge"`
 	ConfirmedAt                sql.NullTime `json:"confirmed_at"`
 	AutoJoin                   bool         `json:"auto_join"`
 	AutoJoinRole               string       `json:"auto_join_role"`
-	SsoProviderConfigurationID string       `json:"sso_provider_configuration_id"`
+	SsoProviderConfigurationID dbtype.UUID  `json:"sso_provider_configuration_id"`
 	EnforceSso                 bool         `json:"enforce_sso"`
 	CreatedAt                  time.Time    `json:"created_at"`
 	UpdatedAt                  time.Time    `json:"updated_at"`
@@ -1653,14 +1655,14 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL, NULL)
 `
 
 type InsertWorkspaceInvitationParams struct {
-	ID          string    `json:"id"`
-	WorkspaceID string    `json:"workspace_id"`
-	Email       string    `json:"email"`
-	Role        string    `json:"role"`
-	InvitedBy   string    `json:"invited_by"`
-	Digest      []byte    `json:"digest"`
-	CreatedAt   time.Time `json:"created_at"`
-	ExpiresAt   time.Time `json:"expires_at"`
+	ID          dbtype.UUID `json:"id"`
+	WorkspaceID dbtype.UUID `json:"workspace_id"`
+	Email       string      `json:"email"`
+	Role        string      `json:"role"`
+	InvitedBy   dbtype.UUID `json:"invited_by"`
+	Digest      []byte      `json:"digest"`
+	CreatedAt   time.Time   `json:"created_at"`
+	ExpiresAt   time.Time   `json:"expires_at"`
 }
 
 func (q *Queries) InsertWorkspaceInvitation(ctx context.Context, arg InsertWorkspaceInvitationParams) error {
@@ -1682,7 +1684,7 @@ SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at
 FROM credbound.workspace_invitations WHERE accepted_user_id = $1 ORDER BY created_at, id
 `
 
-func (q *Queries) ListAcceptedInvitationsForUser(ctx context.Context, acceptedUserID sql.NullString) ([]CredboundWorkspaceInvitation, error) {
+func (q *Queries) ListAcceptedInvitationsForUser(ctx context.Context, acceptedUserID dbtype.UUID) ([]CredboundWorkspaceInvitation, error) {
 	rows, err := q.db.QueryContext(ctx, listAcceptedInvitationsForUser, acceptedUserID)
 	if err != nil {
 		return nil, err
@@ -1754,7 +1756,7 @@ SELECT id, workspace_id, enabled, default_role, trust_directory_emails, group_ro
 FROM credbound.scim_configurations WHERE workspace_id = $1 ORDER BY created_at, id
 `
 
-func (q *Queries) ListSCIMConfigurationsByWorkspace(ctx context.Context, workspaceID string) ([]CredboundScimConfiguration, error) {
+func (q *Queries) ListSCIMConfigurationsByWorkspace(ctx context.Context, workspaceID dbtype.UUID) ([]CredboundScimConfiguration, error) {
 	rows, err := q.db.QueryContext(ctx, listSCIMConfigurationsByWorkspace, workspaceID)
 	if err != nil {
 		return nil, err
@@ -1791,7 +1793,7 @@ SELECT id, configuration_id, prefix, digest, created_at, expires_at, last_used_a
 FROM credbound.scim_credentials WHERE configuration_id = $1 ORDER BY created_at, id
 `
 
-func (q *Queries) ListSCIMCredentials(ctx context.Context, configurationID string) ([]CredboundScimCredential, error) {
+func (q *Queries) ListSCIMCredentials(ctx context.Context, configurationID dbtype.UUID) ([]CredboundScimCredential, error) {
 	rows, err := q.db.QueryContext(ctx, listSCIMCredentials, configurationID)
 	if err != nil {
 		return nil, err
@@ -1828,7 +1830,7 @@ SELECT id, configuration_id, user_id, external_id, normalized_user_name, display
 FROM credbound.scim_users WHERE user_id = $1 ORDER BY created_at, id
 `
 
-func (q *Queries) ListSCIMUsersForUser(ctx context.Context, userID string) ([]CredboundScimUser, error) {
+func (q *Queries) ListSCIMUsersForUser(ctx context.Context, userID dbtype.UUID) ([]CredboundScimUser, error) {
 	rows, err := q.db.QueryContext(ctx, listSCIMUsersForUser, userID)
 	if err != nil {
 		return nil, err
@@ -1869,7 +1871,7 @@ UPDATE credbound.login_throttles SET locked_until = $2 WHERE user_id = $1
 `
 
 type LockLoginThrottleParams struct {
-	UserID      string       `json:"user_id"`
+	UserID      dbtype.UUID  `json:"user_id"`
 	LockedUntil sql.NullTime `json:"locked_until"`
 }
 
@@ -1886,7 +1888,7 @@ SELECT user_id, hash, updated_at FROM credbound.password_credentials WHERE user_
 FOR UPDATE
 `
 
-func (q *Queries) LockPassword(ctx context.Context, userID string) (CredboundPasswordCredential, error) {
+func (q *Queries) LockPassword(ctx context.Context, userID dbtype.UUID) (CredboundPasswordCredential, error) {
 	row := q.db.QueryRowContext(ctx, lockPassword, userID)
 	var i CredboundPasswordCredential
 	err := row.Scan(&i.UserID, &i.Hash, &i.UpdatedAt)
@@ -1900,15 +1902,15 @@ ORDER BY user_id
 FOR UPDATE
 `
 
-func (q *Queries) LockRootAdministrators(ctx context.Context) ([]string, error) {
+func (q *Queries) LockRootAdministrators(ctx context.Context) ([]dbtype.UUID, error) {
 	rows, err := q.db.QueryContext(ctx, lockRootAdministrators)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []string
+	var items []dbtype.UUID
 	for rows.Next() {
-		var user_id string
+		var user_id dbtype.UUID
 		if err := rows.Scan(&user_id); err != nil {
 			return nil, err
 		}
@@ -1932,15 +1934,15 @@ ORDER BY w.id
 FOR UPDATE OF w
 `
 
-func (q *Queries) LockUserAdminWorkspaces(ctx context.Context, userID string) ([]string, error) {
+func (q *Queries) LockUserAdminWorkspaces(ctx context.Context, userID dbtype.UUID) ([]dbtype.UUID, error) {
 	rows, err := q.db.QueryContext(ctx, lockUserAdminWorkspaces, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []string
+	var items []dbtype.UUID
 	for rows.Next() {
-		var id string
+		var id dbtype.UUID
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
@@ -1959,9 +1961,9 @@ const lockWorkspace = `-- name: LockWorkspace :one
 SELECT id FROM credbound.workspaces WHERE id = $1 FOR UPDATE
 `
 
-func (q *Queries) LockWorkspace(ctx context.Context, id string) (string, error) {
+func (q *Queries) LockWorkspace(ctx context.Context, id dbtype.UUID) (dbtype.UUID, error) {
 	row := q.db.QueryRowContext(ctx, lockWorkspace, id)
-	var id_2 string
+	var id_2 dbtype.UUID
 	err := row.Scan(&id_2)
 	return id_2, err
 }
@@ -1970,7 +1972,7 @@ const oAuthAccessTokenJSONByID = `-- name: OAuthAccessTokenJSONByID :one
 SELECT data_json FROM credbound.oauth_access_tokens WHERE id = $1
 `
 
-func (q *Queries) OAuthAccessTokenJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
+func (q *Queries) OAuthAccessTokenJSONByID(ctx context.Context, id dbtype.UUID) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthAccessTokenJSONByID, id)
 	var data_json json.RawMessage
 	err := row.Scan(&data_json)
@@ -1993,11 +1995,11 @@ SELECT id, data_json FROM credbound.oauth_access_tokens WHERE grant_id = $1
 `
 
 type OAuthAccessTokenRecordsByGrantRow struct {
-	ID       string          `json:"id"`
+	ID       dbtype.UUID     `json:"id"`
 	DataJson json.RawMessage `json:"data_json"`
 }
 
-func (q *Queries) OAuthAccessTokenRecordsByGrant(ctx context.Context, grantID string) ([]OAuthAccessTokenRecordsByGrantRow, error) {
+func (q *Queries) OAuthAccessTokenRecordsByGrant(ctx context.Context, grantID dbtype.UUID) ([]OAuthAccessTokenRecordsByGrantRow, error) {
 	rows, err := q.db.QueryContext(ctx, oAuthAccessTokenRecordsByGrant, grantID)
 	if err != nil {
 		return nil, err
@@ -2024,7 +2026,7 @@ const oAuthAuthorizationCodeJSONByID = `-- name: OAuthAuthorizationCodeJSONByID 
 SELECT data_json FROM credbound.oauth_authorization_codes WHERE id = $1
 `
 
-func (q *Queries) OAuthAuthorizationCodeJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
+func (q *Queries) OAuthAuthorizationCodeJSONByID(ctx context.Context, id dbtype.UUID) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthAuthorizationCodeJSONByID, id)
 	var data_json json.RawMessage
 	err := row.Scan(&data_json)
@@ -2046,7 +2048,7 @@ const oAuthClientAccessTokenJSONByID = `-- name: OAuthClientAccessTokenJSONByID 
 SELECT data_json FROM credbound.oauth_client_access_tokens WHERE id = $1
 `
 
-func (q *Queries) OAuthClientAccessTokenJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
+func (q *Queries) OAuthClientAccessTokenJSONByID(ctx context.Context, id dbtype.UUID) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthClientAccessTokenJSONByID, id)
 	var data_json json.RawMessage
 	err := row.Scan(&data_json)
@@ -2069,8 +2071,8 @@ SELECT data_json FROM credbound.oauth_clients WHERE issuer_id = $1 AND client_id
 `
 
 type OAuthClientJSONByClientIDParams struct {
-	IssuerID string `json:"issuer_id"`
-	ClientID string `json:"client_id"`
+	IssuerID dbtype.UUID `json:"issuer_id"`
+	ClientID string      `json:"client_id"`
 }
 
 func (q *Queries) OAuthClientJSONByClientID(ctx context.Context, arg OAuthClientJSONByClientIDParams) (json.RawMessage, error) {
@@ -2084,7 +2086,7 @@ const oAuthClientJSONByID = `-- name: OAuthClientJSONByID :one
 SELECT data_json FROM credbound.oauth_clients WHERE id = $1
 `
 
-func (q *Queries) OAuthClientJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
+func (q *Queries) OAuthClientJSONByID(ctx context.Context, id dbtype.UUID) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthClientJSONByID, id)
 	var data_json json.RawMessage
 	err := row.Scan(&data_json)
@@ -2095,7 +2097,7 @@ const oAuthClientJSONsByIssuer = `-- name: OAuthClientJSONsByIssuer :many
 SELECT data_json FROM credbound.oauth_clients WHERE issuer_id = $1
 `
 
-func (q *Queries) OAuthClientJSONsByIssuer(ctx context.Context, issuerID string) ([]json.RawMessage, error) {
+func (q *Queries) OAuthClientJSONsByIssuer(ctx context.Context, issuerID dbtype.UUID) ([]json.RawMessage, error) {
 	rows, err := q.db.QueryContext(ctx, oAuthClientJSONsByIssuer, issuerID)
 	if err != nil {
 		return nil, err
@@ -2124,7 +2126,7 @@ WHERE id = $1 AND used_at IS NULL AND expires_at > $4
 `
 
 type OAuthConsumeAuthorizationCodeParams struct {
-	ID        string          `json:"id"`
+	ID        dbtype.UUID     `json:"id"`
 	UsedAt    sql.NullTime    `json:"used_at"`
 	DataJson  json.RawMessage `json:"data_json"`
 	ExpiresAt time.Time       `json:"expires_at"`
@@ -2149,7 +2151,7 @@ WHERE id = $1 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > $4
 `
 
 type OAuthConsumeRefreshTokenParams struct {
-	ID        string          `json:"id"`
+	ID        dbtype.UUID     `json:"id"`
 	UsedAt    sql.NullTime    `json:"used_at"`
 	DataJson  json.RawMessage `json:"data_json"`
 	ExpiresAt time.Time       `json:"expires_at"`
@@ -2172,15 +2174,15 @@ const oAuthGrantIDsByClient = `-- name: OAuthGrantIDsByClient :many
 SELECT id FROM credbound.oauth_grants WHERE client_record_id = $1
 `
 
-func (q *Queries) OAuthGrantIDsByClient(ctx context.Context, clientRecordID string) ([]string, error) {
+func (q *Queries) OAuthGrantIDsByClient(ctx context.Context, clientRecordID dbtype.UUID) ([]dbtype.UUID, error) {
 	rows, err := q.db.QueryContext(ctx, oAuthGrantIDsByClient, clientRecordID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []string
+	var items []dbtype.UUID
 	for rows.Next() {
-		var id string
+		var id dbtype.UUID
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
@@ -2199,15 +2201,15 @@ const oAuthGrantIDsByResource = `-- name: OAuthGrantIDsByResource :many
 SELECT id FROM credbound.oauth_grants WHERE resource_id = $1
 `
 
-func (q *Queries) OAuthGrantIDsByResource(ctx context.Context, resourceID string) ([]string, error) {
+func (q *Queries) OAuthGrantIDsByResource(ctx context.Context, resourceID dbtype.UUID) ([]dbtype.UUID, error) {
 	rows, err := q.db.QueryContext(ctx, oAuthGrantIDsByResource, resourceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []string
+	var items []dbtype.UUID
 	for rows.Next() {
-		var id string
+		var id dbtype.UUID
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
@@ -2226,15 +2228,15 @@ const oAuthGrantIDsByUser = `-- name: OAuthGrantIDsByUser :many
 SELECT id FROM credbound.oauth_grants WHERE user_id = $1
 `
 
-func (q *Queries) OAuthGrantIDsByUser(ctx context.Context, userID string) ([]string, error) {
+func (q *Queries) OAuthGrantIDsByUser(ctx context.Context, userID dbtype.UUID) ([]dbtype.UUID, error) {
 	rows, err := q.db.QueryContext(ctx, oAuthGrantIDsByUser, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []string
+	var items []dbtype.UUID
 	for rows.Next() {
-		var id string
+		var id dbtype.UUID
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
@@ -2253,7 +2255,7 @@ const oAuthGrantJSONByID = `-- name: OAuthGrantJSONByID :one
 SELECT data_json FROM credbound.oauth_grants WHERE id = $1
 `
 
-func (q *Queries) OAuthGrantJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
+func (q *Queries) OAuthGrantJSONByID(ctx context.Context, id dbtype.UUID) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthGrantJSONByID, id)
 	var data_json json.RawMessage
 	err := row.Scan(&data_json)
@@ -2265,7 +2267,7 @@ SELECT id, data_json FROM credbound.oauth_grants
 `
 
 type OAuthGrantRecordsRow struct {
-	ID       string          `json:"id"`
+	ID       dbtype.UUID     `json:"id"`
 	DataJson json.RawMessage `json:"data_json"`
 }
 
@@ -2296,7 +2298,7 @@ const oAuthInitialAccessTokenJSONByID = `-- name: OAuthInitialAccessTokenJSONByI
 SELECT data_json FROM credbound.oauth_initial_access_tokens WHERE id = $1
 `
 
-func (q *Queries) OAuthInitialAccessTokenJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
+func (q *Queries) OAuthInitialAccessTokenJSONByID(ctx context.Context, id dbtype.UUID) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthInitialAccessTokenJSONByID, id)
 	var data_json json.RawMessage
 	err := row.Scan(&data_json)
@@ -2308,8 +2310,8 @@ SELECT data_json FROM credbound.oauth_initial_access_tokens WHERE id = $1 AND is
 `
 
 type OAuthInitialAccessTokenJSONByIDAndIssuerParams struct {
-	ID       string `json:"id"`
-	IssuerID string `json:"issuer_id"`
+	ID       dbtype.UUID `json:"id"`
+	IssuerID dbtype.UUID `json:"issuer_id"`
 }
 
 func (q *Queries) OAuthInitialAccessTokenJSONByIDAndIssuer(ctx context.Context, arg OAuthInitialAccessTokenJSONByIDAndIssuerParams) (json.RawMessage, error) {
@@ -2334,7 +2336,7 @@ const oAuthInitialAccessTokenJSONsByIssuer = `-- name: OAuthInitialAccessTokenJS
 SELECT data_json FROM credbound.oauth_initial_access_tokens WHERE issuer_id = $1 ORDER BY id
 `
 
-func (q *Queries) OAuthInitialAccessTokenJSONsByIssuer(ctx context.Context, issuerID string) ([]json.RawMessage, error) {
+func (q *Queries) OAuthInitialAccessTokenJSONsByIssuer(ctx context.Context, issuerID dbtype.UUID) ([]json.RawMessage, error) {
 	rows, err := q.db.QueryContext(ctx, oAuthInitialAccessTokenJSONsByIssuer, issuerID)
 	if err != nil {
 		return nil, err
@@ -2362,9 +2364,9 @@ INSERT INTO credbound.oauth_access_tokens (id, prefix, grant_id, data_json) VALU
 `
 
 type OAuthInsertAccessTokenParams struct {
-	ID       string          `json:"id"`
+	ID       dbtype.UUID     `json:"id"`
 	Prefix   string          `json:"prefix"`
-	GrantID  string          `json:"grant_id"`
+	GrantID  dbtype.UUID     `json:"grant_id"`
 	DataJson json.RawMessage `json:"data_json"`
 }
 
@@ -2383,9 +2385,9 @@ INSERT INTO credbound.oauth_authorization_codes (id, prefix, grant_id, used_at, 
 `
 
 type OAuthInsertAuthorizationCodeParams struct {
-	ID        string          `json:"id"`
+	ID        dbtype.UUID     `json:"id"`
 	Prefix    string          `json:"prefix"`
-	GrantID   string          `json:"grant_id"`
+	GrantID   dbtype.UUID     `json:"grant_id"`
 	UsedAt    sql.NullTime    `json:"used_at"`
 	ExpiresAt time.Time       `json:"expires_at"`
 	DataJson  json.RawMessage `json:"data_json"`
@@ -2408,8 +2410,8 @@ INSERT INTO credbound.oauth_clients (id, issuer_id, client_id, created_at, data_
 `
 
 type OAuthInsertClientParams struct {
-	ID        string          `json:"id"`
-	IssuerID  string          `json:"issuer_id"`
+	ID        dbtype.UUID     `json:"id"`
+	IssuerID  dbtype.UUID     `json:"issuer_id"`
 	ClientID  string          `json:"client_id"`
 	CreatedAt time.Time       `json:"created_at"`
 	DataJson  json.RawMessage `json:"data_json"`
@@ -2431,9 +2433,9 @@ INSERT INTO credbound.oauth_client_access_tokens (id, prefix, client_record_id, 
 `
 
 type OAuthInsertClientAccessTokenParams struct {
-	ID             string          `json:"id"`
+	ID             dbtype.UUID     `json:"id"`
 	Prefix         string          `json:"prefix"`
-	ClientRecordID string          `json:"client_record_id"`
+	ClientRecordID dbtype.UUID     `json:"client_record_id"`
 	DataJson       json.RawMessage `json:"data_json"`
 }
 
@@ -2453,11 +2455,11 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type OAuthInsertGrantParams struct {
-	ID             string          `json:"id"`
-	ClientRecordID string          `json:"client_record_id"`
-	ResourceID     string          `json:"resource_id"`
-	UserID         string          `json:"user_id"`
-	WorkspaceID    string          `json:"workspace_id"`
+	ID             dbtype.UUID     `json:"id"`
+	ClientRecordID dbtype.UUID     `json:"client_record_id"`
+	ResourceID     dbtype.UUID     `json:"resource_id"`
+	UserID         dbtype.UUID     `json:"user_id"`
+	WorkspaceID    dbtype.UUID     `json:"workspace_id"`
 	CreatedAt      time.Time       `json:"created_at"`
 	DataJson       json.RawMessage `json:"data_json"`
 }
@@ -2481,8 +2483,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type OAuthInsertInitialAccessTokenParams struct {
-	ID                string          `json:"id"`
-	IssuerID          string          `json:"issuer_id"`
+	ID                dbtype.UUID     `json:"id"`
+	IssuerID          dbtype.UUID     `json:"issuer_id"`
 	Prefix            string          `json:"prefix"`
 	RegistrationCount int32           `json:"registration_count"`
 	MaxRegistrations  int32           `json:"max_registrations"`
@@ -2511,7 +2513,7 @@ INSERT INTO credbound.oauth_issuers (id, issuer, created_at, data_json) VALUES (
 `
 
 type OAuthInsertIssuerParams struct {
-	ID        string          `json:"id"`
+	ID        dbtype.UUID     `json:"id"`
 	Issuer    string          `json:"issuer"`
 	CreatedAt time.Time       `json:"created_at"`
 	DataJson  json.RawMessage `json:"data_json"`
@@ -2535,10 +2537,10 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type OAuthInsertRefreshTokenParams struct {
-	ID        string          `json:"id"`
-	FamilyID  string          `json:"family_id"`
+	ID        dbtype.UUID     `json:"id"`
+	FamilyID  dbtype.UUID     `json:"family_id"`
 	Prefix    string          `json:"prefix"`
-	GrantID   string          `json:"grant_id"`
+	GrantID   dbtype.UUID     `json:"grant_id"`
 	UsedAt    sql.NullTime    `json:"used_at"`
 	RevokedAt sql.NullTime    `json:"revoked_at"`
 	ExpiresAt time.Time       `json:"expires_at"`
@@ -2564,9 +2566,9 @@ INSERT INTO credbound.oauth_resources (id, issuer_id, workspace_id, resource, cr
 `
 
 type OAuthInsertResourceParams struct {
-	ID          string          `json:"id"`
-	IssuerID    string          `json:"issuer_id"`
-	WorkspaceID string          `json:"workspace_id"`
+	ID          dbtype.UUID     `json:"id"`
+	IssuerID    dbtype.UUID     `json:"issuer_id"`
+	WorkspaceID dbtype.UUID     `json:"workspace_id"`
 	Resource    string          `json:"resource"`
 	CreatedAt   time.Time       `json:"created_at"`
 	DataJson    json.RawMessage `json:"data_json"`
@@ -2588,7 +2590,7 @@ const oAuthIssuerJSONByID = `-- name: OAuthIssuerJSONByID :one
 SELECT data_json FROM credbound.oauth_issuers WHERE id = $1
 `
 
-func (q *Queries) OAuthIssuerJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
+func (q *Queries) OAuthIssuerJSONByID(ctx context.Context, id dbtype.UUID) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthIssuerJSONByID, id)
 	var data_json json.RawMessage
 	err := row.Scan(&data_json)
@@ -2610,9 +2612,9 @@ const oAuthLockIssuer = `-- name: OAuthLockIssuer :one
 SELECT id FROM credbound.oauth_issuers WHERE id = $1 FOR UPDATE
 `
 
-func (q *Queries) OAuthLockIssuer(ctx context.Context, id string) (string, error) {
+func (q *Queries) OAuthLockIssuer(ctx context.Context, id dbtype.UUID) (dbtype.UUID, error) {
 	row := q.db.QueryRowContext(ctx, oAuthLockIssuer, id)
-	var id_2 string
+	var id_2 dbtype.UUID
 	err := row.Scan(&id_2)
 	return id_2, err
 }
@@ -2621,7 +2623,7 @@ const oAuthRefreshFamilyExists = `-- name: OAuthRefreshFamilyExists :one
 SELECT EXISTS(SELECT 1 FROM credbound.oauth_refresh_tokens WHERE family_id = $1)
 `
 
-func (q *Queries) OAuthRefreshFamilyExists(ctx context.Context, familyID string) (bool, error) {
+func (q *Queries) OAuthRefreshFamilyExists(ctx context.Context, familyID dbtype.UUID) (bool, error) {
 	row := q.db.QueryRowContext(ctx, oAuthRefreshFamilyExists, familyID)
 	var exists bool
 	err := row.Scan(&exists)
@@ -2632,15 +2634,15 @@ const oAuthRefreshFamilyGrantIDs = `-- name: OAuthRefreshFamilyGrantIDs :many
 SELECT DISTINCT grant_id FROM credbound.oauth_refresh_tokens WHERE family_id = $1
 `
 
-func (q *Queries) OAuthRefreshFamilyGrantIDs(ctx context.Context, familyID string) ([]string, error) {
+func (q *Queries) OAuthRefreshFamilyGrantIDs(ctx context.Context, familyID dbtype.UUID) ([]dbtype.UUID, error) {
 	rows, err := q.db.QueryContext(ctx, oAuthRefreshFamilyGrantIDs, familyID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []string
+	var items []dbtype.UUID
 	for rows.Next() {
-		var grant_id string
+		var grant_id dbtype.UUID
 		if err := rows.Scan(&grant_id); err != nil {
 			return nil, err
 		}
@@ -2676,7 +2678,7 @@ const oAuthRefreshTokenJSONByID = `-- name: OAuthRefreshTokenJSONByID :one
 SELECT data_json FROM credbound.oauth_refresh_tokens WHERE id = $1
 `
 
-func (q *Queries) OAuthRefreshTokenJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
+func (q *Queries) OAuthRefreshTokenJSONByID(ctx context.Context, id dbtype.UUID) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthRefreshTokenJSONByID, id)
 	var data_json json.RawMessage
 	err := row.Scan(&data_json)
@@ -2688,11 +2690,11 @@ SELECT id, data_json FROM credbound.oauth_refresh_tokens WHERE grant_id = $1 AND
 `
 
 type OAuthRefreshTokenRecordsByGrantRow struct {
-	ID       string          `json:"id"`
+	ID       dbtype.UUID     `json:"id"`
 	DataJson json.RawMessage `json:"data_json"`
 }
 
-func (q *Queries) OAuthRefreshTokenRecordsByGrant(ctx context.Context, grantID string) ([]OAuthRefreshTokenRecordsByGrantRow, error) {
+func (q *Queries) OAuthRefreshTokenRecordsByGrant(ctx context.Context, grantID dbtype.UUID) ([]OAuthRefreshTokenRecordsByGrantRow, error) {
 	rows, err := q.db.QueryContext(ctx, oAuthRefreshTokenRecordsByGrant, grantID)
 	if err != nil {
 		return nil, err
@@ -2719,7 +2721,7 @@ const oAuthResourceJSONByID = `-- name: OAuthResourceJSONByID :one
 SELECT data_json FROM credbound.oauth_resources WHERE id = $1
 `
 
-func (q *Queries) OAuthResourceJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
+func (q *Queries) OAuthResourceJSONByID(ctx context.Context, id dbtype.UUID) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthResourceJSONByID, id)
 	var data_json json.RawMessage
 	err := row.Scan(&data_json)
@@ -2742,7 +2744,7 @@ UPDATE credbound.oauth_initial_access_tokens SET revoked_at = $2, data_json = $3
 `
 
 type OAuthRevokeInitialAccessTokenParams struct {
-	ID        string          `json:"id"`
+	ID        dbtype.UUID     `json:"id"`
 	RevokedAt sql.NullTime    `json:"revoked_at"`
 	DataJson  json.RawMessage `json:"data_json"`
 }
@@ -2760,7 +2762,7 @@ UPDATE credbound.oauth_refresh_tokens SET revoked_at = $2 WHERE family_id = $1 A
 `
 
 type OAuthRevokeRefreshFamilyParams struct {
-	FamilyID  string       `json:"family_id"`
+	FamilyID  dbtype.UUID  `json:"family_id"`
 	RevokedAt sql.NullTime `json:"revoked_at"`
 }
 
@@ -2777,7 +2779,7 @@ UPDATE credbound.oauth_refresh_tokens SET revoked_at = $2, data_json = $3 WHERE 
 `
 
 type OAuthRevokeRefreshTokenParams struct {
-	ID        string          `json:"id"`
+	ID        dbtype.UUID     `json:"id"`
 	RevokedAt sql.NullTime    `json:"revoked_at"`
 	DataJson  json.RawMessage `json:"data_json"`
 }
@@ -2795,7 +2797,7 @@ UPDATE credbound.oauth_access_tokens SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateAccessTokenJSONParams struct {
-	ID       string          `json:"id"`
+	ID       dbtype.UUID     `json:"id"`
 	DataJson json.RawMessage `json:"data_json"`
 }
 
@@ -2812,7 +2814,7 @@ UPDATE credbound.oauth_client_access_tokens SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateClientAccessTokenJSONParams struct {
-	ID       string          `json:"id"`
+	ID       dbtype.UUID     `json:"id"`
 	DataJson json.RawMessage `json:"data_json"`
 }
 
@@ -2829,7 +2831,7 @@ UPDATE credbound.oauth_clients SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateClientJSONParams struct {
-	ID       string          `json:"id"`
+	ID       dbtype.UUID     `json:"id"`
 	DataJson json.RawMessage `json:"data_json"`
 }
 
@@ -2846,7 +2848,7 @@ UPDATE credbound.oauth_grants SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateGrantJSONParams struct {
-	ID       string          `json:"id"`
+	ID       dbtype.UUID     `json:"id"`
 	DataJson json.RawMessage `json:"data_json"`
 }
 
@@ -2863,7 +2865,7 @@ UPDATE credbound.oauth_issuers SET data_json = $3 WHERE id = $1 AND issuer = $2
 `
 
 type OAuthUpdateIssuerParams struct {
-	ID       string          `json:"id"`
+	ID       dbtype.UUID     `json:"id"`
 	Issuer   string          `json:"issuer"`
 	DataJson json.RawMessage `json:"data_json"`
 }
@@ -2881,7 +2883,7 @@ UPDATE credbound.oauth_issuers SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateIssuerJSONParams struct {
-	ID       string          `json:"id"`
+	ID       dbtype.UUID     `json:"id"`
 	DataJson json.RawMessage `json:"data_json"`
 }
 
@@ -2898,7 +2900,7 @@ UPDATE credbound.oauth_resources SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateResourceJSONParams struct {
-	ID       string          `json:"id"`
+	ID       dbtype.UUID     `json:"id"`
 	DataJson json.RawMessage `json:"data_json"`
 }
 
@@ -2916,8 +2918,8 @@ ON CONFLICT (issuer_id, client_id) DO UPDATE SET data_json = EXCLUDED.data_json
 `
 
 type OAuthUpsertCIMDClientParams struct {
-	ID        string          `json:"id"`
-	IssuerID  string          `json:"issuer_id"`
+	ID        dbtype.UUID     `json:"id"`
+	IssuerID  dbtype.UUID     `json:"issuer_id"`
 	ClientID  string          `json:"client_id"`
 	CreatedAt time.Time       `json:"created_at"`
 	DataJson  json.RawMessage `json:"data_json"`
@@ -2941,7 +2943,7 @@ WHERE id = $1 AND registration_count = $4 AND revoked_at IS NULL AND expires_at 
 `
 
 type OAuthUseInitialAccessTokenParams struct {
-	ID                  string          `json:"id"`
+	ID                  dbtype.UUID     `json:"id"`
 	RegistrationCount   int32           `json:"registration_count"`
 	DataJson            json.RawMessage `json:"data_json"`
 	RegistrationCount_2 int32           `json:"registration_count_2"`
@@ -2976,10 +2978,10 @@ UPDATE credbound.password_credentials SET hash = $2, updated_at = $3 WHERE user_
 `
 
 type RehashPasswordParams struct {
-	UserID       string    `json:"user_id"`
-	Hash         string    `json:"hash"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	PreviousHash string    `json:"previous_hash"`
+	UserID       dbtype.UUID `json:"user_id"`
+	Hash         string      `json:"hash"`
+	UpdatedAt    time.Time   `json:"updated_at"`
+	PreviousHash string      `json:"previous_hash"`
 }
 
 func (q *Queries) RehashPassword(ctx context.Context, arg RehashPasswordParams) (int64, error) {
@@ -3002,7 +3004,7 @@ WHERE id = $1 AND verified_at IS NULL
 `
 
 type ReissueEmailVerificationParams struct {
-	ID                    string       `json:"id"`
+	ID                    dbtype.UUID  `json:"id"`
 	VerificationDigest    []byte       `json:"verification_digest"`
 	VerificationExpiresAt sql.NullTime `json:"verification_expires_at"`
 	UpdatedAt             time.Time    `json:"updated_at"`
@@ -3026,9 +3028,9 @@ UPDATE credbound.password_credentials SET hash = $2, updated_at = $3 WHERE user_
 `
 
 type ReplacePasswordParams struct {
-	UserID    string    `json:"user_id"`
-	Hash      string    `json:"hash"`
-	UpdatedAt time.Time `json:"updated_at"`
+	UserID    dbtype.UUID `json:"user_id"`
+	Hash      string      `json:"hash"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) ReplacePassword(ctx context.Context, arg ReplacePasswordParams) (int64, error) {
@@ -3044,8 +3046,8 @@ UPDATE credbound.personal_access_tokens SET revoked_at = $2 WHERE workspace_id =
 `
 
 type RevokeAllWorkspacePATsParams struct {
-	WorkspaceID sql.NullString `json:"workspace_id"`
-	RevokedAt   sql.NullTime   `json:"revoked_at"`
+	WorkspaceID dbtype.UUID  `json:"workspace_id"`
+	RevokedAt   sql.NullTime `json:"revoked_at"`
 }
 
 func (q *Queries) RevokeAllWorkspacePATs(ctx context.Context, arg RevokeAllWorkspacePATsParams) error {
@@ -3058,8 +3060,8 @@ UPDATE credbound.personal_access_tokens SET revoked_at = $3 WHERE user_id = $1 A
 `
 
 type RevokePATParams struct {
-	UserID    string       `json:"user_id"`
-	ID        string       `json:"id"`
+	UserID    dbtype.UUID  `json:"user_id"`
+	ID        dbtype.UUID  `json:"id"`
 	RevokedAt sql.NullTime `json:"revoked_at"`
 }
 
@@ -3076,8 +3078,8 @@ UPDATE credbound.scim_credentials SET revoked_at = $3 WHERE configuration_id = $
 `
 
 type RevokeSCIMCredentialParams struct {
-	ConfigurationID string       `json:"configuration_id"`
-	ID              string       `json:"id"`
+	ConfigurationID dbtype.UUID  `json:"configuration_id"`
+	ID              dbtype.UUID  `json:"id"`
 	RevokedAt       sql.NullTime `json:"revoked_at"`
 }
 
@@ -3094,7 +3096,7 @@ UPDATE credbound.scim_credentials SET revoked_at = $2 WHERE configuration_id = $
 `
 
 type RevokeSCIMCredentialsParams struct {
-	ConfigurationID string       `json:"configuration_id"`
+	ConfigurationID dbtype.UUID  `json:"configuration_id"`
 	RevokedAt       sql.NullTime `json:"revoked_at"`
 }
 
@@ -3108,7 +3110,7 @@ UPDATE credbound.sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NU
 `
 
 type RevokeSessionByIDParams struct {
-	ID        string       `json:"id"`
+	ID        dbtype.UUID  `json:"id"`
 	RevokedAt sql.NullTime `json:"revoked_at"`
 }
 
@@ -3125,7 +3127,7 @@ UPDATE credbound.personal_access_tokens SET revoked_at = $2 WHERE user_id = $1 A
 `
 
 type RevokeUserPATsParams struct {
-	UserID    string       `json:"user_id"`
+	UserID    dbtype.UUID  `json:"user_id"`
 	RevokedAt sql.NullTime `json:"revoked_at"`
 }
 
@@ -3139,7 +3141,7 @@ UPDATE credbound.sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at 
 `
 
 type RevokeUserSessionsParams struct {
-	UserID    string       `json:"user_id"`
+	UserID    dbtype.UUID  `json:"user_id"`
 	RevokedAt sql.NullTime `json:"revoked_at"`
 }
 
@@ -3153,8 +3155,8 @@ UPDATE credbound.workspace_invitations SET revoked_at = $3 WHERE id = $2 AND wor
 `
 
 type RevokeWorkspaceInvitationParams struct {
-	WorkspaceID string       `json:"workspace_id"`
-	ID          string       `json:"id"`
+	WorkspaceID dbtype.UUID  `json:"workspace_id"`
+	ID          dbtype.UUID  `json:"id"`
 	RevokedAt   sql.NullTime `json:"revoked_at"`
 }
 
@@ -3171,9 +3173,9 @@ UPDATE credbound.personal_access_tokens SET revoked_at = $3 WHERE user_id = $1 A
 `
 
 type RevokeWorkspacePATsParams struct {
-	UserID      string         `json:"user_id"`
-	WorkspaceID sql.NullString `json:"workspace_id"`
-	RevokedAt   sql.NullTime   `json:"revoked_at"`
+	UserID      dbtype.UUID  `json:"user_id"`
+	WorkspaceID dbtype.UUID  `json:"workspace_id"`
+	RevokedAt   sql.NullTime `json:"revoked_at"`
 }
 
 func (q *Queries) RevokeWorkspacePATs(ctx context.Context, arg RevokeWorkspacePATsParams) error {
@@ -3189,10 +3191,10 @@ WHERE NOT credbound.totp_factors.active
 `
 
 type SaveTOTPEnrollmentParams struct {
-	UserID          string    `json:"user_id"`
-	EncryptedSecret []byte    `json:"encrypted_secret"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	UserID          dbtype.UUID `json:"user_id"`
+	EncryptedSecret []byte      `json:"encrypted_secret"`
+	CreatedAt       time.Time   `json:"created_at"`
+	UpdatedAt       time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) SaveTOTPEnrollment(ctx context.Context, arg SaveTOTPEnrollmentParams) (int64, error) {
@@ -3212,7 +3214,7 @@ const scrubUserAcceptedInvitations = `-- name: ScrubUserAcceptedInvitations :exe
 UPDATE credbound.workspace_invitations SET email = 'anonymized-' || id::text || '@invalid' WHERE accepted_user_id = $1
 `
 
-func (q *Queries) ScrubUserAcceptedInvitations(ctx context.Context, acceptedUserID sql.NullString) error {
+func (q *Queries) ScrubUserAcceptedInvitations(ctx context.Context, acceptedUserID dbtype.UUID) error {
 	_, err := q.db.ExecContext(ctx, scrubUserAcceptedInvitations, acceptedUserID)
 	return err
 }
@@ -3222,8 +3224,8 @@ UPDATE credbound.user_emails SET address = 'anonymized-' || id::text || '@invali
 `
 
 type ScrubUserEmailsParams struct {
-	UserID    string    `json:"user_id"`
-	UpdatedAt time.Time `json:"updated_at"`
+	UserID    dbtype.UUID `json:"user_id"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) ScrubUserEmails(ctx context.Context, arg ScrubUserEmailsParams) error {
@@ -3235,7 +3237,7 @@ const scrubUserPATNames = `-- name: ScrubUserPATNames :exec
 UPDATE credbound.personal_access_tokens SET name = '' WHERE user_id = $1
 `
 
-func (q *Queries) ScrubUserPATNames(ctx context.Context, userID string) error {
+func (q *Queries) ScrubUserPATNames(ctx context.Context, userID dbtype.UUID) error {
 	_, err := q.db.ExecContext(ctx, scrubUserPATNames, userID)
 	return err
 }
@@ -3245,8 +3247,8 @@ UPDATE credbound.users SET display_name = '', disabled = true, updated_at = $2 W
 `
 
 type ScrubUserProfileParams struct {
-	ID        string    `json:"id"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        dbtype.UUID `json:"id"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) ScrubUserProfile(ctx context.Context, arg ScrubUserProfileParams) (int64, error) {
@@ -3262,8 +3264,8 @@ UPDATE credbound.scim_users SET external_id = NULL, normalized_user_name = 'anon
 `
 
 type ScrubUserSCIMLinksParams struct {
-	UserID    string    `json:"user_id"`
-	UpdatedAt time.Time `json:"updated_at"`
+	UserID    dbtype.UUID `json:"user_id"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) ScrubUserSCIMLinks(ctx context.Context, arg ScrubUserSCIMLinksParams) error {
@@ -3275,7 +3277,7 @@ const scrubUserSSOEmails = `-- name: ScrubUserSSOEmails :exec
 UPDATE credbound.sso_identities SET email = '' WHERE user_id = $1
 `
 
-func (q *Queries) ScrubUserSSOEmails(ctx context.Context, userID string) error {
+func (q *Queries) ScrubUserSSOEmails(ctx context.Context, userID dbtype.UUID) error {
 	_, err := q.db.ExecContext(ctx, scrubUserSSOEmails, userID)
 	return err
 }
@@ -3284,7 +3286,7 @@ const scrubUserSessions = `-- name: ScrubUserSessions :exec
 UPDATE credbound.sessions SET user_agent = '', ip_address = '' WHERE user_id = $1
 `
 
-func (q *Queries) ScrubUserSessions(ctx context.Context, userID string) error {
+func (q *Queries) ScrubUserSessions(ctx context.Context, userID dbtype.UUID) error {
 	_, err := q.db.ExecContext(ctx, scrubUserSessions, userID)
 	return err
 }
@@ -3295,9 +3297,9 @@ WHERE id = $2 AND user_id = $1 AND verified_at IS NOT NULL
 `
 
 type SetPrimaryEmailParams struct {
-	UserID    string    `json:"user_id"`
-	ID        string    `json:"id"`
-	UpdatedAt time.Time `json:"updated_at"`
+	UserID    dbtype.UUID `json:"user_id"`
+	ID        dbtype.UUID `json:"id"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) SetPrimaryEmail(ctx context.Context, arg SetPrimaryEmailParams) (int64, error) {
@@ -3313,9 +3315,9 @@ UPDATE credbound.users SET disabled = $2, updated_at = $3 WHERE id = $1
 `
 
 type SetUserDisabledParams struct {
-	ID        string    `json:"id"`
-	Disabled  bool      `json:"disabled"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        dbtype.UUID `json:"id"`
+	Disabled  bool        `json:"disabled"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) SetUserDisabled(ctx context.Context, arg SetUserDisabledParams) (int64, error) {
@@ -3331,7 +3333,7 @@ UPDATE credbound.workspaces SET disabled_at = $2, updated_at = $3 WHERE id = $1
 `
 
 type SetWorkspaceDisabledParams struct {
-	ID         string       `json:"id"`
+	ID         dbtype.UUID  `json:"id"`
 	DisabledAt sql.NullTime `json:"disabled_at"`
 	UpdatedAt  time.Time    `json:"updated_at"`
 }
@@ -3349,7 +3351,7 @@ UPDATE credbound.personal_access_tokens SET last_used_at = $2 WHERE id = $1
 `
 
 type TouchPATParams struct {
-	ID         string       `json:"id"`
+	ID         dbtype.UUID  `json:"id"`
 	LastUsedAt sql.NullTime `json:"last_used_at"`
 }
 
@@ -3366,7 +3368,7 @@ UPDATE credbound.passkeys SET credential_json = $3, last_used_at = $4 WHERE user
 `
 
 type TouchPasskeyParams struct {
-	UserID         string       `json:"user_id"`
+	UserID         dbtype.UUID  `json:"user_id"`
 	CredentialID   []byte       `json:"credential_id"`
 	CredentialJson []byte       `json:"credential_json"`
 	LastUsedAt     sql.NullTime `json:"last_used_at"`
@@ -3390,7 +3392,7 @@ UPDATE credbound.scim_credentials SET last_used_at = $2 WHERE id = $1
 `
 
 type TouchSCIMCredentialParams struct {
-	ID         string       `json:"id"`
+	ID         dbtype.UUID  `json:"id"`
 	LastUsedAt sql.NullTime `json:"last_used_at"`
 }
 
@@ -3407,8 +3409,8 @@ UPDATE credbound.sso_identities SET last_used_at = $3 WHERE id = $2 AND user_id 
 `
 
 type TouchSSOIdentityParams struct {
-	UserID     string       `json:"user_id"`
-	ID         string       `json:"id"`
+	UserID     dbtype.UUID  `json:"user_id"`
+	ID         dbtype.UUID  `json:"id"`
 	LastUsedAt sql.NullTime `json:"last_used_at"`
 }
 
@@ -3425,8 +3427,8 @@ UPDATE credbound.sessions SET last_seen_at = $2 WHERE id = $1 AND revoked_at IS 
 `
 
 type TouchSessionParams struct {
-	ID         string    `json:"id"`
-	LastSeenAt time.Time `json:"last_seen_at"`
+	ID         dbtype.UUID `json:"id"`
+	LastSeenAt time.Time   `json:"last_seen_at"`
 }
 
 func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) (int64, error) {
@@ -3442,7 +3444,7 @@ UPDATE credbound.users SET last_seen_at = $2 WHERE id = $1
 `
 
 type TouchUserLastSeenParams struct {
-	ID         string       `json:"id"`
+	ID         dbtype.UUID  `json:"id"`
 	LastSeenAt sql.NullTime `json:"last_seen_at"`
 }
 
@@ -3478,12 +3480,12 @@ WHERE id = $1 AND workspace_id = $6
 `
 
 type UpdateSCIMConfigurationParams struct {
-	ID                    string          `json:"id"`
+	ID                    dbtype.UUID     `json:"id"`
 	DefaultRole           string          `json:"default_role"`
 	TrustDirectoryEmails  bool            `json:"trust_directory_emails"`
 	GroupRoleMappingsJson json.RawMessage `json:"group_role_mappings_json"`
 	UpdatedAt             time.Time       `json:"updated_at"`
-	WorkspaceID           string          `json:"workspace_id"`
+	WorkspaceID           dbtype.UUID     `json:"workspace_id"`
 }
 
 func (q *Queries) UpdateSCIMConfiguration(ctx context.Context, arg UpdateSCIMConfigurationParams) (int64, error) {
@@ -3507,8 +3509,8 @@ WHERE configuration_id = $1 AND id = $2
 `
 
 type UpdateSCIMUserParams struct {
-	ConfigurationID    string          `json:"configuration_id"`
-	ID                 string          `json:"id"`
+	ConfigurationID    dbtype.UUID     `json:"configuration_id"`
+	ID                 dbtype.UUID     `json:"id"`
 	ExternalID         sql.NullString  `json:"external_id"`
 	NormalizedUserName string          `json:"normalized_user_name"`
 	DisplayName        string          `json:"display_name"`
@@ -3543,9 +3545,9 @@ UPDATE credbound.users SET display_name = $2, updated_at = $3 WHERE id = $1
 `
 
 type UpdateUserParams struct {
-	ID          string    `json:"id"`
-	DisplayName string    `json:"display_name"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          dbtype.UUID `json:"id"`
+	DisplayName string      `json:"display_name"`
+	UpdatedAt   time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (int64, error) {
@@ -3561,10 +3563,10 @@ UPDATE credbound.workspaces SET name = $2, updated_at = $3, require_mfa = $4 WHE
 `
 
 type UpdateWorkspaceParams struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	RequireMfa bool      `json:"require_mfa"`
+	ID         dbtype.UUID `json:"id"`
+	Name       string      `json:"name"`
+	UpdatedAt  time.Time   `json:"updated_at"`
+	RequireMfa bool        `json:"require_mfa"`
 }
 
 func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams) (int64, error) {
@@ -3586,12 +3588,12 @@ WHERE id = $1 AND confirmed_at IS NOT NULL
 `
 
 type UpdateWorkspaceDomainPolicyParams struct {
-	ID                         string    `json:"id"`
-	AutoJoin                   bool      `json:"auto_join"`
-	AutoJoinRole               string    `json:"auto_join_role"`
-	SsoProviderConfigurationID string    `json:"sso_provider_configuration_id"`
-	EnforceSso                 bool      `json:"enforce_sso"`
-	UpdatedAt                  time.Time `json:"updated_at"`
+	ID                         dbtype.UUID `json:"id"`
+	AutoJoin                   bool        `json:"auto_join"`
+	AutoJoinRole               string      `json:"auto_join_role"`
+	SsoProviderConfigurationID dbtype.UUID `json:"sso_provider_configuration_id"`
+	EnforceSso                 bool        `json:"enforce_sso"`
+	UpdatedAt                  time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) UpdateWorkspaceDomainPolicy(ctx context.Context, arg UpdateWorkspaceDomainPolicyParams) (int64, error) {
@@ -3616,10 +3618,10 @@ ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = EXCLUDED.
 `
 
 type UpsertInstanceAdministratorParams struct {
-	UserID    string    `json:"user_id"`
-	Role      string    `json:"role"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	UserID    dbtype.UUID `json:"user_id"`
+	Role      string      `json:"role"`
+	CreatedAt time.Time   `json:"created_at"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) UpsertInstanceAdministrator(ctx context.Context, arg UpsertInstanceAdministratorParams) error {
@@ -3639,8 +3641,8 @@ RETURNING failed_attempts
 `
 
 type UpsertLoginFailureParams struct {
-	UserID    string    `json:"user_id"`
-	UpdatedAt time.Time `json:"updated_at"`
+	UserID    dbtype.UUID `json:"user_id"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) UpsertLoginFailure(ctx context.Context, arg UpsertLoginFailureParams) (int64, error) {
@@ -3657,13 +3659,13 @@ ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = EXCLUDED.role, status =
 `
 
 type UpsertMembershipParams struct {
-	WorkspaceID        string    `json:"workspace_id"`
-	UserID             string    `json:"user_id"`
-	Role               string    `json:"role"`
-	Status             string    `json:"status"`
-	ProvisioningSource string    `json:"provisioning_source"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	WorkspaceID        dbtype.UUID `json:"workspace_id"`
+	UserID             dbtype.UUID `json:"user_id"`
+	Role               string      `json:"role"`
+	Status             string      `json:"status"`
+	ProvisioningSource string      `json:"provisioning_source"`
+	CreatedAt          time.Time   `json:"created_at"`
+	UpdatedAt          time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) UpsertMembership(ctx context.Context, arg UpsertMembershipParams) error {
@@ -3685,9 +3687,9 @@ ON CONFLICT (user_id) DO UPDATE SET hash = excluded.hash, updated_at = excluded.
 `
 
 type UpsertPasswordParams struct {
-	UserID    string    `json:"user_id"`
-	Hash      string    `json:"hash"`
-	UpdatedAt time.Time `json:"updated_at"`
+	UserID    dbtype.UUID `json:"user_id"`
+	Hash      string      `json:"hash"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) UpsertPassword(ctx context.Context, arg UpsertPasswordParams) error {
@@ -3703,8 +3705,8 @@ WHERE credbound.scim_groups.configuration_id = EXCLUDED.configuration_id
 `
 
 type UpsertSCIMGroupParams struct {
-	ID              string          `json:"id"`
-	ConfigurationID string          `json:"configuration_id"`
+	ID              dbtype.UUID     `json:"id"`
+	ConfigurationID dbtype.UUID     `json:"configuration_id"`
 	ExternalID      sql.NullString  `json:"external_id"`
 	DisplayName     string          `json:"display_name"`
 	MemberIdsJson   json.RawMessage `json:"member_ids_json"`
@@ -3732,9 +3734,9 @@ UPDATE credbound.totp_factors SET last_used_step = $2, updated_at = $3 WHERE use
 `
 
 type UseTOTPParams struct {
-	UserID       string    `json:"user_id"`
-	LastUsedStep int64     `json:"last_used_step"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	UserID       dbtype.UUID `json:"user_id"`
+	LastUsedStep int64       `json:"last_used_step"`
+	UpdatedAt    time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) UseTOTP(ctx context.Context, arg UseTOTPParams) (int64, error) {
@@ -3752,7 +3754,7 @@ WHERE id = $1 AND verified_at IS NULL
 `
 
 type VerifyEmailParams struct {
-	ID         string       `json:"id"`
+	ID         dbtype.UUID  `json:"id"`
 	VerifiedAt sql.NullTime `json:"verified_at"`
 }
 

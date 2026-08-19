@@ -16,7 +16,7 @@ import (
 func FuzzDecodeCursor(f *testing.F) {
 	f.Add("")
 	f.Add("not base64 $$$")
-	f.Add(encodeCursor(time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC), "0198b463-0000-7000-8000-000000000001"))
+	f.Add(encodeCursor(time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC), credbound.MustParseUUID("0198b463-0000-7000-8000-000000000001")))
 	f.Add("e30")
 	f.Add("eyJ0IjowLCJpZCI6IiJ9")
 	f.Add("eyJ0IjotMSwiaWQiOiJ4In0")

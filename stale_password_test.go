@@ -29,14 +29,14 @@ type stalePasswordStore struct {
 	laterErr        error
 }
 
-func (s *stalePasswordStore) RecordPasswordAuthentication(ctx context.Context, userID, currentHash string, seenAt time.Time, commit credbound.Commit) error {
+func (s *stalePasswordStore) RecordPasswordAuthentication(ctx context.Context, userID credbound.UUID, currentHash string, seenAt time.Time, commit credbound.Commit) error {
 	if s.recordErr != nil {
 		return s.recordErr
 	}
 	return s.Store.RecordPasswordAuthentication(ctx, userID, currentHash, seenAt, commit)
 }
 
-func (s *stalePasswordStore) PasswordByUserID(ctx context.Context, userID string) (credbound.PasswordCredential, error) {
+func (s *stalePasswordStore) PasswordByUserID(ctx context.Context, userID credbound.UUID) (credbound.PasswordCredential, error) {
 	s.passwordReads++
 	if s.passwordReads > 1 {
 		if s.laterErr != nil {
@@ -156,7 +156,7 @@ func TestPasswordFinalizationConflictResolution(t *testing.T) {
 	t.Run("re-verification failure", func(t *testing.T) {
 		store, passwords, manager := setup(t)
 		store.recordErr = credbound.ErrConflict
-		store.laterCredential = &credbound.PasswordCredential{UserID: "user", Hash: "hash:correct horse battery#7"}
+		store.laterCredential = &credbound.PasswordCredential{UserID: credbound.MustParseUUID("0198b463-0000-7000-8000-04f8996da763"), Hash: "hash:correct horse battery#7"}
 		calls := 0
 		passwords.onVerify = func() {
 			calls++
@@ -174,7 +174,7 @@ func TestPasswordFinalizationConflictResolution(t *testing.T) {
 		// verifies (an endlessly rehashing peer): the sign-in gives up after
 		// its bounded retries rather than spinning.
 		store.recordErr = credbound.ErrConflict
-		store.laterCredential = &credbound.PasswordCredential{UserID: "user", Hash: "hash:correct horse battery#7"}
+		store.laterCredential = &credbound.PasswordCredential{UserID: credbound.MustParseUUID("0198b463-0000-7000-8000-04f8996da763"), Hash: "hash:correct horse battery#7"}
 		if _, err := manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrInvalidCredentials) {
 			t.Fatalf("exhausted retries error = %v", err)
 		}

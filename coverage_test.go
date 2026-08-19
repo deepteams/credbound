@@ -24,16 +24,16 @@ func TestInstanceRoleErrorBranches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.manager.SetInstanceRole(ctx, root, local, member.ID, credbound.InstanceRole("nope")); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.SetInstanceRole(ctx, root, local, member.ID, credbound.InstanceRole("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("unknown role = %v", err)
 	}
-	if err := f.manager.SetInstanceRole(ctx, root, local, "", credbound.InstanceRoleSupport); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.SetInstanceRole(ctx, root, local, credbound.UUID{}, credbound.InstanceRoleSupport); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("empty user = %v", err)
 	}
 	if err := f.manager.SetInstanceRole(ctx, root, local, root.UserID, credbound.InstanceRoleSupport); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("self downgrade = %v", err)
 	}
-	if err := f.manager.SetInstanceRole(ctx, root, local, "0198b463-0000-7000-8000-0000000000ff", credbound.InstanceRoleSupport); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.manager.SetInstanceRole(ctx, root, local, credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000ff"), credbound.InstanceRoleSupport); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("unknown target = %v", err)
 	}
 	// A non-local actor without a fresh step-up is refused (requireAdminMutation).
@@ -168,7 +168,7 @@ func TestValidationErrorAndTokenParsing(t *testing.T) {
 	}
 
 	// Malformed verification/reset tokens are rejected without a store hit.
-	for _, bad := range []string{"", "cbe_bogus", "cbr_bogus", "cbe_" + authn.UserID, "prefixonly"} {
+	for _, bad := range []string{"", "cbe_bogus", "cbr_bogus", "cbe_" + authn.UserID.String(), "prefixonly"} {
 		if _, err := f.manager.ConfirmEmail(ctx, bad); !errors.Is(err, credbound.ErrInvalidCredentials) {
 			t.Fatalf("malformed confirm %q = %v", bad, err)
 		}
@@ -209,7 +209,7 @@ func TestReadAndDecoyPaths(t *testing.T) {
 	}
 
 	// PAT authentication rejects malformed, unknown and forged tokens.
-	for _, bad := range []string{"", "nope", "cbp_bogus", "cbp_" + member.ID + "_short"} {
+	for _, bad := range []string{"", "00000000-0000-4000-8000-000000000000", "cbp_bogus", "cbp_" + member.ID.String() + "_short"} {
 		if _, err := f.manager.AuthenticatePAT(ctx, bad); !errors.Is(err, credbound.ErrInvalidCredentials) {
 			t.Fatalf("bad PAT %q = %v", bad, err)
 		}
@@ -262,7 +262,7 @@ func TestPATLifecycleAndExportBranches(t *testing.T) {
 	}
 	// Self-export requires a recent interactive authentication and returns the
 	// caller's own record.
-	if export, err := f.manager.ExportUserData(ctx, memberAAL2, ""); err != nil || export.User.ID != member.ID {
+	if export, err := f.manager.ExportUserData(ctx, memberAAL2, credbound.UUID{}); err != nil || export.User.ID != member.ID {
 		t.Fatalf("self export = %#v, %v", export, err)
 	}
 	// A member cannot export another user's data.

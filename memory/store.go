@@ -36,61 +36,61 @@ import (
 // contract for each method is documented on the credbound port interfaces.
 type Store struct {
 	mu                 sync.RWMutex
-	users              map[string]credbound.User
-	emails             map[string]string
-	emailAddresses     map[string]credbound.EmailAddress
-	emailIDs           map[string]string
-	emailVerifications map[string]credbound.EmailVerificationCredential
-	passwords          map[string]credbound.PasswordCredential
-	workspaces         map[string]credbound.Workspace
-	memberships        map[string]map[string]credbound.Membership
-	admins             map[string]credbound.InstanceAdministrator
-	ssoIdentities      map[string]credbound.SSOIdentity
-	ssoKeys            map[string]string
-	totp               map[string]credbound.TOTPFactor
-	recovery           map[string][]credbound.RecoveryCode
-	passkeys           map[string]map[string]credbound.Passkey
-	pats               map[string]credbound.PAT
-	patPrefixes        map[string]string
-	sessions           map[string]credbound.Session
+	users              map[credbound.UUID]credbound.User
+	emails             map[string]credbound.UUID
+	emailAddresses     map[credbound.UUID]credbound.EmailAddress
+	emailIDs           map[string]credbound.UUID
+	emailVerifications map[credbound.UUID]credbound.EmailVerificationCredential
+	passwords          map[credbound.UUID]credbound.PasswordCredential
+	workspaces         map[credbound.UUID]credbound.Workspace
+	memberships        map[string]map[credbound.UUID]credbound.Membership
+	admins             map[credbound.UUID]credbound.InstanceAdministrator
+	ssoIdentities      map[credbound.UUID]credbound.SSOIdentity
+	ssoKeys            map[string]credbound.UUID
+	totp               map[credbound.UUID]credbound.TOTPFactor
+	recovery           map[credbound.UUID][]credbound.RecoveryCode
+	passkeys           map[string]map[credbound.UUID]credbound.Passkey
+	pats               map[credbound.UUID]credbound.PAT
+	patPrefixes        map[string]credbound.UUID
+	sessions           map[credbound.UUID]credbound.Session
 	// ceremonies records consumed single-use ceremony ids. It is deliberately
 	// outside the snapshot/restore cycle: a ceremony is burned by the commit
 	// attempt even when a hook rejects the transaction afterwards.
-	ceremonies           map[string]time.Time
+	ceremonies           map[credbound.UUID]time.Time
 	emailIssuance        map[string]time.Time
-	domains              map[string]credbound.WorkspaceDomain
-	domainNames          map[string]string
-	scimConfigurations   map[string]credbound.SCIMConfiguration
-	scimCredentials      map[string]credbound.SCIMCredential
-	scimCredentialKeys   map[string]string
-	scimUsers            map[string]credbound.SCIMUser
-	scimUserNames        map[string]string
-	scimExternalIDs      map[string]string
-	scimGroups           map[string]credbound.SCIMGroup
-	scimGroupExternal    map[string]string
-	oauthIssuers         map[string]credbound.OAuthIssuer
-	oauthIssuerURLs      map[string]string
-	oauthResources       map[string]credbound.OAuthProtectedResource
-	oauthResourceURIs    map[string]string
-	oauthClients         map[string]credbound.OAuthClient
-	oauthClientKeys      map[string]string
-	oauthInitialTokens   map[string]credbound.OAuthInitialAccessToken
-	oauthInitialKeys     map[string]string
-	oauthGrants          map[string]credbound.OAuthGrant
-	oauthCodes           map[string]credbound.OAuthAuthorizationCode
-	oauthCodeKeys        map[string]string
-	oauthAccessTokens    map[string]credbound.OAuthAccessToken
-	oauthAccessKeys      map[string]string
-	oauthClientTokens    map[string]credbound.OAuthClientAccessToken
-	oauthClientTokenKeys map[string]string
-	oauthRefreshTokens   map[string]credbound.OAuthRefreshToken
-	oauthRefreshKeys     map[string]string
-	throttles            map[string]credbound.LoginThrottle
-	passwordResets       map[string]credbound.PasswordResetCredential
-	emailAuths           map[string]credbound.EmailAuthenticationCredential
-	invitations          map[string]credbound.WorkspaceInvitation
+	domains              map[credbound.UUID]credbound.WorkspaceDomain
+	domainNames          map[string]credbound.UUID
+	scimConfigurations   map[credbound.UUID]credbound.SCIMConfiguration
+	scimCredentials      map[credbound.UUID]credbound.SCIMCredential
+	scimCredentialKeys   map[string]credbound.UUID
+	scimUsers            map[credbound.UUID]credbound.SCIMUser
+	scimUserNames        map[string]credbound.UUID
+	scimExternalIDs      map[string]credbound.UUID
+	scimGroups           map[credbound.UUID]credbound.SCIMGroup
+	scimGroupExternal    map[string]credbound.UUID
+	oauthIssuers         map[credbound.UUID]credbound.OAuthIssuer
+	oauthIssuerURLs      map[string]credbound.UUID
+	oauthResources       map[credbound.UUID]credbound.OAuthProtectedResource
+	oauthResourceURIs    map[string]credbound.UUID
+	oauthClients         map[credbound.UUID]credbound.OAuthClient
+	oauthClientKeys      map[string]credbound.UUID
+	oauthInitialTokens   map[credbound.UUID]credbound.OAuthInitialAccessToken
+	oauthInitialKeys     map[string]credbound.UUID
+	oauthGrants          map[credbound.UUID]credbound.OAuthGrant
+	oauthCodes           map[credbound.UUID]credbound.OAuthAuthorizationCode
+	oauthCodeKeys        map[string]credbound.UUID
+	oauthAccessTokens    map[credbound.UUID]credbound.OAuthAccessToken
+	oauthAccessKeys      map[string]credbound.UUID
+	oauthClientTokens    map[credbound.UUID]credbound.OAuthClientAccessToken
+	oauthClientTokenKeys map[string]credbound.UUID
+	oauthRefreshTokens   map[credbound.UUID]credbound.OAuthRefreshToken
+	oauthRefreshKeys     map[string]credbound.UUID
+	throttles            map[credbound.UUID]credbound.LoginThrottle
+	passwordResets       map[credbound.UUID]credbound.PasswordResetCredential
+	emailAuths           map[credbound.UUID]credbound.EmailAuthenticationCredential
+	invitations          map[credbound.UUID]credbound.WorkspaceInvitation
 	audits               []credbound.AuditEvent
-	auditIDs             map[string]struct{}
+	auditIDs             map[credbound.UUID]struct{}
 	auditSequence        int64
 	auditHead            []byte
 	auditFailure         error
@@ -140,34 +140,34 @@ func TxFrom(tx credbound.Tx) (*Tx, bool) {
 // New returns an empty Store ready to be passed as credbound.Config.Store.
 func New() *Store {
 	return &Store{
-		users: make(map[string]credbound.User), emails: make(map[string]string),
-		emailAddresses: make(map[string]credbound.EmailAddress), emailIDs: make(map[string]string),
-		emailVerifications: make(map[string]credbound.EmailVerificationCredential),
-		passwords:          make(map[string]credbound.PasswordCredential), workspaces: make(map[string]credbound.Workspace),
-		memberships: make(map[string]map[string]credbound.Membership), admins: make(map[string]credbound.InstanceAdministrator),
-		totp: make(map[string]credbound.TOTPFactor), recovery: make(map[string][]credbound.RecoveryCode),
-		passkeys: make(map[string]map[string]credbound.Passkey), pats: make(map[string]credbound.PAT),
-		patPrefixes: make(map[string]string), sessions: make(map[string]credbound.Session),
-		ceremonies:    make(map[string]time.Time),
+		users: make(map[credbound.UUID]credbound.User), emails: make(map[string]credbound.UUID),
+		emailAddresses: make(map[credbound.UUID]credbound.EmailAddress), emailIDs: make(map[string]credbound.UUID),
+		emailVerifications: make(map[credbound.UUID]credbound.EmailVerificationCredential),
+		passwords:          make(map[credbound.UUID]credbound.PasswordCredential), workspaces: make(map[credbound.UUID]credbound.Workspace),
+		memberships: make(map[string]map[credbound.UUID]credbound.Membership), admins: make(map[credbound.UUID]credbound.InstanceAdministrator),
+		totp: make(map[credbound.UUID]credbound.TOTPFactor), recovery: make(map[credbound.UUID][]credbound.RecoveryCode),
+		passkeys: make(map[string]map[credbound.UUID]credbound.Passkey), pats: make(map[credbound.UUID]credbound.PAT),
+		patPrefixes: make(map[string]credbound.UUID), sessions: make(map[credbound.UUID]credbound.Session),
+		ceremonies:    make(map[credbound.UUID]time.Time),
 		emailIssuance: make(map[string]time.Time),
-		domains:       make(map[string]credbound.WorkspaceDomain), domainNames: make(map[string]string), auditIDs: make(map[string]struct{}),
-		auditHead: make([]byte, 32), throttles: make(map[string]credbound.LoginThrottle),
-		passwordResets: make(map[string]credbound.PasswordResetCredential),
-		emailAuths:     make(map[string]credbound.EmailAuthenticationCredential),
-		invitations:    make(map[string]credbound.WorkspaceInvitation),
-		ssoIdentities:  make(map[string]credbound.SSOIdentity), ssoKeys: make(map[string]string),
-		scimConfigurations: make(map[string]credbound.SCIMConfiguration),
-		scimCredentials:    make(map[string]credbound.SCIMCredential), scimCredentialKeys: make(map[string]string),
-		scimUsers: make(map[string]credbound.SCIMUser), scimUserNames: make(map[string]string), scimExternalIDs: make(map[string]string),
-		scimGroups: make(map[string]credbound.SCIMGroup), scimGroupExternal: make(map[string]string),
-		oauthIssuers: make(map[string]credbound.OAuthIssuer), oauthIssuerURLs: make(map[string]string),
-		oauthResources: make(map[string]credbound.OAuthProtectedResource), oauthResourceURIs: make(map[string]string),
-		oauthClients: make(map[string]credbound.OAuthClient), oauthClientKeys: make(map[string]string),
-		oauthInitialTokens: make(map[string]credbound.OAuthInitialAccessToken), oauthInitialKeys: make(map[string]string),
-		oauthGrants: make(map[string]credbound.OAuthGrant), oauthCodes: make(map[string]credbound.OAuthAuthorizationCode), oauthCodeKeys: make(map[string]string),
-		oauthAccessTokens: make(map[string]credbound.OAuthAccessToken), oauthAccessKeys: make(map[string]string),
-		oauthClientTokens: make(map[string]credbound.OAuthClientAccessToken), oauthClientTokenKeys: make(map[string]string),
-		oauthRefreshTokens: make(map[string]credbound.OAuthRefreshToken), oauthRefreshKeys: make(map[string]string),
+		domains:       make(map[credbound.UUID]credbound.WorkspaceDomain), domainNames: make(map[string]credbound.UUID), auditIDs: make(map[credbound.UUID]struct{}),
+		auditHead: make([]byte, 32), throttles: make(map[credbound.UUID]credbound.LoginThrottle),
+		passwordResets: make(map[credbound.UUID]credbound.PasswordResetCredential),
+		emailAuths:     make(map[credbound.UUID]credbound.EmailAuthenticationCredential),
+		invitations:    make(map[credbound.UUID]credbound.WorkspaceInvitation),
+		ssoIdentities:  make(map[credbound.UUID]credbound.SSOIdentity), ssoKeys: make(map[string]credbound.UUID),
+		scimConfigurations: make(map[credbound.UUID]credbound.SCIMConfiguration),
+		scimCredentials:    make(map[credbound.UUID]credbound.SCIMCredential), scimCredentialKeys: make(map[string]credbound.UUID),
+		scimUsers: make(map[credbound.UUID]credbound.SCIMUser), scimUserNames: make(map[string]credbound.UUID), scimExternalIDs: make(map[string]credbound.UUID),
+		scimGroups: make(map[credbound.UUID]credbound.SCIMGroup), scimGroupExternal: make(map[string]credbound.UUID),
+		oauthIssuers: make(map[credbound.UUID]credbound.OAuthIssuer), oauthIssuerURLs: make(map[string]credbound.UUID),
+		oauthResources: make(map[credbound.UUID]credbound.OAuthProtectedResource), oauthResourceURIs: make(map[string]credbound.UUID),
+		oauthClients: make(map[credbound.UUID]credbound.OAuthClient), oauthClientKeys: make(map[string]credbound.UUID),
+		oauthInitialTokens: make(map[credbound.UUID]credbound.OAuthInitialAccessToken), oauthInitialKeys: make(map[string]credbound.UUID),
+		oauthGrants: make(map[credbound.UUID]credbound.OAuthGrant), oauthCodes: make(map[credbound.UUID]credbound.OAuthAuthorizationCode), oauthCodeKeys: make(map[string]credbound.UUID),
+		oauthAccessTokens: make(map[credbound.UUID]credbound.OAuthAccessToken), oauthAccessKeys: make(map[string]credbound.UUID),
+		oauthClientTokens: make(map[credbound.UUID]credbound.OAuthClientAccessToken), oauthClientTokenKeys: make(map[string]credbound.UUID),
+		oauthRefreshTokens: make(map[credbound.UUID]credbound.OAuthRefreshToken), oauthRefreshKeys: make(map[string]credbound.UUID),
 	}
 }
 
@@ -201,7 +201,7 @@ func (s *Store) Bootstrap(ctx context.Context, user credbound.User, email credbo
 	s.emailIDs[email.Address] = email.ID
 	s.passwords[user.ID] = password
 	s.workspaces[workspace.ID] = workspace
-	s.memberships[workspace.ID] = map[string]credbound.Membership{user.ID: normalizeMembership(membership)}
+	s.memberships[workspace.ID.String()] = map[credbound.UUID]credbound.Membership{user.ID: normalizeMembership(membership)}
 	s.admins[user.ID] = admin
 	return s.finishCommitLocked(ctx, commit, previous)
 }
@@ -233,10 +233,10 @@ func (s *Store) CreateUser(ctx context.Context, user credbound.User, email credb
 	s.emailAddresses[email.ID] = cloneEmail(email)
 	s.emailIDs[email.Address] = email.ID
 	s.passwords[user.ID] = password
-	if s.memberships[membership.WorkspaceID] == nil {
-		s.memberships[membership.WorkspaceID] = make(map[string]credbound.Membership)
+	if s.memberships[membership.WorkspaceID.String()] == nil {
+		s.memberships[membership.WorkspaceID.String()] = make(map[credbound.UUID]credbound.Membership)
 	}
-	s.memberships[membership.WorkspaceID][user.ID] = normalizeMembership(membership)
+	s.memberships[membership.WorkspaceID.String()][user.ID] = normalizeMembership(membership)
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
@@ -276,7 +276,7 @@ func (s *Store) CreateSignup(ctx context.Context, user credbound.User, email cre
 	}
 	s.passwords[user.ID] = password
 	s.workspaces[workspace.ID] = cloneWorkspace(workspace)
-	s.memberships[workspace.ID] = map[string]credbound.Membership{user.ID: normalizeMembership(membership)}
+	s.memberships[workspace.ID.String()] = map[credbound.UUID]credbound.Membership{user.ID: normalizeMembership(membership)}
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
@@ -295,7 +295,7 @@ func (s *Store) UserByEmail(ctx context.Context, email string) (credbound.User, 
 }
 
 // UserByID returns the user with the given ID.
-func (s *Store) UserByID(ctx context.Context, id string) (credbound.User, error) {
+func (s *Store) UserByID(ctx context.Context, id credbound.UUID) (credbound.User, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.User{}, err
 	}
@@ -311,7 +311,7 @@ func (s *Store) UserByID(ctx context.Context, id string) (credbound.User, error)
 // SetUserDisabled enables or disables a user; disabling refuses to orphan
 // the last enabled root administrator or a workspace's last active admin
 // (credbound.ErrConflict) and revokes the user's tokens and sessions.
-func (s *Store) SetUserDisabled(ctx context.Context, userID string, disabled bool, at time.Time, commit credbound.Commit) error {
+func (s *Store) SetUserDisabled(ctx context.Context, userID credbound.UUID, disabled bool, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -358,7 +358,7 @@ func (s *Store) SetUserDisabled(ctx context.Context, userID string, disabled boo
 	user.UpdatedAt = at
 	s.users[userID] = cloneUser(user)
 	if disabled {
-		s.revokeUserCredentialsLocked(userID, "", at)
+		s.revokeUserCredentialsLocked(userID, credbound.UUID{}, at)
 		s.revokeUserSessionsLocked(userID, at)
 	}
 	return s.finishCommitLocked(ctx, commit, previous)
@@ -411,12 +411,12 @@ func (s *Store) Users(ctx context.Context, page credbound.PageRequest) iter.Seq2
 		sort.Slice(values, func(i, j int) bool {
 			return newer(values[i].CreatedAt, values[i].ID, values[j].CreatedAt, values[j].ID)
 		})
-		yieldMemoryPage(values, page.Limit, func(value credbound.User) (time.Time, string) { return value.CreatedAt, value.ID }, yield)
+		yieldMemoryPage(values, page.Limit, func(value credbound.User) (time.Time, credbound.UUID) { return value.CreatedAt, value.ID }, yield)
 	}
 }
 
 // PasswordByUserID returns the user's stored password credential.
-func (s *Store) PasswordByUserID(ctx context.Context, userID string) (credbound.PasswordCredential, error) {
+func (s *Store) PasswordByUserID(ctx context.Context, userID credbound.UUID) (credbound.PasswordCredential, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.PasswordCredential{}, err
 	}
@@ -473,7 +473,7 @@ func (s *Store) RehashPassword(ctx context.Context, password credbound.PasswordC
 
 // RecordAuthentication marks a successful login, updating the user's last-
 // seen time and clearing any login throttle.
-func (s *Store) RecordAuthentication(ctx context.Context, userID string, seenAt time.Time, commit credbound.Commit) error {
+func (s *Store) RecordAuthentication(ctx context.Context, userID credbound.UUID, seenAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -495,7 +495,7 @@ func (s *Store) RecordAuthentication(ctx context.Context, userID string, seenAt 
 // RecordAuthentication, but only while currentHash is still the stored
 // credential; a credential that moved or vanished reports
 // credbound.ErrConflict and leaves the store untouched.
-func (s *Store) RecordPasswordAuthentication(ctx context.Context, userID, currentHash string, seenAt time.Time, commit credbound.Commit) error {
+func (s *Store) RecordPasswordAuthentication(ctx context.Context, userID credbound.UUID, currentHash string, seenAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -518,7 +518,7 @@ func (s *Store) RecordPasswordAuthentication(ctx context.Context, userID, curren
 }
 
 // LoginThrottleByUserID returns the user's current login throttle state.
-func (s *Store) LoginThrottleByUserID(ctx context.Context, userID string) (credbound.LoginThrottle, error) {
+func (s *Store) LoginThrottleByUserID(ctx context.Context, userID credbound.UUID) (credbound.LoginThrottle, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.LoginThrottle{}, err
 	}
@@ -534,7 +534,7 @@ func (s *Store) LoginThrottleByUserID(ctx context.Context, userID string) (credb
 // RecordLoginFailure counts a failed login (restarting the window after an
 // expired lockout) and applies lockedUntil once the failure threshold is
 // reached, returning the updated throttle.
-func (s *Store) RecordLoginFailure(ctx context.Context, userID string, at time.Time, threshold int64, lockedUntil time.Time, commit credbound.Commit) (credbound.LoginThrottle, error) {
+func (s *Store) RecordLoginFailure(ctx context.Context, userID credbound.UUID, at time.Time, threshold int64, lockedUntil time.Time, commit credbound.Commit) (credbound.LoginThrottle, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.LoginThrottle{}, err
 	}
@@ -604,7 +604,7 @@ func (s *Store) CreatePasswordReset(ctx context.Context, credential credbound.Pa
 }
 
 // PasswordResetByID returns the password reset credential with the given ID.
-func (s *Store) PasswordResetByID(ctx context.Context, resetID string) (credbound.PasswordResetCredential, error) {
+func (s *Store) PasswordResetByID(ctx context.Context, resetID credbound.UUID) (credbound.PasswordResetCredential, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.PasswordResetCredential{}, err
 	}
@@ -621,7 +621,7 @@ func (s *Store) PasswordResetByID(ctx context.Context, resetID string) (credboun
 // account's first, for a passwordless member provisioned by SSO JIT or SCIM —
 // revoking the user's other pending resets, tokens, sessions and throttle in
 // the same commit; a reused reset reports credbound.ErrConflict.
-func (s *Store) CompletePasswordReset(ctx context.Context, resetID string, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {
+func (s *Store) CompletePasswordReset(ctx context.Context, resetID credbound.UUID, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -649,7 +649,7 @@ func (s *Store) CompletePasswordReset(ctx context.Context, resetID string, passw
 		}
 	}
 	s.passwords[password.UserID] = password
-	s.revokeUserCredentialsLocked(password.UserID, "", at)
+	s.revokeUserCredentialsLocked(password.UserID, credbound.UUID{}, at)
 	s.revokeUserSessionsLocked(password.UserID, at)
 	delete(s.throttles, password.UserID)
 	return s.finishCommitLocked(ctx, commit, previous)
@@ -679,7 +679,7 @@ func (s *Store) CreateEmailAuthentication(ctx context.Context, credential credbo
 
 // EmailAuthenticationByID returns the email authentication credential with
 // the given token ID.
-func (s *Store) EmailAuthenticationByID(ctx context.Context, tokenID string) (credbound.EmailAuthenticationCredential, error) {
+func (s *Store) EmailAuthenticationByID(ctx context.Context, tokenID credbound.UUID) (credbound.EmailAuthenticationCredential, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.EmailAuthenticationCredential{}, err
 	}
@@ -695,7 +695,7 @@ func (s *Store) EmailAuthenticationByID(ctx context.Context, tokenID string) (cr
 // ConsumeEmailAuthentication marks the user's credential used and, when the
 // consumption completes the sign-in, updates last-seen and clears the login
 // throttle; reuse reports credbound.ErrConflict.
-func (s *Store) ConsumeEmailAuthentication(ctx context.Context, tokenID, userID string, at time.Time, completesLogin bool, commit credbound.Commit) error {
+func (s *Store) ConsumeEmailAuthentication(ctx context.Context, tokenID, userID credbound.UUID, at time.Time, completesLogin bool, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -750,7 +750,7 @@ func (s *Store) SaveEmail(ctx context.Context, email credbound.EmailAddress, ver
 
 // EmailVerificationByID returns the email address and its pending
 // verification credential.
-func (s *Store) EmailVerificationByID(ctx context.Context, emailID string) (credbound.EmailAddress, credbound.EmailVerificationCredential, error) {
+func (s *Store) EmailVerificationByID(ctx context.Context, emailID credbound.UUID) (credbound.EmailAddress, credbound.EmailVerificationCredential, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.EmailAddress{}, credbound.EmailVerificationCredential{}, err
 	}
@@ -810,7 +810,7 @@ func (s *Store) EmailByAddress(ctx context.Context, address string) (credbound.E
 // ReissueEmailVerification replaces the pending verification credential of an
 // unverified address; an already-verified or missing address reports
 // credbound.ErrConflict.
-func (s *Store) ReissueEmailVerification(ctx context.Context, emailID string, verification credbound.EmailVerificationCredential, commit credbound.Commit) error {
+func (s *Store) ReissueEmailVerification(ctx context.Context, emailID credbound.UUID, verification credbound.EmailVerificationCredential, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -833,7 +833,7 @@ func (s *Store) ReissueEmailVerification(ctx context.Context, emailID string, ve
 // VerifyEmail marks the address verified, makes it usable for sign-in and
 // discards the verification credential; an already-verified address reports
 // credbound.ErrConflict.
-func (s *Store) VerifyEmail(ctx context.Context, emailID string, verifiedAt time.Time, commit credbound.Commit) error {
+func (s *Store) VerifyEmail(ctx context.Context, emailID credbound.UUID, verifiedAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -860,7 +860,7 @@ func (s *Store) VerifyEmail(ctx context.Context, emailID string, verifiedAt time
 
 // SetPrimaryEmail promotes a verified address to primary and demotes the
 // previous one; an unverified target reports credbound.ErrConflict.
-func (s *Store) SetPrimaryEmail(ctx context.Context, userID, emailID string, commit credbound.Commit) error {
+func (s *Store) SetPrimaryEmail(ctx context.Context, userID, emailID credbound.UUID, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -896,7 +896,7 @@ func (s *Store) SetPrimaryEmail(ctx context.Context, userID, emailID string, com
 
 // RemoveEmail deletes a non-primary address, refusing to remove the user's
 // last verified one (credbound.ErrConflict).
-func (s *Store) RemoveEmail(ctx context.Context, userID, emailID string, commit credbound.Commit) error {
+func (s *Store) RemoveEmail(ctx context.Context, userID, emailID credbound.UUID, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -933,7 +933,7 @@ func (s *Store) RemoveEmail(ctx context.Context, userID, emailID string, commit 
 
 // Emails streams the user's email addresses, newest first, as one cursor
 // page.
-func (s *Store) Emails(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.EmailAddress], error] {
+func (s *Store) Emails(ctx context.Context, userID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.EmailAddress], error] {
 	return func(yield func(credbound.PageEvent[credbound.EmailAddress], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
 		if err != nil {
@@ -973,7 +973,7 @@ func (s *Store) Emails(ctx context.Context, userID string, page credbound.PageRe
 }
 
 // TOTPByUserID returns the user's TOTP factor.
-func (s *Store) TOTPByUserID(ctx context.Context, userID string) (credbound.TOTPFactor, error) {
+func (s *Store) TOTPByUserID(ctx context.Context, userID credbound.UUID) (credbound.TOTPFactor, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.TOTPFactor{}, err
 	}
@@ -1033,7 +1033,7 @@ func (s *Store) ActivateTOTP(ctx context.Context, factor credbound.TOTPFactor, r
 
 // UseTOTP records a successful code for the given time step, reporting false
 // without error when the step was already consumed (replay).
-func (s *Store) UseTOTP(ctx context.Context, userID string, step int64, commit credbound.Commit) (bool, error) {
+func (s *Store) UseTOTP(ctx context.Context, userID credbound.UUID, step int64, commit credbound.Commit) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -1063,7 +1063,7 @@ func (s *Store) UseTOTP(ctx context.Context, userID string, step int64, commit c
 
 // ConsumeRecoveryCode marks the matching unused recovery code used,
 // reporting false when no unused code matches the digest.
-func (s *Store) ConsumeRecoveryCode(ctx context.Context, userID string, digest []byte, usedAt time.Time, commit credbound.Commit) (bool, error) {
+func (s *Store) ConsumeRecoveryCode(ctx context.Context, userID credbound.UUID, digest []byte, usedAt time.Time, commit credbound.Commit) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -1091,7 +1091,7 @@ func (s *Store) ConsumeRecoveryCode(ctx context.Context, userID string, digest [
 
 // CountUnusedRecoveryCodes reports how many of the user's recovery codes
 // remain unused.
-func (s *Store) CountUnusedRecoveryCodes(ctx context.Context, userID string) (int64, error) {
+func (s *Store) CountUnusedRecoveryCodes(ctx context.Context, userID credbound.UUID) (int64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -1107,7 +1107,7 @@ func (s *Store) CountUnusedRecoveryCodes(ctx context.Context, userID string) (in
 }
 
 // DisableTOTP removes the user's TOTP factor and recovery codes.
-func (s *Store) DisableTOTP(ctx context.Context, userID string, commit credbound.Commit) error {
+func (s *Store) DisableTOTP(ctx context.Context, userID credbound.UUID, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1128,7 +1128,7 @@ func (s *Store) DisableTOTP(ctx context.Context, userID string, commit credbound
 // ReplaceRecoveryCodes atomically deletes the user's recovery codes and
 // inserts the replacement set; without an active TOTP factor it reports
 // credbound.ErrNotFound.
-func (s *Store) ReplaceRecoveryCodes(ctx context.Context, userID string, codes []credbound.RecoveryCode, commit credbound.Commit) error {
+func (s *Store) ReplaceRecoveryCodes(ctx context.Context, userID credbound.UUID, codes []credbound.RecoveryCode, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1150,7 +1150,7 @@ func (s *Store) ReplaceRecoveryCodes(ctx context.Context, userID string, codes [
 // and every passkey, and revokes the user's active sessions, in one
 // transaction. It succeeds even when no second factor exists; an unknown
 // user reports credbound.ErrNotFound.
-func (s *Store) ResetSecondFactor(ctx context.Context, userID string, at time.Time, commit credbound.Commit) error {
+func (s *Store) ResetSecondFactor(ctx context.Context, userID credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1165,27 +1165,27 @@ func (s *Store) ResetSecondFactor(ctx context.Context, userID string, at time.Ti
 	}
 	delete(s.totp, userID)
 	delete(s.recovery, userID)
-	delete(s.passkeys, userID)
+	delete(s.passkeys, userID.String())
 	s.revokeUserSessionsLocked(userID, at)
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
 // Passkeys streams the user's passkeys in creation order.
-func (s *Store) Passkeys(ctx context.Context, userID string) iter.Seq2[credbound.Passkey, error] {
+func (s *Store) Passkeys(ctx context.Context, userID credbound.UUID) iter.Seq2[credbound.Passkey, error] {
 	return func(yield func(credbound.Passkey, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(credbound.Passkey{}, err)
 			return
 		}
 		s.mu.RLock()
-		values := make([]credbound.Passkey, 0, len(s.passkeys[userID]))
-		for _, passkey := range s.passkeys[userID] {
+		values := make([]credbound.Passkey, 0, len(s.passkeys[userID.String()]))
+		for _, passkey := range s.passkeys[userID.String()] {
 			values = append(values, clonePasskey(passkey))
 		}
 		s.mu.RUnlock()
 		sort.Slice(values, func(i, j int) bool {
 			if values[i].CreatedAt.Equal(values[j].CreatedAt) {
-				return values[i].ID < values[j].ID
+				return values[i].ID.Compare(values[j].ID) < 0
 			}
 			return values[i].CreatedAt.Before(values[j].CreatedAt)
 		})
@@ -1223,10 +1223,10 @@ func (s *Store) SavePasskey(ctx context.Context, passkey credbound.Passkey, comm
 	if err != nil {
 		return err
 	}
-	if s.passkeys[passkey.UserID] == nil {
-		s.passkeys[passkey.UserID] = make(map[string]credbound.Passkey)
+	if s.passkeys[passkey.UserID.String()] == nil {
+		s.passkeys[passkey.UserID.String()] = make(map[credbound.UUID]credbound.Passkey)
 	}
-	s.passkeys[passkey.UserID][passkey.ID] = clonePasskey(passkey)
+	s.passkeys[passkey.UserID.String()][passkey.ID] = clonePasskey(passkey)
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
@@ -1250,13 +1250,13 @@ func (s *Store) PasskeyByCredentialID(ctx context.Context, credentialID []byte) 
 
 // TouchPasskey persists the credential's updated JSON (sign counter) and
 // last-used time after a successful assertion.
-func (s *Store) TouchPasskey(ctx context.Context, userID string, credentialID, credentialJSON []byte, usedAt time.Time, commit credbound.Commit) error {
+func (s *Store) TouchPasskey(ctx context.Context, userID credbound.UUID, credentialID, credentialJSON []byte, usedAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for id, passkey := range s.passkeys[userID] {
+	for id, passkey := range s.passkeys[userID.String()] {
 		if hmac.Equal(passkey.CredentialID, credentialID) {
 			previous, err := s.prepareCommitLocked(commit)
 			if err != nil {
@@ -1264,7 +1264,7 @@ func (s *Store) TouchPasskey(ctx context.Context, userID string, credentialID, c
 			}
 			passkey.CredentialJSON = slices.Clone(credentialJSON)
 			passkey.LastUsedAt = cloneTime(&usedAt)
-			s.passkeys[userID][id] = passkey
+			s.passkeys[userID.String()][id] = passkey
 			s.touchLastSeenLocked(userID, usedAt)
 			delete(s.throttles, userID)
 			return s.finishCommitLocked(ctx, commit, previous)
@@ -1274,20 +1274,20 @@ func (s *Store) TouchPasskey(ctx context.Context, userID string, credentialID, c
 }
 
 // DeletePasskey removes one of the user's passkeys.
-func (s *Store) DeletePasskey(ctx context.Context, userID, passkeyID string, commit credbound.Commit) error {
+func (s *Store) DeletePasskey(ctx context.Context, userID, passkeyID credbound.UUID, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.passkeys[userID][passkeyID]; !ok {
+	if _, ok := s.passkeys[userID.String()][passkeyID]; !ok {
 		return credbound.ErrNotFound
 	}
 	previous, err := s.prepareCommitLocked(commit)
 	if err != nil {
 		return err
 	}
-	delete(s.passkeys[userID], passkeyID)
+	delete(s.passkeys[userID.String()], passkeyID)
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
@@ -1333,7 +1333,7 @@ func (s *Store) PATByPrefix(ctx context.Context, prefix string) (credbound.PAT, 
 
 // TouchPAT records a token use, updating the token's and user's last-seen
 // times.
-func (s *Store) TouchPAT(ctx context.Context, id string, usedAt time.Time, commit credbound.Commit) error {
+func (s *Store) TouchPAT(ctx context.Context, id credbound.UUID, usedAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1354,7 +1354,7 @@ func (s *Store) TouchPAT(ctx context.Context, id string, usedAt time.Time, commi
 }
 
 // RevokePAT marks the user's token revoked.
-func (s *Store) RevokePAT(ctx context.Context, userID, id string, revokedAt time.Time, commit credbound.Commit) error {
+func (s *Store) RevokePAT(ctx context.Context, userID, id credbound.UUID, revokedAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1375,7 +1375,7 @@ func (s *Store) RevokePAT(ctx context.Context, userID, id string, revokedAt time
 
 // RevokeUserCredentials revokes all of the user's tokens (PATs and OAuth)
 // and sessions in one commit.
-func (s *Store) RevokeUserCredentials(ctx context.Context, userID string, at time.Time, commit credbound.Commit) error {
+func (s *Store) RevokeUserCredentials(ctx context.Context, userID credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1388,7 +1388,7 @@ func (s *Store) RevokeUserCredentials(ctx context.Context, userID string, at tim
 	if err != nil {
 		return err
 	}
-	s.revokeUserCredentialsLocked(userID, "", at)
+	s.revokeUserCredentialsLocked(userID, credbound.UUID{}, at)
 	s.revokeUserSessionsLocked(userID, at)
 	return s.finishCommitLocked(ctx, commit, previous)
 }
@@ -1398,7 +1398,7 @@ func (s *Store) RevokeUserCredentials(ctx context.Context, userID string, at tim
 // factors, all under the commit's snapshot, while the append-only audit chain
 // is preserved. Disabling the last enabled root or a sole workspace admin
 // reports ErrConflict, exactly like SetUserDisabled.
-func (s *Store) AnonymizeUser(ctx context.Context, userID string, at time.Time, commit credbound.Commit) error {
+func (s *Store) AnonymizeUser(ctx context.Context, userID credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1446,7 +1446,7 @@ func (s *Store) AnonymizeUser(ctx context.Context, userID string, at time.Time, 
 		if email.UserID != userID {
 			continue
 		}
-		tombstone := "anonymized-" + id + "@invalid"
+		tombstone := "anonymized-" + id.String() + "@invalid"
 		delete(s.emails, email.Address)
 		delete(s.emailIDs, email.Address)
 		email.Address = tombstone
@@ -1486,7 +1486,7 @@ func (s *Store) AnonymizeUser(ctx context.Context, userID string, at time.Time, 
 		}
 		s.deleteSCIMUserIndexesLocked(link)
 		link.ExternalID = ""
-		link.UserName = "anonymized-" + id
+		link.UserName = "anonymized-" + id.String()
 		link.DisplayName = ""
 		link.Schemas, link.Emails, link.Attributes = nil, nil, nil
 		link.Active = false
@@ -1499,21 +1499,21 @@ func (s *Store) AnonymizeUser(ctx context.Context, userID string, at time.Time, 
 	}
 	for id, invitation := range s.invitations {
 		if invitation.AcceptedUserID == userID {
-			invitation.Email = "anonymized-" + id + "@invalid"
+			invitation.Email = "anonymized-" + id.String() + "@invalid"
 			s.invitations[id] = cloneInvitation(invitation)
 		}
 	}
 	delete(s.totp, userID)
 	delete(s.recovery, userID)
-	delete(s.passkeys, userID)
-	s.revokeUserCredentialsLocked(userID, "", at)
+	delete(s.passkeys, userID.String())
+	s.revokeUserCredentialsLocked(userID, credbound.UUID{}, at)
 	s.revokeUserSessionsLocked(userID, at)
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
 // PATs streams the user's tokens, newest first, as one cursor page with
 // digests omitted.
-func (s *Store) PATs(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.PAT], error] {
+func (s *Store) PATs(ctx context.Context, userID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.PAT], error] {
 	return func(yield func(credbound.PageEvent[credbound.PAT], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
 		if err != nil {
@@ -1589,7 +1589,7 @@ func (s *Store) CreateSession(ctx context.Context, session credbound.Session, cr
 }
 
 // SessionByID returns the session with the given ID.
-func (s *Store) SessionByID(ctx context.Context, id string) (credbound.Session, error) {
+func (s *Store) SessionByID(ctx context.Context, id credbound.UUID) (credbound.Session, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.Session{}, err
 	}
@@ -1606,7 +1606,7 @@ func (s *Store) SessionByID(ctx context.Context, id string) (credbound.Session, 
 // already revoked reports credbound.ErrConflict, so an authentication racing
 // a revocation can neither record activity on nor extend the idle window of
 // a dead session.
-func (s *Store) TouchSession(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
+func (s *Store) TouchSession(ctx context.Context, id credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1631,7 +1631,7 @@ func (s *Store) TouchSession(ctx context.Context, id string, at time.Time, commi
 
 // RevokeSession marks the session revoked; an already-revoked session is
 // left unchanged.
-func (s *Store) RevokeSession(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
+func (s *Store) RevokeSession(ctx context.Context, id credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1653,7 +1653,7 @@ func (s *Store) RevokeSession(ctx context.Context, id string, at time.Time, comm
 }
 
 // RevokeUserSessions revokes every session of the user.
-func (s *Store) RevokeUserSessions(ctx context.Context, userID string, at time.Time, commit credbound.Commit) error {
+func (s *Store) RevokeUserSessions(ctx context.Context, userID credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1672,7 +1672,7 @@ func (s *Store) RevokeUserSessions(ctx context.Context, userID string, at time.T
 
 // Sessions streams the user's sessions, newest first, as one cursor page
 // with digests omitted.
-func (s *Store) Sessions(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Session], error] {
+func (s *Store) Sessions(ctx context.Context, userID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Session], error] {
 	return func(yield func(credbound.PageEvent[credbound.Session], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
 		if err != nil {
@@ -1750,7 +1750,7 @@ func (s *Store) CreateWorkspaceDomain(ctx context.Context, domain credbound.Work
 }
 
 // WorkspaceDomainByID returns the domain record with the given ID.
-func (s *Store) WorkspaceDomainByID(ctx context.Context, id string) (credbound.WorkspaceDomain, error) {
+func (s *Store) WorkspaceDomainByID(ctx context.Context, id credbound.UUID) (credbound.WorkspaceDomain, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.WorkspaceDomain{}, err
 	}
@@ -1784,7 +1784,7 @@ func (s *Store) ConfirmedWorkspaceDomainByName(ctx context.Context, name string)
 
 // ConfirmWorkspaceDomain marks the domain verified; confirming twice reports
 // credbound.ErrConflict.
-func (s *Store) ConfirmWorkspaceDomain(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
+func (s *Store) ConfirmWorkspaceDomain(ctx context.Context, id credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1810,7 +1810,7 @@ func (s *Store) ConfirmWorkspaceDomain(ctx context.Context, id string, at time.T
 // UpdateWorkspaceDomainPolicy replaces the auto-join and SSO-enforcement
 // policy of a confirmed domain; an unconfirmed domain reports
 // credbound.ErrConflict.
-func (s *Store) UpdateWorkspaceDomainPolicy(ctx context.Context, id string, policy credbound.WorkspaceDomainPolicyInput, at time.Time, commit credbound.Commit) error {
+func (s *Store) UpdateWorkspaceDomainPolicy(ctx context.Context, id credbound.UUID, policy credbound.WorkspaceDomainPolicyInput, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1835,7 +1835,7 @@ func (s *Store) UpdateWorkspaceDomainPolicy(ctx context.Context, id string, poli
 }
 
 // DeleteWorkspaceDomain removes the domain claim.
-func (s *Store) DeleteWorkspaceDomain(ctx context.Context, id string, commit credbound.Commit) error {
+func (s *Store) DeleteWorkspaceDomain(ctx context.Context, id credbound.UUID, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1856,7 +1856,7 @@ func (s *Store) DeleteWorkspaceDomain(ctx context.Context, id string, commit cre
 
 // WorkspaceDomains streams the workspace's domains, newest first, as one
 // cursor page.
-func (s *Store) WorkspaceDomains(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.WorkspaceDomain], error] {
+func (s *Store) WorkspaceDomains(ctx context.Context, workspaceID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.WorkspaceDomain], error] {
 	return func(yield func(credbound.PageEvent[credbound.WorkspaceDomain], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
 		if err != nil {
@@ -1917,7 +1917,7 @@ func (s *Store) JITProvisionSSOUser(ctx context.Context, user credbound.User, em
 	if _, exists := s.workspaces[membership.WorkspaceID]; !exists {
 		return credbound.ErrNotFound
 	}
-	key := ssoKey(identity.ProviderConfigurationID, identity.Issuer, identity.Subject)
+	key := ssoKey(identity.ProviderConfigurationID.String(), identity.Issuer, identity.Subject)
 	if _, exists := s.ssoIdentities[identity.ID]; exists {
 		return credbound.ErrConflict
 	}
@@ -1932,10 +1932,10 @@ func (s *Store) JITProvisionSSOUser(ctx context.Context, user credbound.User, em
 	s.emailAddresses[email.ID] = cloneEmail(email)
 	s.emailIDs[email.Address] = email.ID
 	s.emails[email.Address] = user.ID
-	if s.memberships[membership.WorkspaceID] == nil {
-		s.memberships[membership.WorkspaceID] = make(map[string]credbound.Membership)
+	if s.memberships[membership.WorkspaceID.String()] == nil {
+		s.memberships[membership.WorkspaceID.String()] = make(map[credbound.UUID]credbound.Membership)
 	}
-	s.memberships[membership.WorkspaceID][user.ID] = normalizeMembership(membership)
+	s.memberships[membership.WorkspaceID.String()][user.ID] = normalizeMembership(membership)
 	s.ssoIdentities[identity.ID] = cloneSSOIdentity(identity)
 	s.ssoKeys[key] = identity.ID
 	return s.finishCommitLocked(ctx, commit, previous)
@@ -1959,12 +1959,12 @@ func (s *Store) CreateWorkspace(ctx context.Context, workspace credbound.Workspa
 		return err
 	}
 	s.workspaces[workspace.ID] = cloneWorkspace(workspace)
-	s.memberships[workspace.ID] = map[string]credbound.Membership{owner.UserID: normalizeMembership(owner)}
+	s.memberships[workspace.ID.String()] = map[credbound.UUID]credbound.Membership{owner.UserID: normalizeMembership(owner)}
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
 // WorkspaceByID returns the workspace with the given ID.
-func (s *Store) WorkspaceByID(ctx context.Context, workspaceID string) (credbound.Workspace, error) {
+func (s *Store) WorkspaceByID(ctx context.Context, workspaceID credbound.UUID) (credbound.Workspace, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.Workspace{}, err
 	}
@@ -1999,7 +1999,7 @@ func (s *Store) UpdateWorkspace(ctx context.Context, workspace credbound.Workspa
 
 // SetWorkspaceDisabled enables or disables the workspace; disabling revokes
 // the members' workspace-scoped tokens.
-func (s *Store) SetWorkspaceDisabled(ctx context.Context, workspaceID string, disabled bool, at time.Time, commit credbound.Commit) error {
+func (s *Store) SetWorkspaceDisabled(ctx context.Context, workspaceID credbound.UUID, disabled bool, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -2020,7 +2020,7 @@ func (s *Store) SetWorkspaceDisabled(ctx context.Context, workspaceID string, di
 	workspace.UpdatedAt = at
 	s.workspaces[workspaceID] = cloneWorkspace(workspace)
 	if disabled {
-		for userID := range s.memberships[workspaceID] {
+		for userID := range s.memberships[workspaceID.String()] {
 			s.revokeUserCredentialsLocked(userID, workspaceID, at)
 		}
 	}
@@ -2029,16 +2029,16 @@ func (s *Store) SetWorkspaceDisabled(ctx context.Context, workspaceID string, di
 
 // Workspaces streams all workspaces, newest first, as one cursor page.
 func (s *Store) Workspaces(ctx context.Context, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Workspace], error] {
-	return s.workspacesPage(ctx, "", page)
+	return s.workspacesPage(ctx, credbound.UUID{}, page)
 }
 
 // UserWorkspaces streams the workspaces the user belongs to, newest first,
 // as one cursor page.
-func (s *Store) UserWorkspaces(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Workspace], error] {
+func (s *Store) UserWorkspaces(ctx context.Context, userID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Workspace], error] {
 	return s.workspacesPage(ctx, userID, page)
 }
 
-func (s *Store) workspacesPage(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Workspace], error] {
+func (s *Store) workspacesPage(ctx context.Context, userID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Workspace], error] {
 	return func(yield func(credbound.PageEvent[credbound.Workspace], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
 		if err != nil {
@@ -2052,8 +2052,8 @@ func (s *Store) workspacesPage(ctx context.Context, userID string, page credboun
 		s.mu.RLock()
 		values := make([]credbound.Workspace, 0)
 		for id, workspace := range s.workspaces {
-			if userID != "" {
-				if _, member := s.memberships[id][userID]; !member {
+			if userID != (credbound.UUID{}) {
+				if _, member := s.memberships[id.String()][userID]; !member {
 					continue
 				}
 			}
@@ -2065,18 +2065,18 @@ func (s *Store) workspacesPage(ctx context.Context, userID string, page credboun
 		sort.Slice(values, func(i, j int) bool {
 			return newer(values[i].CreatedAt, values[i].ID, values[j].CreatedAt, values[j].ID)
 		})
-		yieldMemoryPage(values, page.Limit, func(value credbound.Workspace) (time.Time, string) { return value.CreatedAt, value.ID }, yield)
+		yieldMemoryPage(values, page.Limit, func(value credbound.Workspace) (time.Time, credbound.UUID) { return value.CreatedAt, value.ID }, yield)
 	}
 }
 
 // Membership returns the user's membership in the workspace.
-func (s *Store) Membership(ctx context.Context, workspaceID, userID string) (credbound.Membership, error) {
+func (s *Store) Membership(ctx context.Context, workspaceID, userID credbound.UUID) (credbound.Membership, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.Membership{}, err
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	membership, ok := s.memberships[workspaceID][userID]
+	membership, ok := s.memberships[workspaceID.String()][userID]
 	if !ok {
 		return credbound.Membership{}, credbound.ErrNotFound
 	}
@@ -2118,7 +2118,7 @@ func (s *Store) CreateWorkspaceInvitation(ctx context.Context, invitation credbo
 }
 
 // WorkspaceInvitationByID returns the invitation with the given ID.
-func (s *Store) WorkspaceInvitationByID(ctx context.Context, invitationID string) (credbound.WorkspaceInvitation, error) {
+func (s *Store) WorkspaceInvitationByID(ctx context.Context, invitationID credbound.UUID) (credbound.WorkspaceInvitation, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.WorkspaceInvitation{}, err
 	}
@@ -2133,7 +2133,7 @@ func (s *Store) WorkspaceInvitationByID(ctx context.Context, invitationID string
 
 // PendingWorkspaceInvitation returns the workspace's unaccepted, unrevoked
 // invitation for the email address.
-func (s *Store) PendingWorkspaceInvitation(ctx context.Context, workspaceID, email string) (credbound.WorkspaceInvitation, error) {
+func (s *Store) PendingWorkspaceInvitation(ctx context.Context, workspaceID credbound.UUID, email string) (credbound.WorkspaceInvitation, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.WorkspaceInvitation{}, err
 	}
@@ -2150,7 +2150,7 @@ func (s *Store) PendingWorkspaceInvitation(ctx context.Context, workspaceID, ema
 // AcceptWorkspaceInvitation marks the invitation accepted by the user and
 // installs the resulting membership in the same commit; an accepted or
 // revoked invitation reports credbound.ErrConflict.
-func (s *Store) AcceptWorkspaceInvitation(ctx context.Context, invitationID, userID string, at time.Time, membership credbound.Membership, commit credbound.Commit) error {
+func (s *Store) AcceptWorkspaceInvitation(ctx context.Context, invitationID, userID credbound.UUID, at time.Time, membership credbound.Membership, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -2173,16 +2173,16 @@ func (s *Store) AcceptWorkspaceInvitation(ctx context.Context, invitationID, use
 	invitation.AcceptedAt = cloneTime(&at)
 	invitation.AcceptedUserID = userID
 	s.invitations[invitationID] = invitation
-	if s.memberships[membership.WorkspaceID] == nil {
-		s.memberships[membership.WorkspaceID] = make(map[string]credbound.Membership)
+	if s.memberships[membership.WorkspaceID.String()] == nil {
+		s.memberships[membership.WorkspaceID.String()] = make(map[credbound.UUID]credbound.Membership)
 	}
-	s.memberships[membership.WorkspaceID][userID] = normalizeMembership(membership)
+	s.memberships[membership.WorkspaceID.String()][userID] = normalizeMembership(membership)
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
 // RegisterInvitedUser atomically creates the invited user with email,
 // password and membership while accepting the invitation.
-func (s *Store) RegisterInvitedUser(ctx context.Context, invitationID string, user credbound.User, email credbound.EmailAddress, password credbound.PasswordCredential, membership credbound.Membership, at time.Time, commit credbound.Commit) error {
+func (s *Store) RegisterInvitedUser(ctx context.Context, invitationID credbound.UUID, user credbound.User, email credbound.EmailAddress, password credbound.PasswordCredential, membership credbound.Membership, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -2216,16 +2216,16 @@ func (s *Store) RegisterInvitedUser(ctx context.Context, invitationID string, us
 	s.emailAddresses[email.ID] = cloneEmail(email)
 	s.emailIDs[email.Address] = email.ID
 	s.passwords[user.ID] = password
-	if s.memberships[membership.WorkspaceID] == nil {
-		s.memberships[membership.WorkspaceID] = make(map[string]credbound.Membership)
+	if s.memberships[membership.WorkspaceID.String()] == nil {
+		s.memberships[membership.WorkspaceID.String()] = make(map[credbound.UUID]credbound.Membership)
 	}
-	s.memberships[membership.WorkspaceID][user.ID] = normalizeMembership(membership)
+	s.memberships[membership.WorkspaceID.String()][user.ID] = normalizeMembership(membership)
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
 // RevokeWorkspaceInvitation marks the workspace's invitation revoked; an
 // accepted or already-revoked invitation reports credbound.ErrConflict.
-func (s *Store) RevokeWorkspaceInvitation(ctx context.Context, workspaceID, invitationID string, at time.Time, commit credbound.Commit) error {
+func (s *Store) RevokeWorkspaceInvitation(ctx context.Context, workspaceID, invitationID credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -2249,7 +2249,7 @@ func (s *Store) RevokeWorkspaceInvitation(ctx context.Context, workspaceID, invi
 
 // WorkspaceInvitations streams the workspace's invitations, newest first, as
 // one cursor page.
-func (s *Store) WorkspaceInvitations(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.WorkspaceInvitation], error] {
+func (s *Store) WorkspaceInvitations(ctx context.Context, workspaceID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.WorkspaceInvitation], error] {
 	return func(yield func(credbound.PageEvent[credbound.WorkspaceInvitation], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
 		if err != nil {
@@ -2304,7 +2304,7 @@ func (s *Store) UpsertMembership(ctx context.Context, membership credbound.Membe
 	if _, ok := s.users[membership.UserID]; !ok {
 		return credbound.ErrNotFound
 	}
-	if existing, ok := s.memberships[membership.WorkspaceID][membership.UserID]; ok &&
+	if existing, ok := s.memberships[membership.WorkspaceID.String()][membership.UserID]; ok &&
 		existing.Role == credbound.RoleAdmin && existing.Status == credbound.MembershipActive &&
 		(membership.Role != credbound.RoleAdmin || membership.Status != credbound.MembershipActive) &&
 		s.activeWorkspaceAdminsLocked(membership.WorkspaceID) <= 1 {
@@ -2314,13 +2314,13 @@ func (s *Store) UpsertMembership(ctx context.Context, membership credbound.Membe
 	if err != nil {
 		return err
 	}
-	if s.memberships[membership.WorkspaceID] == nil {
-		s.memberships[membership.WorkspaceID] = make(map[string]credbound.Membership)
+	if s.memberships[membership.WorkspaceID.String()] == nil {
+		s.memberships[membership.WorkspaceID.String()] = make(map[credbound.UUID]credbound.Membership)
 	}
-	if existing, ok := s.memberships[membership.WorkspaceID][membership.UserID]; ok {
+	if existing, ok := s.memberships[membership.WorkspaceID.String()][membership.UserID]; ok {
 		membership.CreatedAt = existing.CreatedAt
 	}
-	s.memberships[membership.WorkspaceID][membership.UserID] = normalizeMembership(membership)
+	s.memberships[membership.WorkspaceID.String()][membership.UserID] = normalizeMembership(membership)
 	if membership.Status != credbound.MembershipActive {
 		s.revokeUserCredentialsLocked(membership.UserID, membership.WorkspaceID, commit.Audit.OccurredAt)
 	}
@@ -2330,13 +2330,13 @@ func (s *Store) UpsertMembership(ctx context.Context, membership credbound.Membe
 // RemoveMembership deletes the membership, refusing to remove the
 // workspace's last active admin (credbound.ErrConflict) and revoking the
 // member's workspace-scoped tokens.
-func (s *Store) RemoveMembership(ctx context.Context, workspaceID, userID string, at time.Time, commit credbound.Commit) error {
+func (s *Store) RemoveMembership(ctx context.Context, workspaceID, userID credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	membership, ok := s.memberships[workspaceID][userID]
+	membership, ok := s.memberships[workspaceID.String()][userID]
 	if !ok {
 		return credbound.ErrNotFound
 	}
@@ -2347,14 +2347,14 @@ func (s *Store) RemoveMembership(ctx context.Context, workspaceID, userID string
 	if err != nil {
 		return err
 	}
-	delete(s.memberships[workspaceID], userID)
+	delete(s.memberships[workspaceID.String()], userID)
 	s.revokeUserCredentialsLocked(userID, workspaceID, at)
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
 // Memberships streams the workspace's memberships, newest first, as one
 // cursor page.
-func (s *Store) Memberships(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Membership], error] {
+func (s *Store) Memberships(ctx context.Context, workspaceID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Membership], error] {
 	return func(yield func(credbound.PageEvent[credbound.Membership], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
 		if err != nil {
@@ -2366,8 +2366,8 @@ func (s *Store) Memberships(ctx context.Context, workspaceID string, page credbo
 			return
 		}
 		s.mu.RLock()
-		values := make([]credbound.Membership, 0, len(s.memberships[workspaceID]))
-		for _, membership := range s.memberships[workspaceID] {
+		values := make([]credbound.Membership, 0, len(s.memberships[workspaceID.String()]))
+		for _, membership := range s.memberships[workspaceID.String()] {
 			if afterCursor(membership.CreatedAt, membership.UserID, cursor) {
 				values = append(values, normalizeMembership(membership))
 			}
@@ -2376,12 +2376,12 @@ func (s *Store) Memberships(ctx context.Context, workspaceID string, page credbo
 		sort.Slice(values, func(i, j int) bool {
 			return newer(values[i].CreatedAt, values[i].UserID, values[j].CreatedAt, values[j].UserID)
 		})
-		yieldMemoryPage(values, page.Limit, func(value credbound.Membership) (time.Time, string) { return value.CreatedAt, value.UserID }, yield)
+		yieldMemoryPage(values, page.Limit, func(value credbound.Membership) (time.Time, credbound.UUID) { return value.CreatedAt, value.UserID }, yield)
 	}
 }
 
 // InstanceAdministrator returns the user's instance-administration role.
-func (s *Store) InstanceAdministrator(ctx context.Context, userID string) (credbound.InstanceAdministrator, error) {
+func (s *Store) InstanceAdministrator(ctx context.Context, userID credbound.UUID) (credbound.InstanceAdministrator, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.InstanceAdministrator{}, err
 	}
@@ -2454,7 +2454,7 @@ func (s *Store) SetInstanceRole(ctx context.Context, admin credbound.InstanceAdm
 
 // RemoveInstanceRole revokes the user's instance role, refusing to remove
 // the last root administrator (credbound.ErrConflict).
-func (s *Store) RemoveInstanceRole(ctx context.Context, userID string, commit credbound.Commit) error {
+func (s *Store) RemoveInstanceRole(ctx context.Context, userID credbound.UUID, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -2485,13 +2485,13 @@ func (s *Store) RemoveInstanceRole(ctx context.Context, userID string, commit cr
 
 // SSOIdentity resolves a linked identity by provider configuration, issuer
 // and subject.
-func (s *Store) SSOIdentity(ctx context.Context, providerConfigurationID, issuer, subject string) (credbound.SSOIdentity, error) {
+func (s *Store) SSOIdentity(ctx context.Context, providerConfigurationID credbound.UUID, issuer, subject string) (credbound.SSOIdentity, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.SSOIdentity{}, err
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	id, ok := s.ssoKeys[ssoKey(providerConfigurationID, issuer, subject)]
+	id, ok := s.ssoKeys[ssoKey(providerConfigurationID.String(), issuer, subject)]
 	if !ok {
 		return credbound.SSOIdentity{}, credbound.ErrNotFound
 	}
@@ -2509,7 +2509,7 @@ func (s *Store) LinkSSO(ctx context.Context, identity credbound.SSOIdentity, com
 	if _, ok := s.users[identity.UserID]; !ok {
 		return credbound.ErrNotFound
 	}
-	key := ssoKey(identity.ProviderConfigurationID, identity.Issuer, identity.Subject)
+	key := ssoKey(identity.ProviderConfigurationID.String(), identity.Issuer, identity.Subject)
 	if _, exists := s.ssoIdentities[identity.ID]; exists {
 		return credbound.ErrConflict
 	}
@@ -2531,7 +2531,7 @@ func (s *Store) LinkSSO(ctx context.Context, identity credbound.SSOIdentity, com
 
 // TouchSSO updates the identity's last-used time and the user's last-seen
 // time after a successful SSO login.
-func (s *Store) TouchSSO(ctx context.Context, userID, identityID string, usedAt time.Time, commit credbound.Commit) error {
+func (s *Store) TouchSSO(ctx context.Context, userID, identityID credbound.UUID, usedAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -2553,7 +2553,7 @@ func (s *Store) TouchSSO(ctx context.Context, userID, identityID string, usedAt 
 }
 
 // UnlinkSSO removes the user's SSO identity link.
-func (s *Store) UnlinkSSO(ctx context.Context, userID, identityID string, commit credbound.Commit) error {
+func (s *Store) UnlinkSSO(ctx context.Context, userID, identityID credbound.UUID, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -2565,7 +2565,7 @@ func (s *Store) UnlinkSSO(ctx context.Context, userID, identityID string, commit
 	}
 	// The last authentication method cannot be unlinked: a passwordless,
 	// passkey-less user removing their only SSO identity would be locked out.
-	methods := len(s.passkeys[userID])
+	methods := len(s.passkeys[userID.String()])
 	if _, ok := s.passwords[userID]; ok {
 		methods++
 	}
@@ -2581,14 +2581,14 @@ func (s *Store) UnlinkSSO(ctx context.Context, userID, identityID string, commit
 	if err != nil {
 		return err
 	}
-	delete(s.ssoKeys, ssoKey(identity.ProviderConfigurationID, identity.Issuer, identity.Subject))
+	delete(s.ssoKeys, ssoKey(identity.ProviderConfigurationID.String(), identity.Issuer, identity.Subject))
 	delete(s.ssoIdentities, identityID)
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
 // SSOIdentities streams the user's SSO identity links, newest first, as one
 // cursor page.
-func (s *Store) SSOIdentities(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.SSOIdentity], error] {
+func (s *Store) SSOIdentities(ctx context.Context, userID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.SSOIdentity], error] {
 	return func(yield func(credbound.PageEvent[credbound.SSOIdentity], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
 		if err != nil {
@@ -2648,7 +2648,7 @@ func (s *Store) AppendAudit(ctx context.Context, commit credbound.Commit) error 
 
 // AuditEvents streams the workspace's audit events, newest first, as one
 // cursor page.
-func (s *Store) AuditEvents(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.AuditEvent], error] {
+func (s *Store) AuditEvents(ctx context.Context, workspaceID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.AuditEvent], error] {
 	return s.auditEvents(ctx, page, func(event credbound.AuditEvent) bool { return event.WorkspaceID == workspaceID })
 }
 
@@ -2698,90 +2698,90 @@ func (s *Store) auditEvents(ctx context.Context, page credbound.PageRequest, inc
 }
 
 type storeState struct {
-	users                map[string]credbound.User
-	emails               map[string]string
-	emailAddresses       map[string]credbound.EmailAddress
-	emailIDs             map[string]string
-	emailVerifications   map[string]credbound.EmailVerificationCredential
-	passwords            map[string]credbound.PasswordCredential
-	workspaces           map[string]credbound.Workspace
-	memberships          map[string]map[string]credbound.Membership
-	admins               map[string]credbound.InstanceAdministrator
-	ssoIdentities        map[string]credbound.SSOIdentity
-	ssoKeys              map[string]string
-	totp                 map[string]credbound.TOTPFactor
-	recovery             map[string][]credbound.RecoveryCode
-	passkeys             map[string]map[string]credbound.Passkey
-	pats                 map[string]credbound.PAT
-	patPrefixes          map[string]string
-	sessions             map[string]credbound.Session
-	domains              map[string]credbound.WorkspaceDomain
-	domainNames          map[string]string
-	scimConfigurations   map[string]credbound.SCIMConfiguration
-	scimCredentials      map[string]credbound.SCIMCredential
-	scimCredentialKeys   map[string]string
-	scimUsers            map[string]credbound.SCIMUser
-	scimUserNames        map[string]string
-	scimExternalIDs      map[string]string
-	scimGroups           map[string]credbound.SCIMGroup
-	scimGroupExternal    map[string]string
-	oauthIssuers         map[string]credbound.OAuthIssuer
-	oauthIssuerURLs      map[string]string
-	oauthResources       map[string]credbound.OAuthProtectedResource
-	oauthResourceURIs    map[string]string
-	oauthClients         map[string]credbound.OAuthClient
-	oauthClientKeys      map[string]string
-	oauthInitialTokens   map[string]credbound.OAuthInitialAccessToken
-	oauthInitialKeys     map[string]string
-	oauthGrants          map[string]credbound.OAuthGrant
-	oauthCodes           map[string]credbound.OAuthAuthorizationCode
-	oauthCodeKeys        map[string]string
-	oauthAccessTokens    map[string]credbound.OAuthAccessToken
-	oauthAccessKeys      map[string]string
-	oauthClientTokens    map[string]credbound.OAuthClientAccessToken
-	oauthClientTokenKeys map[string]string
-	oauthRefreshTokens   map[string]credbound.OAuthRefreshToken
-	oauthRefreshKeys     map[string]string
-	throttles            map[string]credbound.LoginThrottle
-	passwordResets       map[string]credbound.PasswordResetCredential
-	emailAuths           map[string]credbound.EmailAuthenticationCredential
-	invitations          map[string]credbound.WorkspaceInvitation
+	users                map[credbound.UUID]credbound.User
+	emails               map[string]credbound.UUID
+	emailAddresses       map[credbound.UUID]credbound.EmailAddress
+	emailIDs             map[string]credbound.UUID
+	emailVerifications   map[credbound.UUID]credbound.EmailVerificationCredential
+	passwords            map[credbound.UUID]credbound.PasswordCredential
+	workspaces           map[credbound.UUID]credbound.Workspace
+	memberships          map[string]map[credbound.UUID]credbound.Membership
+	admins               map[credbound.UUID]credbound.InstanceAdministrator
+	ssoIdentities        map[credbound.UUID]credbound.SSOIdentity
+	ssoKeys              map[string]credbound.UUID
+	totp                 map[credbound.UUID]credbound.TOTPFactor
+	recovery             map[credbound.UUID][]credbound.RecoveryCode
+	passkeys             map[string]map[credbound.UUID]credbound.Passkey
+	pats                 map[credbound.UUID]credbound.PAT
+	patPrefixes          map[string]credbound.UUID
+	sessions             map[credbound.UUID]credbound.Session
+	domains              map[credbound.UUID]credbound.WorkspaceDomain
+	domainNames          map[string]credbound.UUID
+	scimConfigurations   map[credbound.UUID]credbound.SCIMConfiguration
+	scimCredentials      map[credbound.UUID]credbound.SCIMCredential
+	scimCredentialKeys   map[string]credbound.UUID
+	scimUsers            map[credbound.UUID]credbound.SCIMUser
+	scimUserNames        map[string]credbound.UUID
+	scimExternalIDs      map[string]credbound.UUID
+	scimGroups           map[credbound.UUID]credbound.SCIMGroup
+	scimGroupExternal    map[string]credbound.UUID
+	oauthIssuers         map[credbound.UUID]credbound.OAuthIssuer
+	oauthIssuerURLs      map[string]credbound.UUID
+	oauthResources       map[credbound.UUID]credbound.OAuthProtectedResource
+	oauthResourceURIs    map[string]credbound.UUID
+	oauthClients         map[credbound.UUID]credbound.OAuthClient
+	oauthClientKeys      map[string]credbound.UUID
+	oauthInitialTokens   map[credbound.UUID]credbound.OAuthInitialAccessToken
+	oauthInitialKeys     map[string]credbound.UUID
+	oauthGrants          map[credbound.UUID]credbound.OAuthGrant
+	oauthCodes           map[credbound.UUID]credbound.OAuthAuthorizationCode
+	oauthCodeKeys        map[string]credbound.UUID
+	oauthAccessTokens    map[credbound.UUID]credbound.OAuthAccessToken
+	oauthAccessKeys      map[string]credbound.UUID
+	oauthClientTokens    map[credbound.UUID]credbound.OAuthClientAccessToken
+	oauthClientTokenKeys map[string]credbound.UUID
+	oauthRefreshTokens   map[credbound.UUID]credbound.OAuthRefreshToken
+	oauthRefreshKeys     map[string]credbound.UUID
+	throttles            map[credbound.UUID]credbound.LoginThrottle
+	passwordResets       map[credbound.UUID]credbound.PasswordResetCredential
+	emailAuths           map[credbound.UUID]credbound.EmailAuthenticationCredential
+	invitations          map[credbound.UUID]credbound.WorkspaceInvitation
 	audits               []credbound.AuditEvent
-	auditIDs             map[string]struct{}
+	auditIDs             map[credbound.UUID]struct{}
 	auditSequence        int64
 	auditHead            []byte
 }
 
 func (s *Store) snapshotLocked() storeState {
 	state := storeState{
-		users: make(map[string]credbound.User, len(s.users)), emails: make(map[string]string, len(s.emails)),
-		emailAddresses: make(map[string]credbound.EmailAddress, len(s.emailAddresses)), emailIDs: make(map[string]string, len(s.emailIDs)),
-		emailVerifications: make(map[string]credbound.EmailVerificationCredential, len(s.emailVerifications)),
-		passwords:          make(map[string]credbound.PasswordCredential, len(s.passwords)), workspaces: make(map[string]credbound.Workspace, len(s.workspaces)),
-		memberships: make(map[string]map[string]credbound.Membership, len(s.memberships)), admins: make(map[string]credbound.InstanceAdministrator, len(s.admins)),
-		ssoIdentities: make(map[string]credbound.SSOIdentity, len(s.ssoIdentities)), ssoKeys: make(map[string]string, len(s.ssoKeys)),
-		totp: make(map[string]credbound.TOTPFactor, len(s.totp)), recovery: make(map[string][]credbound.RecoveryCode, len(s.recovery)),
-		passkeys: make(map[string]map[string]credbound.Passkey, len(s.passkeys)), pats: make(map[string]credbound.PAT, len(s.pats)),
-		patPrefixes: make(map[string]string, len(s.patPrefixes)), sessions: make(map[string]credbound.Session, len(s.sessions)),
-		domains: make(map[string]credbound.WorkspaceDomain, len(s.domains)), domainNames: make(map[string]string, len(s.domainNames)),
-		audits: slices.Clone(s.audits), auditIDs: make(map[string]struct{}, len(s.auditIDs)),
+		users: make(map[credbound.UUID]credbound.User, len(s.users)), emails: make(map[string]credbound.UUID, len(s.emails)),
+		emailAddresses: make(map[credbound.UUID]credbound.EmailAddress, len(s.emailAddresses)), emailIDs: make(map[string]credbound.UUID, len(s.emailIDs)),
+		emailVerifications: make(map[credbound.UUID]credbound.EmailVerificationCredential, len(s.emailVerifications)),
+		passwords:          make(map[credbound.UUID]credbound.PasswordCredential, len(s.passwords)), workspaces: make(map[credbound.UUID]credbound.Workspace, len(s.workspaces)),
+		memberships: make(map[string]map[credbound.UUID]credbound.Membership, len(s.memberships)), admins: make(map[credbound.UUID]credbound.InstanceAdministrator, len(s.admins)),
+		ssoIdentities: make(map[credbound.UUID]credbound.SSOIdentity, len(s.ssoIdentities)), ssoKeys: make(map[string]credbound.UUID, len(s.ssoKeys)),
+		totp: make(map[credbound.UUID]credbound.TOTPFactor, len(s.totp)), recovery: make(map[credbound.UUID][]credbound.RecoveryCode, len(s.recovery)),
+		passkeys: make(map[string]map[credbound.UUID]credbound.Passkey, len(s.passkeys)), pats: make(map[credbound.UUID]credbound.PAT, len(s.pats)),
+		patPrefixes: make(map[string]credbound.UUID, len(s.patPrefixes)), sessions: make(map[credbound.UUID]credbound.Session, len(s.sessions)),
+		domains: make(map[credbound.UUID]credbound.WorkspaceDomain, len(s.domains)), domainNames: make(map[string]credbound.UUID, len(s.domainNames)),
+		audits: slices.Clone(s.audits), auditIDs: make(map[credbound.UUID]struct{}, len(s.auditIDs)),
 		auditSequence: s.auditSequence, auditHead: slices.Clone(s.auditHead),
-		throttles:          make(map[string]credbound.LoginThrottle, len(s.throttles)),
-		passwordResets:     make(map[string]credbound.PasswordResetCredential, len(s.passwordResets)),
-		emailAuths:         make(map[string]credbound.EmailAuthenticationCredential, len(s.emailAuths)),
-		invitations:        make(map[string]credbound.WorkspaceInvitation, len(s.invitations)),
-		scimConfigurations: make(map[string]credbound.SCIMConfiguration, len(s.scimConfigurations)),
-		scimCredentials:    make(map[string]credbound.SCIMCredential, len(s.scimCredentials)), scimCredentialKeys: make(map[string]string, len(s.scimCredentialKeys)),
-		scimUsers: make(map[string]credbound.SCIMUser, len(s.scimUsers)), scimUserNames: make(map[string]string, len(s.scimUserNames)), scimExternalIDs: make(map[string]string, len(s.scimExternalIDs)),
-		scimGroups: make(map[string]credbound.SCIMGroup, len(s.scimGroups)), scimGroupExternal: make(map[string]string, len(s.scimGroupExternal)),
-		oauthIssuers: make(map[string]credbound.OAuthIssuer, len(s.oauthIssuers)), oauthIssuerURLs: make(map[string]string, len(s.oauthIssuerURLs)),
-		oauthResources: make(map[string]credbound.OAuthProtectedResource, len(s.oauthResources)), oauthResourceURIs: make(map[string]string, len(s.oauthResourceURIs)),
-		oauthClients: make(map[string]credbound.OAuthClient, len(s.oauthClients)), oauthClientKeys: make(map[string]string, len(s.oauthClientKeys)),
-		oauthInitialTokens: make(map[string]credbound.OAuthInitialAccessToken, len(s.oauthInitialTokens)), oauthInitialKeys: make(map[string]string, len(s.oauthInitialKeys)),
-		oauthGrants: make(map[string]credbound.OAuthGrant, len(s.oauthGrants)), oauthCodes: make(map[string]credbound.OAuthAuthorizationCode, len(s.oauthCodes)), oauthCodeKeys: make(map[string]string, len(s.oauthCodeKeys)),
-		oauthAccessTokens: make(map[string]credbound.OAuthAccessToken, len(s.oauthAccessTokens)), oauthAccessKeys: make(map[string]string, len(s.oauthAccessKeys)),
-		oauthClientTokens: make(map[string]credbound.OAuthClientAccessToken, len(s.oauthClientTokens)), oauthClientTokenKeys: make(map[string]string, len(s.oauthClientTokenKeys)),
-		oauthRefreshTokens: make(map[string]credbound.OAuthRefreshToken, len(s.oauthRefreshTokens)), oauthRefreshKeys: make(map[string]string, len(s.oauthRefreshKeys)),
+		throttles:          make(map[credbound.UUID]credbound.LoginThrottle, len(s.throttles)),
+		passwordResets:     make(map[credbound.UUID]credbound.PasswordResetCredential, len(s.passwordResets)),
+		emailAuths:         make(map[credbound.UUID]credbound.EmailAuthenticationCredential, len(s.emailAuths)),
+		invitations:        make(map[credbound.UUID]credbound.WorkspaceInvitation, len(s.invitations)),
+		scimConfigurations: make(map[credbound.UUID]credbound.SCIMConfiguration, len(s.scimConfigurations)),
+		scimCredentials:    make(map[credbound.UUID]credbound.SCIMCredential, len(s.scimCredentials)), scimCredentialKeys: make(map[string]credbound.UUID, len(s.scimCredentialKeys)),
+		scimUsers: make(map[credbound.UUID]credbound.SCIMUser, len(s.scimUsers)), scimUserNames: make(map[string]credbound.UUID, len(s.scimUserNames)), scimExternalIDs: make(map[string]credbound.UUID, len(s.scimExternalIDs)),
+		scimGroups: make(map[credbound.UUID]credbound.SCIMGroup, len(s.scimGroups)), scimGroupExternal: make(map[string]credbound.UUID, len(s.scimGroupExternal)),
+		oauthIssuers: make(map[credbound.UUID]credbound.OAuthIssuer, len(s.oauthIssuers)), oauthIssuerURLs: make(map[string]credbound.UUID, len(s.oauthIssuerURLs)),
+		oauthResources: make(map[credbound.UUID]credbound.OAuthProtectedResource, len(s.oauthResources)), oauthResourceURIs: make(map[string]credbound.UUID, len(s.oauthResourceURIs)),
+		oauthClients: make(map[credbound.UUID]credbound.OAuthClient, len(s.oauthClients)), oauthClientKeys: make(map[string]credbound.UUID, len(s.oauthClientKeys)),
+		oauthInitialTokens: make(map[credbound.UUID]credbound.OAuthInitialAccessToken, len(s.oauthInitialTokens)), oauthInitialKeys: make(map[string]credbound.UUID, len(s.oauthInitialKeys)),
+		oauthGrants: make(map[credbound.UUID]credbound.OAuthGrant, len(s.oauthGrants)), oauthCodes: make(map[credbound.UUID]credbound.OAuthAuthorizationCode, len(s.oauthCodes)), oauthCodeKeys: make(map[string]credbound.UUID, len(s.oauthCodeKeys)),
+		oauthAccessTokens: make(map[credbound.UUID]credbound.OAuthAccessToken, len(s.oauthAccessTokens)), oauthAccessKeys: make(map[string]credbound.UUID, len(s.oauthAccessKeys)),
+		oauthClientTokens: make(map[credbound.UUID]credbound.OAuthClientAccessToken, len(s.oauthClientTokens)), oauthClientTokenKeys: make(map[string]credbound.UUID, len(s.oauthClientTokenKeys)),
+		oauthRefreshTokens: make(map[credbound.UUID]credbound.OAuthRefreshToken, len(s.oauthRefreshTokens)), oauthRefreshKeys: make(map[string]credbound.UUID, len(s.oauthRefreshKeys)),
 	}
 	for key, value := range s.users {
 		state.users[key] = cloneUser(value)
@@ -2805,7 +2805,7 @@ func (s *Store) snapshotLocked() storeState {
 		state.workspaces[key] = cloneWorkspace(value)
 	}
 	for workspaceID, members := range s.memberships {
-		state.memberships[workspaceID] = make(map[string]credbound.Membership, len(members))
+		state.memberships[workspaceID] = make(map[credbound.UUID]credbound.Membership, len(members))
 		for userID, membership := range members {
 			state.memberships[workspaceID][userID] = membership
 		}
@@ -2826,7 +2826,7 @@ func (s *Store) snapshotLocked() storeState {
 		state.recovery[key] = cloneRecovery(value)
 	}
 	for userID, passkeys := range s.passkeys {
-		state.passkeys[userID] = make(map[string]credbound.Passkey, len(passkeys))
+		state.passkeys[userID] = make(map[credbound.UUID]credbound.Passkey, len(passkeys))
 		for passkeyID, passkey := range passkeys {
 			state.passkeys[userID][passkeyID] = clonePasskey(passkey)
 		}
@@ -3006,7 +3006,7 @@ func (s *Store) canAudit(event credbound.AuditEvent) error {
 	if s.auditFailure != nil {
 		return fmt.Errorf("%w: %v", credbound.ErrAuditUnavailable, s.auditFailure)
 	}
-	if event.ID == "" || event.Action == "" || event.OccurredAt.IsZero() {
+	if event.ID == (credbound.UUID{}) || event.Action == "" || event.OccurredAt.IsZero() {
 		return credbound.ErrAuditUnavailable
 	}
 	if _, duplicate := s.auditIDs[event.ID]; duplicate {
@@ -3070,7 +3070,7 @@ func cloneAuditEvent(event credbound.AuditEvent) credbound.AuditEvent {
 	return event
 }
 
-func (s *Store) touchLastSeenLocked(userID string, seenAt time.Time) {
+func (s *Store) touchLastSeenLocked(userID credbound.UUID, seenAt time.Time) {
 	user := s.users[userID]
 	user.LastSeenAt = cloneTime(&seenAt)
 	s.users[userID] = user
@@ -3081,11 +3081,11 @@ func ssoKey(providerConfigurationID, issuer, subject string) string {
 }
 
 type pageCursor struct {
-	UnixNano int64  `json:"t"`
-	ID       string `json:"id"`
+	UnixNano int64          `json:"t"`
+	ID       credbound.UUID `json:"id"`
 }
 
-func encodeCursor(timestamp time.Time, id string) string {
+func encodeCursor(timestamp time.Time, id credbound.UUID) string {
 	payload, _ := json.Marshal(pageCursor{UnixNano: timestamp.UnixNano(), ID: id})
 	return base64.RawURLEncoding.EncodeToString(payload)
 }
@@ -3099,23 +3099,23 @@ func decodeCursor(raw string) (pageCursor, error) {
 		return pageCursor{}, credbound.ErrInvalidInput
 	}
 	var cursor pageCursor
-	if err := json.Unmarshal(payload, &cursor); err != nil || cursor.UnixNano == 0 || cursor.ID == "" {
+	if err := json.Unmarshal(payload, &cursor); err != nil || cursor.UnixNano == 0 || cursor.ID == (credbound.UUID{}) {
 		return pageCursor{}, credbound.ErrInvalidInput
 	}
 	return cursor, nil
 }
 
-func afterCursor(timestamp time.Time, id string, cursor pageCursor) bool {
-	if cursor.ID == "" {
+func afterCursor(timestamp time.Time, id credbound.UUID, cursor pageCursor) bool {
+	if cursor.ID == (credbound.UUID{}) {
 		return true
 	}
 	ct := time.Unix(0, cursor.UnixNano)
-	return timestamp.Before(ct) || (timestamp.Equal(ct) && id < cursor.ID)
+	return timestamp.Before(ct) || (timestamp.Equal(ct) && id.Compare(cursor.ID) < 0)
 }
 
-func newer(leftTime time.Time, leftID string, rightTime time.Time, rightID string) bool {
+func newer(leftTime time.Time, leftID credbound.UUID, rightTime time.Time, rightID credbound.UUID) bool {
 	if leftTime.Equal(rightTime) {
-		return leftID > rightID
+		return leftID.Compare(rightID) > 0
 	}
 	return leftTime.After(rightTime)
 }
@@ -3130,9 +3130,9 @@ func cloneWorkspace(value credbound.Workspace) credbound.Workspace {
 	return value
 }
 
-func (s *Store) activeWorkspaceAdminsLocked(workspaceID string) int {
+func (s *Store) activeWorkspaceAdminsLocked(workspaceID credbound.UUID) int {
 	count := 0
-	for _, membership := range s.memberships[workspaceID] {
+	for _, membership := range s.memberships[workspaceID.String()] {
 		if membership.Role == credbound.RoleAdmin && membership.Status == credbound.MembershipActive {
 			count++
 		}
@@ -3140,34 +3140,34 @@ func (s *Store) activeWorkspaceAdminsLocked(workspaceID string) int {
 	return count
 }
 
-func (s *Store) revokeUserCredentialsLocked(userID, workspaceID string, at time.Time) {
+func (s *Store) revokeUserCredentialsLocked(userID, workspaceID credbound.UUID, at time.Time) {
 	for id, pat := range s.pats {
-		if pat.UserID == userID && pat.RevokedAt == nil && (workspaceID == "" || pat.WorkspaceID == workspaceID) {
+		if pat.UserID == userID && pat.RevokedAt == nil && (workspaceID == (credbound.UUID{}) || pat.WorkspaceID == workspaceID) {
 			pat.RevokedAt = cloneTime(&at)
 			s.pats[id] = clonePAT(pat)
 		}
 	}
 	for id, grant := range s.oauthGrants {
-		if grant.UserID == userID && grant.RevokedAt == nil && (workspaceID == "" || grant.WorkspaceID == workspaceID) {
+		if grant.UserID == userID && grant.RevokedAt == nil && (workspaceID == (credbound.UUID{}) || grant.WorkspaceID == workspaceID) {
 			grant.RevokedAt = cloneTime(&at)
 			s.oauthGrants[id] = cloneOAuthGrant(grant)
 		}
 	}
 	for id, token := range s.oauthAccessTokens {
-		if token.UserID == userID && token.RevokedAt == nil && (workspaceID == "" || token.WorkspaceID == workspaceID) {
+		if token.UserID == userID && token.RevokedAt == nil && (workspaceID == (credbound.UUID{}) || token.WorkspaceID == workspaceID) {
 			token.RevokedAt = cloneTime(&at)
 			s.oauthAccessTokens[id] = cloneOAuthAccessToken(token)
 		}
 	}
 	for id, token := range s.oauthRefreshTokens {
-		if token.UserID == userID && token.RevokedAt == nil && (workspaceID == "" || token.WorkspaceID == workspaceID) {
+		if token.UserID == userID && token.RevokedAt == nil && (workspaceID == (credbound.UUID{}) || token.WorkspaceID == workspaceID) {
 			token.RevokedAt = cloneTime(&at)
 			s.oauthRefreshTokens[id] = cloneOAuthRefreshToken(token)
 		}
 	}
 }
 
-func yieldMemoryPage[T any](values []T, limit int, key func(T) (time.Time, string), yield func(credbound.PageEvent[T], error) bool) {
+func yieldMemoryPage[T any](values []T, limit int, key func(T) (time.Time, credbound.UUID), yield func(credbound.PageEvent[T], error) bool) {
 	hasMore := len(values) > limit
 	if hasMore {
 		values = values[:limit]
@@ -3231,7 +3231,7 @@ func cloneSession(value credbound.Session) credbound.Session {
 // revokeUserSessionsLocked backs both RevokeUserSessions and the session
 // revocation cascade of CompletePasswordReset, SetUserDisabled and
 // RevokeUserCredentials.
-func (s *Store) revokeUserSessionsLocked(userID string, at time.Time) {
+func (s *Store) revokeUserSessionsLocked(userID credbound.UUID, at time.Time) {
 	for id, session := range s.sessions {
 		if session.UserID == userID && session.RevokedAt == nil {
 			session.RevokedAt = cloneTime(&at)
@@ -3274,7 +3274,7 @@ func normalizeMembership(value credbound.Membership) credbound.Membership {
 
 // SCIMUsersByUser streams every tenant-scoped SCIM profile linked to the
 // user across configurations, oldest first, for the PrivacyStore capability.
-func (s *Store) SCIMUsersByUser(ctx context.Context, userID string) iter.Seq2[credbound.SCIMUser, error] {
+func (s *Store) SCIMUsersByUser(ctx context.Context, userID credbound.UUID) iter.Seq2[credbound.SCIMUser, error] {
 	return func(yield func(credbound.SCIMUser, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(credbound.SCIMUser{}, err)
@@ -3301,7 +3301,7 @@ func (s *Store) SCIMUsersByUser(ctx context.Context, userID string) iter.Seq2[cr
 
 // AcceptedWorkspaceInvitations streams every invitation the user accepted,
 // oldest first, for the PrivacyStore capability.
-func (s *Store) AcceptedWorkspaceInvitations(ctx context.Context, userID string) iter.Seq2[credbound.WorkspaceInvitation, error] {
+func (s *Store) AcceptedWorkspaceInvitations(ctx context.Context, userID credbound.UUID) iter.Seq2[credbound.WorkspaceInvitation, error] {
 	return func(yield func(credbound.WorkspaceInvitation, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(credbound.WorkspaceInvitation{}, err)

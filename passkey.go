@@ -103,11 +103,11 @@ func (m *Manager) FinishPasskeyRegistration(ctx context.Context, actor Authentic
 		CredentialID:   append([]byte(nil), credentialID...),
 		CredentialJSON: sealedCredential, CreatedAt: m.now(),
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "passkey.create", "passkey", id, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "passkey.create", "passkey", id.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return Passkey{}, err
 	}
-	meta, err := m.newEventMeta(EventPasskeyRegistered, "auth.passkey.registration.finish", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventPasskeyRegistered, "auth.passkey.registration.finish", actor.UserID, UUID{}, event)
 	if err != nil {
 		return Passkey{}, err
 	}
@@ -273,8 +273,8 @@ func (m *Manager) FinishPasskeyAuthentication(ctx context.Context, continuation 
 // commitPasskeyAuthentication is the shared success tail of the two passkey
 // sign-in flows: it touches the credential, consumes the single-use ceremony
 // in the same commit, and mints the AAL2 authentication.
-func (m *Manager) commitPasskeyAuthentication(ctx context.Context, operation string, state ceremonyContinuation, userID string, credentialID, credentialJSON []byte) (Authentication, error) {
-	event, err := m.newAudit(ctx, userID, "auth.passkey", "user", userID, "", AuditSucceeded, "")
+func (m *Manager) commitPasskeyAuthentication(ctx context.Context, operation string, state ceremonyContinuation, userID UUID, credentialID, credentialJSON []byte) (Authentication, error) {
+	event, err := m.newAudit(ctx, userID, "auth.passkey", "user", userID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, err
 	}
@@ -295,7 +295,7 @@ func (m *Manager) commitPasskeyAuthentication(ctx context.Context, operation str
 		return Authentication{}, m.mapStoreError(ctx, operation, err)
 	}
 	authentication := Authentication{UserID: userID, Method: MethodPasskey, Level: AAL2, AuthenticatedAt: now}
-	if meta, metaErr := m.newEventMeta(EventPasskeyAuthenticated, operation, userID, "", event); metaErr == nil {
+	if meta, metaErr := m.newEventMeta(EventPasskeyAuthenticated, operation, userID, UUID{}, event); metaErr == nil {
 		authenticated := PasskeyAuthenticatedEvent{EventMeta: meta, PasskeyID: passkeyID, UserID: userID}
 		m.events.emit(ctx, EventPasskeyAuthenticated, func(listener EventListener) error { return listener.OnPasskeyAuthenticated(ctx, authenticated) })
 	}
@@ -356,7 +356,7 @@ func (m *Manager) FinishDiscoverablePasskeyAuthentication(ctx context.Context, c
 	if err != nil {
 		return Authentication{}, err
 	}
-	resolvedUserID := ""
+	resolvedUserID := UUID{}
 	lookup := func(ctx context.Context, credentialID []byte) (PasskeyUser, error) {
 		passkey, lookupErr := credentialStore.PasskeyByCredentialID(ctx, credentialID)
 		if lookupErr != nil {
@@ -371,7 +371,7 @@ func (m *Manager) FinishDiscoverablePasskeyAuthentication(ctx context.Context, c
 	}
 	credentialID, credentialJSON, err := provider.FinishDiscoverableAuthentication(ctx, state.Session, response, lookup)
 	if err != nil {
-		if resolvedUserID == "" {
+		if resolvedUserID == (UUID{}) {
 			// The assertion never resolved to an account, so there is no
 			// actor to audit; the caller learns nothing but failure.
 			return Authentication{}, ErrInvalidCredentials
@@ -387,7 +387,7 @@ func (m *Manager) FinishDiscoverablePasskeyAuthentication(ctx context.Context, c
 		m.emitAuthenticationFailed(ctx, "auth.passkey.discoverable.finish", audit, MethodPasskey, resolvedUserID, reason)
 		return Authentication{}, ErrInvalidCredentials
 	}
-	if resolvedUserID == "" {
+	if resolvedUserID == (UUID{}) {
 		return Authentication{}, ErrInvalidCredentials
 	}
 	record, lookupErr := m.store.UserByID(ctx, resolvedUserID)
@@ -423,20 +423,20 @@ func (m *Manager) discoverablePasskeys() (DiscoverablePasskeyProvider, PasskeyCr
 // DeletePasskey removes one of the actor's passkeys, atomically with the
 // audit event. It requires a fresh AAL2 step-up and works even without
 // Config.Passkeys, so stale credentials remain removable.
-func (m *Manager) DeletePasskey(ctx context.Context, actor Authentication, passkeyID string) (err error) {
+func (m *Manager) DeletePasskey(ctx context.Context, actor Authentication, passkeyID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.passkey.delete", started, err) }()
 	if err := m.requireStepUp(ctx, actor, "auth.passkey.delete"); err != nil {
 		return err
 	}
-	if passkeyID == "" {
+	if passkeyID == (UUID{}) {
 		return fmt.Errorf("%w: passkey id is required", ErrInvalidInput)
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "passkey.delete", "passkey", passkeyID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "passkey.delete", "passkey", passkeyID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
-	meta, err := m.newEventMeta(EventPasskeyDeleted, "auth.passkey.delete", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventPasskeyDeleted, "auth.passkey.delete", actor.UserID, UUID{}, event)
 	if err != nil {
 		return err
 	}
@@ -455,11 +455,11 @@ func (m *Manager) DeletePasskey(ctx context.Context, actor Authentication, passk
 // Passkeys streams the metadata of a user's registered passkeys so the host
 // can render a credential-management page. The sealed credential material is
 // never exposed. Reading another user requires admin users read permission.
-func (m *Manager) Passkeys(ctx context.Context, actor Authentication, userID string) iter.Seq2[Passkey, error] {
-	if actor.UserID == "" {
+func (m *Manager) Passkeys(ctx context.Context, actor Authentication, userID UUID) iter.Seq2[Passkey, error] {
+	if actor.UserID == (UUID{}) {
 		return errorSeq[Passkey](ErrUnauthorized)
 	}
-	if userID == "" {
+	if userID == (UUID{}) {
 		userID = actor.UserID
 	}
 	if userID == actor.UserID {
@@ -483,19 +483,19 @@ func (m *Manager) Passkeys(ctx context.Context, actor Authentication, userID str
 	}
 }
 
-func (m *Manager) passkeyIDByCredential(ctx context.Context, userID string, credentialID []byte) string {
+func (m *Manager) passkeyIDByCredential(ctx context.Context, userID UUID, credentialID []byte) UUID {
 	for passkey, err := range m.store.Passkeys(ctx, userID) {
 		if err != nil {
-			return ""
+			return UUID{}
 		}
 		if hmac.Equal(passkey.CredentialID, credentialID) {
 			return passkey.ID
 		}
 	}
-	return ""
+	return UUID{}
 }
 
-func (m *Manager) passkeyUser(ctx context.Context, userID string) (PasskeyUser, error) {
+func (m *Manager) passkeyUser(ctx context.Context, userID UUID) (PasskeyUser, error) {
 	user, err := m.store.UserByID(ctx, userID)
 	if err != nil {
 		return PasskeyUser{}, err

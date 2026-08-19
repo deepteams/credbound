@@ -41,7 +41,7 @@ const domainChallengePrefix = "credbound-domain-verification="
 // real owner. It requires a DomainStore-capable store (ErrNotSupported
 // otherwise), a fresh AAL2 step-up and workspace settings write, exactly
 // like UpdateWorkspace. An unconfirmed domain has no effect on any flow.
-func (m *Manager) CreateWorkspaceDomain(ctx context.Context, actor Authentication, workspaceID, domain string) (_ IssuedWorkspaceDomain, err error) {
+func (m *Manager) CreateWorkspaceDomain(ctx context.Context, actor Authentication, workspaceID UUID, domain string) (_ IssuedWorkspaceDomain, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "workspace.domain.create", started, err) }()
 	if m.domainStore == nil {
@@ -68,7 +68,7 @@ func (m *Manager) CreateWorkspaceDomain(ctx context.Context, actor Authenticatio
 		ID: id, WorkspaceID: workspaceID, Domain: name, Challenge: challenge,
 		CreatedAt: now, UpdatedAt: now,
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "workspace.domain.create", "workspace_domain", id, workspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "workspace.domain.create", "workspace_domain", id.String(), workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return IssuedWorkspaceDomain{}, err
 	}
@@ -98,7 +98,7 @@ func (m *Manager) CreateWorkspaceDomain(ctx context.Context, actor Authenticatio
 // step-up and workspace settings write in the owning workspace, and fails
 // with ErrConflict when the domain was already confirmed. Only from this
 // point on does the domain's policy apply.
-func (m *Manager) ConfirmWorkspaceDomain(ctx context.Context, actor Authentication, domainID string) (err error) {
+func (m *Manager) ConfirmWorkspaceDomain(ctx context.Context, actor Authentication, domainID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "workspace.domain.confirm", started, err) }()
 	if m.domainStore == nil {
@@ -127,7 +127,7 @@ func (m *Manager) ConfirmWorkspaceDomain(ctx context.Context, actor Authenticati
 	}
 	now := m.now()
 	domain.ConfirmedAt, domain.UpdatedAt = cloneTime(&now), now
-	event, err := m.newAudit(ctx, actor.UserID, "workspace.domain.confirm", "workspace_domain", domain.ID, domain.WorkspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "workspace.domain.confirm", "workspace_domain", domain.ID.String(), domain.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -154,7 +154,7 @@ func (m *Manager) ConfirmWorkspaceDomain(ctx context.Context, actor Authenticati
 // in the workspace role catalog; when AutoJoin or EnforceSSO is set the
 // provider configuration must be registered with the Manager. It requires a
 // fresh AAL2 step-up and workspace settings write in the owning workspace.
-func (m *Manager) UpdateWorkspaceDomainPolicy(ctx context.Context, actor Authentication, domainID string, input WorkspaceDomainPolicyInput) (err error) {
+func (m *Manager) UpdateWorkspaceDomainPolicy(ctx context.Context, actor Authentication, domainID UUID, input WorkspaceDomainPolicyInput) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "workspace.domain.policy_update", started, err) }()
 	if m.domainStore == nil {
@@ -175,8 +175,7 @@ func (m *Manager) UpdateWorkspaceDomainPolicy(ctx context.Context, actor Authent
 		return err
 	}
 	input.AutoJoinRole = role
-	input.SSOProviderConfigurationID = strings.TrimSpace(input.SSOProviderConfigurationID)
-	if input.AutoJoin || input.EnforceSSO || input.SSOProviderConfigurationID != "" {
+	if input.AutoJoin || input.EnforceSSO || input.SSOProviderConfigurationID != (UUID{}) {
 		if _, registered := m.ssoProviders[input.SSOProviderConfigurationID]; !registered {
 			return &ValidationError{Field: "sso_provider_configuration_id", Rule: "unknown", Message: "the SSO provider configuration is not registered"}
 		}
@@ -185,7 +184,7 @@ func (m *Manager) UpdateWorkspaceDomainPolicy(ctx context.Context, actor Authent
 	domain.AutoJoin, domain.AutoJoinRole = input.AutoJoin, input.AutoJoinRole
 	domain.SSOProviderConfigurationID, domain.EnforceSSO = input.SSOProviderConfigurationID, input.EnforceSSO
 	domain.UpdatedAt = now
-	event, err := m.newAudit(ctx, actor.UserID, "workspace.domain.policy_update", "workspace_domain", domain.ID, domain.WorkspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "workspace.domain.policy_update", "workspace_domain", domain.ID.String(), domain.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -209,7 +208,7 @@ func (m *Manager) UpdateWorkspaceDomainPolicy(ctx context.Context, actor Authent
 // the audit event; addresses under it immediately authenticate like any
 // other. It requires a fresh AAL2 step-up and workspace settings write in
 // the owning workspace.
-func (m *Manager) RemoveWorkspaceDomain(ctx context.Context, actor Authentication, domainID string) (err error) {
+func (m *Manager) RemoveWorkspaceDomain(ctx context.Context, actor Authentication, domainID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "workspace.domain.remove", started, err) }()
 	if m.domainStore == nil {
@@ -219,7 +218,7 @@ func (m *Manager) RemoveWorkspaceDomain(ctx context.Context, actor Authenticatio
 	if err != nil {
 		return err
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "workspace.domain.remove", "workspace_domain", domain.ID, domain.WorkspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "workspace.domain.remove", "workspace_domain", domain.ID.String(), domain.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -243,7 +242,7 @@ func (m *Manager) RemoveWorkspaceDomain(ctx context.Context, actor Authenticatio
 // state and policy. The listing requires an active membership holding
 // workspace access, like the other tenant read operations; the challenge is
 // included because it is published in public DNS and is not a secret.
-func (m *Manager) WorkspaceDomains(ctx context.Context, actor Authentication, workspaceID string, page PageRequest) iter.Seq2[PageEvent[WorkspaceDomain], error] {
+func (m *Manager) WorkspaceDomains(ctx context.Context, actor Authentication, workspaceID UUID, page PageRequest) iter.Seq2[PageEvent[WorkspaceDomain], error] {
 	if m.domainStore == nil {
 		return errorSeq[PageEvent[WorkspaceDomain]](ErrNotSupported)
 	}
@@ -262,7 +261,7 @@ func (m *Manager) WorkspaceDomains(ctx context.Context, actor Authentication, wo
 // settings write on the owning workspace, mirroring UpdateWorkspace. The
 // step-up gate runs before the lookup so anonymous or stale contexts cannot
 // probe domain identifiers.
-func (m *Manager) authorizedWorkspaceDomain(ctx context.Context, actor Authentication, domainID, operation string) (WorkspaceDomain, error) {
+func (m *Manager) authorizedWorkspaceDomain(ctx context.Context, actor Authentication, domainID UUID, operation string) (WorkspaceDomain, error) {
 	if err := m.requireStepUp(ctx, actor, operation); err != nil {
 		return WorkspaceDomain{}, err
 	}
@@ -346,7 +345,7 @@ func (m *Manager) domainRequiresSSO(ctx context.Context, email, action string) e
 	if !domain.EnforceSSO {
 		return nil
 	}
-	if auditErr := m.appendAuthenticationAudit(ctx, "", action, AuditFailed, "sso_required"); auditErr != nil {
+	if auditErr := m.appendAuthenticationAudit(ctx, UUID{}, action, AuditFailed, "sso_required"); auditErr != nil {
 		return auditErr
 	}
 	return ErrSSORequired

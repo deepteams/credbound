@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/deepteams/credbound"
+	"github.com/deepteams/credbound/internal/dbtype"
 	db "github.com/deepteams/credbound/internal/sqlc/postgresql"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -148,4 +149,21 @@ func mapError(err error) error {
 		return fmt.Errorf("%w: %v", credbound.ErrConflict, err)
 	}
 	return err
+}
+
+// Identifiers cross the generated-query boundary as dbtype.UUID, which carries
+// the database interfaces, and live in the domain as credbound.UUID, which is
+// the bare sixteen bytes. These two convert between them, at the same boundary
+// where rows already become domain values. The zero identifier is NULL on the
+// way out and reads back as the zero identifier on the way in.
+
+func dbID(id credbound.UUID) dbtype.UUID {
+	return dbtype.UUID{Bytes: id, Valid: id != credbound.UUID{}}
+}
+
+func domainID(value dbtype.UUID) credbound.UUID {
+	if !value.Valid {
+		return credbound.UUID{}
+	}
+	return value.Bytes
 }

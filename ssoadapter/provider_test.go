@@ -12,7 +12,7 @@ import (
 	"github.com/deepteams/credbound"
 )
 
-const testConfigurationID = "0198b463-51a2-7cde-8000-0123456789ab"
+var testConfigurationID = credbound.MustParseUUID("0198b463-51a2-7cde-8000-0123456789ab")
 
 func testConfig(issuerURL string) Config {
 	return Config{
@@ -414,8 +414,8 @@ func TestFinishPropagatesExchangeFailure(t *testing.T) {
 func TestNewValidatesConfiguration(t *testing.T) {
 	issuer := newTestIssuer(t)
 	cases := map[string]func(*Config){
-		"bad uuid":                  func(c *Config) { c.ConfigurationID = "not-a-uuid" },
-		"uuid v4":                   func(c *Config) { c.ConfigurationID = "0198b463-0000-4000-8000-0000000000aa" },
+		"bad uuid":                  func(c *Config) { c.ConfigurationID = credbound.MustParseUUID("00000000-0000-4000-8000-000000000000") },
+		"uuid v4":                   func(c *Config) { c.ConfigurationID = credbound.MustParseUUID("0198b463-0000-4000-8000-0000000000aa") },
 		"non-oidc kind github":      func(c *Config) { c.Kind = credbound.SSOProviderGitHub },
 		"non-oidc kind saml":        func(c *Config) { c.Kind = credbound.SSOProviderSAML },
 		"missing issuer":            func(c *Config) { c.IssuerURL = "" },

@@ -19,7 +19,7 @@ func TestSCIMConflictsNotFoundAndPagination(t *testing.T) {
 	if err := f.store.CreateSCIMConfiguration(ctx, configuration, credential, f.event("scim.configuration.duplicate")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("duplicate configuration = %v", err)
 	}
-	if _, err := f.store.SCIMConfiguration(ctx, "missing"); !errors.Is(err, credbound.ErrNotFound) {
+	if _, err := f.store.SCIMConfiguration(ctx, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("missing configuration = %v", err)
 	}
 	if _, _, err := f.store.SCIMConfigurationByCredentialPrefix(ctx, "missing"); !errors.Is(err, credbound.ErrNotFound) {
@@ -29,7 +29,7 @@ func TestSCIMConflictsNotFoundAndPagination(t *testing.T) {
 		t.Fatalf("duplicate credential id = %v", err)
 	}
 	missingConfiguration := configuration
-	missingConfiguration.ID, missingConfiguration.WorkspaceID = f.id(), "missing"
+	missingConfiguration.ID, missingConfiguration.WorkspaceID = f.id(), credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")
 	missingCredential := credential
 	missingCredential.ID, missingCredential.ConfigurationID, missingCredential.Prefix = f.id(), missingConfiguration.ID, "credential02"
 	if err := f.store.CreateSCIMConfiguration(ctx, missingConfiguration, missingCredential, f.event("scim.configuration.missing")); !errors.Is(err, credbound.ErrNotFound) {
@@ -43,18 +43,18 @@ func TestSCIMConflictsNotFoundAndPagination(t *testing.T) {
 	if err := f.store.SaveSCIMCredential(ctx, duplicatePrefix, f.event("scim.credential.duplicate")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("duplicate credential prefix = %v", err)
 	}
-	if err := f.store.TouchSCIMCredential(ctx, "missing", f.now, f.event("scim.credential.touch")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.TouchSCIMCredential(ctx, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6"), f.now, f.event("scim.credential.touch")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("missing credential touch = %v", err)
 	}
-	if err := f.store.DisableSCIMConfiguration(ctx, "missing", f.now, f.event("scim.configuration.disable")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.DisableSCIMConfiguration(ctx, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6"), f.now, f.event("scim.configuration.disable")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("missing configuration disable = %v", err)
 	}
 	missingUpdate := configuration
-	missingUpdate.ID = "missing"
+	missingUpdate.ID = credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")
 	if err := f.store.UpdateSCIMConfiguration(ctx, missingUpdate, nil, f.event("scim.configuration.update_missing")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("missing configuration update = %v", err)
 	}
-	if err := f.store.RevokeSCIMCredential(ctx, configuration.ID, "missing", f.now, f.event("scim.credential.revoke_missing")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.RevokeSCIMCredential(ctx, configuration.ID, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6"), f.now, f.event("scim.credential.revoke_missing")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("missing credential revoke = %v", err)
 	}
 	cancelled, cancel := context.WithCancel(ctx)
@@ -69,7 +69,7 @@ func TestSCIMConflictsNotFoundAndPagination(t *testing.T) {
 	makeUser := func(emailAddress, externalID string) (credbound.User, credbound.EmailAddress, credbound.Membership, credbound.SCIMUser) {
 		user := credbound.User{ID: f.id(), Email: emailAddress, DisplayName: emailAddress, CreatedAt: f.now, UpdatedAt: f.now}
 		email := f.email(user)
-		membership := credbound.Membership{WorkspaceID: f.workspace.ID, UserID: user.ID, Role: credbound.RoleMember, Status: credbound.MembershipActive, ProvisioningSource: configuration.ID, CreatedAt: f.now, UpdatedAt: f.now}
+		membership := credbound.Membership{WorkspaceID: f.workspace.ID, UserID: user.ID, Role: credbound.RoleMember, Status: credbound.MembershipActive, ProvisioningSource: configuration.ID.String(), CreatedAt: f.now, UpdatedAt: f.now}
 		link := credbound.SCIMUser{ID: f.id(), ConfigurationID: configuration.ID, UserID: user.ID, ExternalID: externalID, UserName: emailAddress, Active: true, CreatedAt: f.now, UpdatedAt: f.now}
 		return user, email, membership, link
 	}
@@ -83,7 +83,7 @@ func TestSCIMConflictsNotFoundAndPagination(t *testing.T) {
 		t.Fatalf("missing SCIM adoption user = %v", err)
 	}
 	wrongConfiguration := link1
-	wrongConfiguration.ID, wrongConfiguration.ConfigurationID = f.id(), "missing"
+	wrongConfiguration.ID, wrongConfiguration.ConfigurationID = f.id(), credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")
 	if err := f.store.CreateSCIMUser(ctx, user1, email1, membership1, wrongConfiguration, f.event("scim.user.configuration_missing")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("missing SCIM user configuration = %v", err)
 	}
@@ -94,7 +94,7 @@ func TestSCIMConflictsNotFoundAndPagination(t *testing.T) {
 	if err := f.store.CreateSCIMUser(ctx, user2, email2, membership2, link2, f.event("scim.user.two")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.store.SCIMUser(ctx, configuration.ID, "missing"); !errors.Is(err, credbound.ErrNotFound) {
+	if _, err := f.store.SCIMUser(ctx, configuration.ID, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("missing SCIM user = %v", err)
 	}
 	if _, err := f.store.SCIMUserByExternalID(ctx, configuration.ID, "missing"); !errors.Is(err, credbound.ErrNotFound) {
@@ -109,7 +109,7 @@ func TestSCIMConflictsNotFoundAndPagination(t *testing.T) {
 		t.Fatalf("conflicting SCIM update = %v", err)
 	}
 	missingLink := link2
-	missingLink.ID = "missing"
+	missingLink.ID = credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")
 	if err := f.store.UpdateSCIMUser(ctx, missingLink, membership2, false, f.event("scim.user.missing")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("missing SCIM update = %v", err)
 	}
@@ -122,7 +122,7 @@ func TestSCIMConflictsNotFoundAndPagination(t *testing.T) {
 		t.Fatalf("second SCIM page = %#v", second)
 	}
 
-	if err := f.store.UpsertSCIMGroup(ctx, credbound.SCIMGroup{ID: f.id(), ConfigurationID: "missing"}, nil, f.event("scim.group.missing_configuration")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.UpsertSCIMGroup(ctx, credbound.SCIMGroup{ID: f.id(), ConfigurationID: credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")}, nil, f.event("scim.group.missing_configuration")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("missing group configuration = %v", err)
 	}
 	group1 := credbound.SCIMGroup{ID: f.id(), ConfigurationID: configuration.ID, ExternalID: "group", DisplayName: "Group", CreatedAt: f.now, UpdatedAt: f.now}
@@ -134,7 +134,7 @@ func TestSCIMConflictsNotFoundAndPagination(t *testing.T) {
 	if err := f.store.UpsertSCIMGroup(ctx, group2, nil, f.event("scim.group.conflict")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("duplicate group external id = %v", err)
 	}
-	if _, err := f.store.SCIMGroup(ctx, configuration.ID, "missing"); !errors.Is(err, credbound.ErrNotFound) {
+	if _, err := f.store.SCIMGroup(ctx, configuration.ID, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("missing SCIM group = %v", err)
 	}
 	if _, err := f.store.SCIMGroupByExternalID(ctx, configuration.ID, "missing"); !errors.Is(err, credbound.ErrNotFound) {

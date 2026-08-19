@@ -33,8 +33,8 @@ func newStoreFixture(t *testing.T) *storeFixture {
 	return f
 }
 
-func (f *storeFixture) id() string {
-	id := fmt.Sprintf("0198b463-0000-7000-8000-%012x", f.next)
+func (f *storeFixture) id() credbound.UUID {
+	id := credbound.MustParseUUID(fmt.Sprintf("0198b463-0000-7000-8000-%012x", f.next))
 	f.next++
 	return id
 }
@@ -111,8 +111,8 @@ func TestCanceledOperations(t *testing.T) {
 	cancel()
 	password := credbound.PasswordCredential{UserID: f.user.ID}
 	factor := credbound.TOTPFactor{UserID: f.user.ID}
-	passkey := credbound.Passkey{ID: "passkey", UserID: f.user.ID}
-	pat := credbound.PAT{ID: "pat", UserID: f.user.ID}
+	passkey := credbound.Passkey{ID: credbound.MustParseUUID("0198b463-0000-7000-8000-4b949c130904"), UserID: f.user.ID}
+	pat := credbound.PAT{ID: credbound.MustParseUUID("0198b463-0000-7000-8000-68d753f055b1"), UserID: f.user.ID}
 	membership := credbound.Membership{WorkspaceID: f.workspace.ID, UserID: f.user.ID}
 	admin := credbound.InstanceAdministrator{UserID: f.user.ID}
 	email := f.email(f.user)
@@ -257,7 +257,7 @@ func TestConflictsNotFoundAndAuditFailures(t *testing.T) {
 		t.Fatalf("duplicate email = %v", err)
 	}
 	missingWorkspace := membership2
-	missingWorkspace.WorkspaceID = "missing"
+	missingWorkspace.WorkspaceID = credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")
 	missingWorkspace.UserID = duplicateEmail.ID
 	missingUser := credbound.User{ID: duplicateEmail.ID, Email: "other@example.com"}
 	if err := f.store.CreateUser(ctx, missingUser, f.email(missingUser), password2, missingWorkspace, f.event("missing.workspace")); !errors.Is(err, credbound.ErrNotFound) {
@@ -267,13 +267,13 @@ func TestConflictsNotFoundAndAuditFailures(t *testing.T) {
 	if _, err := f.store.UserByEmail(ctx, "missing@example.com"); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
-	if _, err := f.store.UserByID(ctx, "missing"); !errors.Is(err, credbound.ErrNotFound) {
+	if _, err := f.store.UserByID(ctx, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
-	if _, err := f.store.PasswordByUserID(ctx, "missing"); !errors.Is(err, credbound.ErrNotFound) {
+	if _, err := f.store.PasswordByUserID(ctx, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
-	if err := f.store.RehashPassword(ctx, credbound.PasswordCredential{UserID: "missing"}, "old", f.event("password.missing")); !errors.Is(err, credbound.ErrConflict) {
+	if err := f.store.RehashPassword(ctx, credbound.PasswordCredential{UserID: credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")}, "old", f.event("password.missing")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatal(err)
 	}
 
@@ -292,10 +292,10 @@ func TestConflictsNotFoundAndAuditFailures(t *testing.T) {
 	if err := f.store.ActivateTOTP(ctx, active, nil, f.event("totp.active")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("active activation = %v", err)
 	}
-	if used, err := f.store.UseTOTP(ctx, "missing", 1, f.event("totp.missing")); used || !errors.Is(err, credbound.ErrNotFound) {
+	if used, err := f.store.UseTOTP(ctx, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6"), 1, f.event("totp.missing")); used || !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("missing TOTP = %v, %v", used, err)
 	}
-	if err := f.store.DisableTOTP(ctx, "missing", f.event("totp.disable.missing")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.DisableTOTP(ctx, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6"), f.event("totp.disable.missing")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
 
@@ -309,13 +309,13 @@ func TestConflictsNotFoundAndAuditFailures(t *testing.T) {
 	if err := f.store.SavePasskey(ctx, duplicateCredential, f.event("passkey.duplicate")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("duplicate credential = %v", err)
 	}
-	if err := f.store.SavePasskey(ctx, credbound.Passkey{ID: f.id(), UserID: "missing", CredentialID: []byte("other")}, f.event("passkey.user.missing")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.SavePasskey(ctx, credbound.Passkey{ID: f.id(), UserID: credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6"), CredentialID: []byte("other")}, f.event("passkey.user.missing")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
 	if err := f.store.TouchPasskey(ctx, user2.ID, []byte("missing"), nil, f.now, f.event("passkey.touch.missing")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
-	if err := f.store.DeletePasskey(ctx, user2.ID, "missing", f.event("passkey.delete.missing")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.DeletePasskey(ctx, user2.ID, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6"), f.event("passkey.delete.missing")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
 
@@ -331,35 +331,35 @@ func TestConflictsNotFoundAndAuditFailures(t *testing.T) {
 	if err := f.store.CreatePAT(ctx, duplicatePrefix, f.event("pat.prefix.conflict")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatal(err)
 	}
-	if err := f.store.CreatePAT(ctx, credbound.PAT{ID: f.id(), UserID: "missing", Prefix: "prefix000002"}, f.event("pat.user.missing")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.CreatePAT(ctx, credbound.PAT{ID: f.id(), UserID: credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6"), Prefix: "prefix000002"}, f.event("pat.user.missing")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
 	if _, err := f.store.PATByPrefix(ctx, "missing"); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
-	if err := f.store.TouchPAT(ctx, "missing", f.now, f.event("pat.touch.missing")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.TouchPAT(ctx, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6"), f.now, f.event("pat.touch.missing")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
 	if err := f.store.RevokePAT(ctx, f.user.ID, pat.ID, f.now, f.event("pat.owner.mismatch")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
 
-	if err := f.store.UpsertMembership(ctx, credbound.Membership{WorkspaceID: "missing", UserID: user2.ID}, f.event("membership.workspace.missing")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.UpsertMembership(ctx, credbound.Membership{WorkspaceID: credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6"), UserID: user2.ID}, f.event("membership.workspace.missing")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
-	if err := f.store.UpsertMembership(ctx, credbound.Membership{WorkspaceID: f.workspace.ID, UserID: "missing"}, f.event("membership.user.missing")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.UpsertMembership(ctx, credbound.Membership{WorkspaceID: f.workspace.ID, UserID: credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")}, f.event("membership.user.missing")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
-	if _, err := f.store.Membership(ctx, f.workspace.ID, "missing"); !errors.Is(err, credbound.ErrNotFound) {
+	if _, err := f.store.Membership(ctx, f.workspace.ID, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
-	if err := f.store.SetInstanceRole(ctx, credbound.InstanceAdministrator{UserID: "missing"}, f.event("admin.user.missing")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.SetInstanceRole(ctx, credbound.InstanceAdministrator{UserID: credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")}, f.event("admin.user.missing")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
-	if _, err := f.store.InstanceAdministrator(ctx, "missing"); !errors.Is(err, credbound.ErrNotFound) {
+	if _, err := f.store.InstanceAdministrator(ctx, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
-	if err := f.store.RemoveInstanceRole(ctx, "missing", f.event("admin.missing")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.RemoveInstanceRole(ctx, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6"), f.event("admin.missing")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatal(err)
 	}
 	if err := f.store.SetInstanceRole(ctx, credbound.InstanceAdministrator{UserID: f.user.ID, Role: credbound.InstanceRoleDeveloper, CreatedAt: f.now, UpdatedAt: f.now}, f.event("admin.last.root.demote")); !errors.Is(err, credbound.ErrConflict) {
@@ -395,11 +395,11 @@ func TestConflictsNotFoundAndAuditFailures(t *testing.T) {
 // mutable value.
 func TestCursorOrderingAndCloneHelpers(t *testing.T) {
 	now := time.Now().UTC()
-	cursor, err := decodeCursor(encodeCursor(now, "b"))
-	if err != nil || !afterCursor(now, "a", cursor) || afterCursor(now, "c", cursor) {
+	cursor, err := decodeCursor(encodeCursor(now, credbound.MustParseUUID("0198b463-0000-7000-8000-00000000000b")))
+	if err != nil || !afterCursor(now, credbound.MustParseUUID("0198b463-0000-7000-8000-00000000000a"), cursor) || afterCursor(now, credbound.MustParseUUID("0198b463-0000-7000-8000-00000000000c"), cursor) {
 		t.Fatalf("cursor ordering = %#v, %v", cursor, err)
 	}
-	if !newer(now, "b", now, "a") || newer(now, "a", now, "b") {
+	if !newer(now, credbound.MustParseUUID("0198b463-0000-7000-8000-00000000000b"), now, credbound.MustParseUUID("0198b463-0000-7000-8000-00000000000a")) || newer(now, credbound.MustParseUUID("0198b463-0000-7000-8000-00000000000a"), now, credbound.MustParseUUID("0198b463-0000-7000-8000-00000000000b")) {
 		t.Fatal("stable id ordering is incorrect")
 	}
 	if _, err := decodeCursor("e30"); !errors.Is(err, credbound.ErrInvalidInput) {

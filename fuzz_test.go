@@ -29,7 +29,7 @@ func FuzzParseSecretToken(f *testing.F) {
 	f.Fuzz(func(t *testing.T, prefix, raw string) {
 		id, ok := parseSecretToken(prefix, raw)
 		if !ok {
-			if id != "" {
+			if id != (UUID{}) {
 				t.Fatalf("rejected token returned the identifier %q", id)
 			}
 			return
@@ -37,10 +37,10 @@ func FuzzParseSecretToken(f *testing.F) {
 		if !validUUIDv7(id) {
 			t.Fatalf("accepted token carries the non-UUIDv7 identifier %q", id)
 		}
-		if !strings.HasPrefix(raw, prefix+"_"+id+"_") {
-			t.Fatalf("accepted token %q does not have the shape %q", raw, prefix+"_"+id+"_…")
+		if !strings.HasPrefix(raw, prefix+"_"+id.String()+"_") {
+			t.Fatalf("accepted token %q does not have the shape %q", raw, prefix+"_"+id.String()+"_…")
 		}
-		secret := raw[len(prefix)+len(id)+2:]
+		secret := raw[len(prefix)+len(id.String())+2:]
 		decoded, err := base64.RawURLEncoding.DecodeString(secret)
 		if err != nil || len(decoded) != 32 {
 			t.Fatalf("accepted token carries a %d-byte secret (%v)", len(decoded), err)
@@ -173,27 +173,36 @@ func FuzzValidUUIDv7(f *testing.F) {
 	f.Add("0198b463000070008000000000000001")
 
 	f.Fuzz(func(t *testing.T, raw string) {
-		if !validUUIDv7(raw) {
+		// Parsing is what rejects a malformed identifier now; validUUIDv7 only
+		// judges the version and variant of one that parsed.
+		id, err := ParseUUID(raw)
+		if err != nil {
 			return
 		}
-		if len(raw) != 36 || raw != strings.ToLower(raw) {
-			t.Fatalf("accepted identifier %q is not the canonical form", raw)
+		if !validUUIDv7(id) {
+			return
 		}
-		if raw[14] != '7' {
+		// Parsing accepts either case and several spellings; String is what
+		// normalizes, so the invariants below hold on the rendered form.
+		canonical := id.String()
+		if len(canonical) != 36 {
+			t.Fatalf("rendered identifier %q is not 36 characters", canonical)
+		}
+		if id[6]&0xf0 != 0x70 {
 			t.Fatalf("accepted identifier %q is not version 7", raw)
 		}
-		if !strings.ContainsRune("89ab", rune(raw[19])) {
-			t.Fatalf("accepted identifier %q has the variant nibble %q", raw, raw[19])
+		if !strings.ContainsRune("89ab", rune(canonical[19])) {
+			t.Fatalf("accepted identifier %q has the variant nibble %q", canonical, canonical[19])
 		}
-		for index, char := range raw {
+		for index, char := range canonical {
 			if index == 8 || index == 13 || index == 18 || index == 23 {
 				if char != '-' {
-					t.Fatalf("accepted identifier %q is misgrouped", raw)
+					t.Fatalf("rendered identifier %q is misgrouped", canonical)
 				}
 				continue
 			}
 			if !strings.ContainsRune("0123456789abcdef", char) {
-				t.Fatalf("accepted identifier %q holds the non-hex rune %q", raw, char)
+				t.Fatalf("rendered identifier %q holds the non-hex rune %q", canonical, char)
 			}
 		}
 	})

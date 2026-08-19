@@ -12,10 +12,12 @@ sql:
         emit_empty_slices: false
         emit_json_tags: true
         overrides:
+          # dbtype.UUID is pgx pgtype.UUID: it carries the database interfaces the
+          # identifier type itself does not — raw 16 bytes plus a Valid flag, so one
+          # type covers both nullable and non-nullable columns, and it needs no
+          # change if the store later moves to pgx's native protocol.
           - db_type: uuid
-            go_type: string
+            go_type: &uuid "github.com/deepteams/credbound/internal/dbtype.UUID"
           - db_type: uuid
             nullable: true
-            go_type:
-              import: database/sql
-              type: NullString
+            go_type: *uuid

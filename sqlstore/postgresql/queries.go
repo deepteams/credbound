@@ -3,6 +3,8 @@ package postgresql
 import (
 	"fmt"
 	"strings"
+
+	"github.com/deepteams/credbound"
 )
 
 // The statements sqlc cannot generate: the paginated reads, which stream
@@ -112,16 +114,16 @@ ORDER BY created_at DESC, id DESC LIMIT $4`
 // workspacesQuery assembles the workspace listing. Both the membership filter
 // and the cursor are optional, so the clauses are added in Go: a guard left in
 // SQL would cost the planner the index on either half.
-func workspacesQuery(userID string, after cursor, limit int) (string, []any) {
+func workspacesQuery(userID credbound.UUID, after cursor, limit int) (string, []any) {
 	query := `SELECT w.id, w.name, w.created_at, w.updated_at, w.disabled_at, w.require_mfa
 FROM credbound.workspaces w`
 	args := []any{}
 	var clauses []string
-	if userID != "" {
+	if userID != (credbound.UUID{}) {
 		args = append(args, userID)
 		clauses = append(clauses, fmt.Sprintf("EXISTS (SELECT 1 FROM credbound.memberships m WHERE m.workspace_id = w.id AND m.user_id = $%d::uuid)", len(args)))
 	}
-	if after.ID != "" {
+	if after.ID != (credbound.UUID{}) {
 		args = append(args, after.Time, after.ID)
 		clauses = append(clauses, fmt.Sprintf("(w.created_at, w.id) < ($%d, $%d::uuid)", len(args)-1, len(args)))
 	}
@@ -135,16 +137,16 @@ FROM credbound.workspaces w`
 // auditEventsQuery assembles the audit listing, scoped to a workspace when
 // workspaceID is set. Same reasoning as workspacesQuery: optional clauses are
 // added rather than guarded.
-func auditEventsQuery(workspaceID string, after cursor, limit int) (string, []any) {
+func auditEventsQuery(workspaceID credbound.UUID, after cursor, limit int) (string, []any) {
 	query := `SELECT id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash
 FROM credbound.audit_events`
 	args := []any{}
 	var clauses []string
-	if workspaceID != "" {
+	if workspaceID != (credbound.UUID{}) {
 		args = append(args, workspaceID)
 		clauses = append(clauses, fmt.Sprintf("workspace_id = $%d::uuid", len(args)))
 	}
-	if after.ID != "" {
+	if after.ID != (credbound.UUID{}) {
 		args = append(args, after.Time, after.ID)
 		clauses = append(clauses, fmt.Sprintf("(occurred_at, id) < ($%d, $%d::uuid)", len(args)-1, len(args)))
 	}

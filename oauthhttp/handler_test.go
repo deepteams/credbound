@@ -79,7 +79,7 @@ type handlerFixture struct {
 	manager   *credbound.Manager
 	handler   *Handler
 	actor     credbound.Authentication
-	issuerID  string
+	issuerID  credbound.UUID
 	clientID  string
 	consent   credbound.OAuthConsent
 	verifier  string
@@ -310,8 +310,8 @@ func TestHandlerProtocolErrorsAndDCR(t *testing.T) {
 	if id, secret, inBody, err := clientCredentials(formOnly, url.Values{"client_id": {"form"}, "client_secret": {"form-secret"}}); err != nil || id != "form" || secret != "form-secret" || !inBody {
 		t.Fatalf("form credentials = %q, %q, %v, %v", id, secret, inBody, err)
 	}
-	contextRequest := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(WithAuthentication(context.Background(), credbound.OAuthAuthentication{UserID: "user"}))
-	if value, ok := AuthenticationFromContext(contextRequest); !ok || value.UserID != "user" {
+	contextRequest := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(WithAuthentication(context.Background(), credbound.OAuthAuthentication{UserID: credbound.MustParseUUID("0198b463-0000-7000-8000-000000000001")}))
+	if value, ok := AuthenticationFromContext(contextRequest); !ok || value.UserID != credbound.MustParseUUID("0198b463-0000-7000-8000-000000000001") {
 		t.Fatalf("context authentication = %#v, %v", value, ok)
 	}
 	// The OIDC max_age parameter: absent means no constraint, zero forces
@@ -431,7 +431,7 @@ func TestHandlerAdditionalProtocolBranches(t *testing.T) {
 		})
 	}
 	response = httptest.NewRecorder()
-	f.handler.writeAuthorizationError(response, "://bad", "state", "invalid_request", "bad")
+	f.handler.writeAuthorizationError(response, "://bad", "state", "invalid_request", "")
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("invalid authorization redirect = %d", response.Code)
 	}

@@ -15,7 +15,7 @@ const invitationPrefix = "cbi"
 // pre-assigned role and returns the single-use token once. The invitee either
 // accepts it from an existing authenticated account owning that address, or
 // registers a new account with it.
-func (m *Manager) InviteToWorkspace(ctx context.Context, actor Authentication, workspaceID string, input InviteToWorkspaceInput) (_ IssuedWorkspaceInvitation, err error) {
+func (m *Manager) InviteToWorkspace(ctx context.Context, actor Authentication, workspaceID UUID, input InviteToWorkspaceInput) (_ IssuedWorkspaceInvitation, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "workspace.invitation.create", started, err) }()
 	if err := m.requireStepUp(ctx, actor, "workspace.invitation.create"); err != nil {
@@ -54,13 +54,13 @@ func (m *Manager) InviteToWorkspace(ctx context.Context, actor Authentication, w
 	if err != nil {
 		return IssuedWorkspaceInvitation{}, err
 	}
-	raw := invitationPrefix + "_" + id + "_" + base64.RawURLEncoding.EncodeToString(secret)
+	raw := invitationPrefix + "_" + id.String() + "_" + base64.RawURLEncoding.EncodeToString(secret)
 	now := m.now()
 	invitation := WorkspaceInvitation{
 		ID: id, WorkspaceID: workspaceID, Email: email, Role: role, InvitedBy: actor.UserID,
 		Digest: m.tokenDigest("workspace-invitation:" + raw), CreatedAt: now, ExpiresAt: now.Add(m.invitationTTL),
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "workspace.invitation.create", "workspace_invitation", id, workspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "workspace.invitation.create", "workspace_invitation", id.String(), workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return IssuedWorkspaceInvitation{}, err
 	}
@@ -112,7 +112,7 @@ func (m *Manager) AcceptInvitation(ctx context.Context, actor Authentication, ra
 		WorkspaceID: invitation.WorkspaceID, UserID: actor.UserID, Role: invitation.Role,
 		Status: MembershipActive, ProvisioningSource: ProvisioningSourceLocal, CreatedAt: now, UpdatedAt: now,
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "workspace.invitation.accept", "workspace_invitation", invitation.ID, invitation.WorkspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "workspace.invitation.accept", "workspace_invitation", invitation.ID.String(), invitation.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return Membership{}, err
 	}
@@ -199,7 +199,7 @@ func (m *Manager) RegisterFromInvitation(ctx context.Context, raw string, input 
 		WorkspaceID: invitation.WorkspaceID, UserID: userID, Role: invitation.Role,
 		Status: MembershipActive, ProvisioningSource: ProvisioningSourceLocal, CreatedAt: now, UpdatedAt: now,
 	}
-	event, err := m.newAudit(ctx, userID, "workspace.invitation.register", "workspace_invitation", invitation.ID, invitation.WorkspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, userID, "workspace.invitation.register", "workspace_invitation", invitation.ID.String(), invitation.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, User{}, err
 	}
@@ -240,7 +240,7 @@ func (m *Manager) RegisterFromInvitation(ctx context.Context, raw string, input 
 
 // RevokeInvitation withdraws a pending invitation so its token can no longer
 // be accepted.
-func (m *Manager) RevokeInvitation(ctx context.Context, actor Authentication, workspaceID, invitationID string) (err error) {
+func (m *Manager) RevokeInvitation(ctx context.Context, actor Authentication, workspaceID, invitationID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "workspace.invitation.revoke", started, err) }()
 	if err := m.requireStepUp(ctx, actor, "workspace.invitation.revoke"); err != nil {
@@ -260,7 +260,7 @@ func (m *Manager) RevokeInvitation(ctx context.Context, actor Authentication, wo
 	if invitation.WorkspaceID != workspaceID {
 		return ErrNotFound
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "workspace.invitation.revoke", "workspace_invitation", invitationID, workspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "workspace.invitation.revoke", "workspace_invitation", invitationID.String(), workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -284,7 +284,7 @@ func (m *Manager) RevokeInvitation(ctx context.Context, actor Authentication, wo
 
 // WorkspaceInvitations streams the workspace's invitations without their
 // digests.
-func (m *Manager) WorkspaceInvitations(ctx context.Context, actor Authentication, workspaceID string, page PageRequest) iter.Seq2[PageEvent[WorkspaceInvitation], error] {
+func (m *Manager) WorkspaceInvitations(ctx context.Context, actor Authentication, workspaceID UUID, page PageRequest) iter.Seq2[PageEvent[WorkspaceInvitation], error] {
 	if err := m.AuthorizePermission(ctx, actor, workspaceID, PermissionWorkspaceUsersRead); err != nil {
 		return errorSeq[PageEvent[WorkspaceInvitation]](err)
 	}
@@ -320,19 +320,19 @@ func (m *Manager) usableInvitation(ctx context.Context, raw, action string) (Wor
 		return WorkspaceInvitation{}, lookupErr
 	}
 	if invitation.RevokedAt != nil || invitation.AcceptedAt != nil {
-		if auditErr := m.appendAuthenticationAudit(ctx, "", action, AuditFailed, "invalid_credentials"); auditErr != nil {
+		if auditErr := m.appendAuthenticationAudit(ctx, UUID{}, action, AuditFailed, "invalid_credentials"); auditErr != nil {
 			return WorkspaceInvitation{}, auditErr
 		}
 		return WorkspaceInvitation{}, ErrInvalidCredentials
 	}
 	if !m.now().Before(invitation.ExpiresAt) {
-		if auditErr := m.appendAuthenticationAudit(ctx, "", action, AuditFailed, "expired"); auditErr != nil {
+		if auditErr := m.appendAuthenticationAudit(ctx, UUID{}, action, AuditFailed, "expired"); auditErr != nil {
 			return WorkspaceInvitation{}, auditErr
 		}
 		return WorkspaceInvitation{}, ErrExpired
 	}
 	if !m.matchTokenDigest(invitation.Digest, "workspace-invitation:"+raw) {
-		if auditErr := m.appendAuthenticationAudit(ctx, "", action, AuditFailed, "invalid_credentials"); auditErr != nil {
+		if auditErr := m.appendAuthenticationAudit(ctx, UUID{}, action, AuditFailed, "invalid_credentials"); auditErr != nil {
 			return WorkspaceInvitation{}, auditErr
 		}
 		return WorkspaceInvitation{}, ErrInvalidCredentials
@@ -350,7 +350,7 @@ func (m *Manager) usableInvitation(ctx context.Context, raw, action string) (Wor
 
 // ownsVerifiedEmail reports whether the user owns the address as a verified
 // email.
-func (m *Manager) ownsVerifiedEmail(ctx context.Context, userID, address string) (bool, error) {
+func (m *Manager) ownsVerifiedEmail(ctx context.Context, userID UUID, address string) (bool, error) {
 	for email, err := range m.userEmails(ctx, userID) {
 		if err != nil {
 			return false, err

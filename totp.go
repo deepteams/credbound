@@ -38,11 +38,11 @@ func (m *Manager) BeginTOTPEnrollment(ctx context.Context, actor Authentication)
 	}
 	now := m.now()
 	factor := TOTPFactor{UserID: actor.UserID, EncryptedSecret: encrypted, CreatedAt: now, UpdatedAt: now}
-	event, err := m.newAudit(ctx, actor.UserID, "totp.enrollment.begin", "user", actor.UserID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "totp.enrollment.begin", "user", actor.UserID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return TOTPEnrollment{}, err
 	}
-	meta, err := m.newEventMeta(EventTOTPEnrollmentStarted, "auth.totp.enroll.begin", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventTOTPEnrollmentStarted, "auth.totp.enroll.begin", actor.UserID, UUID{}, event)
 	if err != nil {
 		return TOTPEnrollment{}, err
 	}
@@ -96,11 +96,11 @@ func (m *Manager) ConfirmTOTPEnrollment(ctx context.Context, actor Authenticatio
 	// a full second factor through VerifyTOTP within its remaining window.
 	factor.LastUsedStep = step
 	factor.UpdatedAt = m.now()
-	event, err := m.newAudit(ctx, actor.UserID, "totp.enrollment.confirm", "user", actor.UserID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "totp.enrollment.confirm", "user", actor.UserID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return nil, err
 	}
-	meta, err := m.newEventMeta(EventTOTPActivated, "auth.totp.enroll.confirm", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventTOTPActivated, "auth.totp.enroll.confirm", actor.UserID, UUID{}, event)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +128,7 @@ func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code str
 	}
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.totp.verify", started, err) }()
-	if actor.UserID == "" || !actor.Interactive() {
+	if actor.UserID == (UUID{}) || !actor.Interactive() {
 		return Authentication{}, ErrUnauthorized
 	}
 	if err := m.requireUnlocked(ctx, actor.UserID, "auth.totp"); err != nil {
@@ -150,7 +150,7 @@ func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code str
 	normalized := strings.TrimSpace(code)
 	step, valid := m.totp.Validate(normalized, secret, m.now())
 	if valid {
-		event, eventErr := m.newAudit(ctx, actor.UserID, "auth.totp", "user", actor.UserID, "", AuditSucceeded, "")
+		event, eventErr := m.newAudit(ctx, actor.UserID, "auth.totp", "user", actor.UserID.String(), UUID{}, AuditSucceeded, "")
 		if eventErr != nil {
 			return Authentication{}, eventErr
 		}
@@ -163,7 +163,7 @@ func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code str
 			if auditErr != nil {
 				return Authentication{}, auditErr
 			}
-			meta, metaErr := m.newEventMeta(EventTOTPReplayRejected, "auth.totp.verify", actor.UserID, "", failedAudit)
+			meta, metaErr := m.newEventMeta(EventTOTPReplayRejected, "auth.totp.verify", actor.UserID, UUID{}, failedAudit)
 			if metaErr == nil {
 				rejected := TOTPReplayRejectedEvent{EventMeta: meta, UserID: actor.UserID}
 				m.events.emit(ctx, EventTOTPReplayRejected, func(listener EventListener) error { return listener.OnTOTPReplayRejected(ctx, rejected) })
@@ -172,7 +172,7 @@ func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code str
 			return Authentication{}, ErrInvalidCredentials
 		}
 		promoted := m.promoteTOTP(actor)
-		meta, metaErr := m.newEventMeta(EventTOTPVerified, "auth.totp.verify", actor.UserID, "", event)
+		meta, metaErr := m.newEventMeta(EventTOTPVerified, "auth.totp.verify", actor.UserID, UUID{}, event)
 		if metaErr == nil {
 			verified := TOTPVerifiedEvent{EventMeta: meta, UserID: actor.UserID}
 			m.events.emit(ctx, EventTOTPVerified, func(listener EventListener) error { return listener.OnTOTPVerified(ctx, verified) })
@@ -181,7 +181,7 @@ func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code str
 		return promoted, nil
 	}
 
-	event, eventErr := m.newAudit(ctx, actor.UserID, "auth.recovery_code", "user", actor.UserID, "", AuditSucceeded, "")
+	event, eventErr := m.newAudit(ctx, actor.UserID, "auth.recovery_code", "user", actor.UserID.String(), UUID{}, AuditSucceeded, "")
 	if eventErr != nil {
 		return Authentication{}, eventErr
 	}
@@ -202,7 +202,7 @@ func (m *Manager) VerifyTOTP(ctx context.Context, actor Authentication, code str
 	}
 	if used {
 		promoted := m.promoteTOTP(actor)
-		meta, metaErr := m.newEventMeta(EventRecoveryCodeConsumed, "auth.totp.verify", actor.UserID, "", event)
+		meta, metaErr := m.newEventMeta(EventRecoveryCodeConsumed, "auth.totp.verify", actor.UserID, UUID{}, event)
 		if metaErr == nil {
 			consumed := RecoveryCodeConsumedEvent{EventMeta: meta, UserID: actor.UserID}
 			m.events.emit(ctx, EventRecoveryCodeConsumed, func(listener EventListener) error { return listener.OnRecoveryCodeConsumed(ctx, consumed) })
@@ -235,11 +235,11 @@ func (m *Manager) DisableTOTP(ctx context.Context, actor Authentication, code st
 	if err := m.requireStepUp(ctx, promoted, "auth.totp.disable"); err != nil {
 		return err
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "totp.disable", "user", actor.UserID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "totp.disable", "user", actor.UserID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
-	meta, err := m.newEventMeta(EventTOTPDisabled, "auth.totp.disable", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventTOTPDisabled, "auth.totp.disable", actor.UserID, UUID{}, event)
 	if err != nil {
 		return err
 	}
@@ -282,11 +282,11 @@ func (m *Manager) RegenerateRecoveryCodes(ctx context.Context, actor Authenticat
 	if err != nil {
 		return nil, err
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "totp.recovery.regenerate", "user", actor.UserID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "totp.recovery.regenerate", "user", actor.UserID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return nil, err
 	}
-	meta, err := m.newEventMeta(EventRecoveryCodesRegenerated, "auth.totp.recovery.regenerate", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventRecoveryCodesRegenerated, "auth.totp.recovery.regenerate", actor.UserID, UUID{}, event)
 	if err != nil {
 		return nil, err
 	}
@@ -305,13 +305,13 @@ func (m *Manager) RegenerateRecoveryCodes(ctx context.Context, actor Authenticat
 // TOTPStatus reports whether a user has a TOTP factor, whether it is active,
 // and how many recovery codes remain unused. It never exposes the secret.
 // Reading another user requires admin users read permission.
-func (m *Manager) TOTPStatus(ctx context.Context, actor Authentication, userID string) (_ TOTPStatus, err error) {
+func (m *Manager) TOTPStatus(ctx context.Context, actor Authentication, userID UUID) (_ TOTPStatus, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.totp.status", started, err) }()
-	if actor.UserID == "" {
+	if actor.UserID == (UUID{}) {
 		return TOTPStatus{}, ErrUnauthorized
 	}
-	if userID == "" {
+	if userID == (UUID{}) {
 		userID = actor.UserID
 	}
 	if userID == actor.UserID {
@@ -347,7 +347,7 @@ func (m *Manager) decryptTOTPSecret(factor TOTPFactor) (string, error) {
 	return string(plaintext), nil
 }
 
-func (m *Manager) generateRecoveryCodes(userID string) ([]string, []RecoveryCode, error) {
+func (m *Manager) generateRecoveryCodes(userID UUID) ([]string, []RecoveryCode, error) {
 	codes := make([]string, 0, recoveryCodeCount)
 	records := make([]RecoveryCode, 0, recoveryCodeCount)
 	for range recoveryCodeCount {

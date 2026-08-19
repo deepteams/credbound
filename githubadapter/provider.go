@@ -71,7 +71,7 @@ var (
 type Config struct {
 	// ConfigurationID is the host-chosen UUIDv7 under which credbound
 	// indexes this provider and its linked identities. Required.
-	ConfigurationID string
+	ConfigurationID credbound.UUID
 	// ClientID is the OAuth app's client identifier. Required.
 	ClientID string
 	// ClientSecret authenticates the client at the token endpoint.
@@ -103,7 +103,7 @@ type Config struct {
 // stateless across ceremonies: everything a Finish needs travels inside the
 // opaque Session bytes that credbound seals into its continuation.
 type Provider struct {
-	configurationID string
+	configurationID credbound.UUID
 	clientID        string
 	clientSecret    string
 	redirectURL     string
@@ -173,7 +173,7 @@ func New(config Config) (*Provider, error) {
 }
 
 // ConfigurationID implements credbound.SSOProvider.
-func (p *Provider) ConfigurationID() string { return p.configurationID }
+func (p *Provider) ConfigurationID() credbound.UUID { return p.configurationID }
 
 // Kind implements credbound.SSOProvider.
 func (p *Provider) Kind() credbound.SSOProviderKind { return credbound.SSOProviderGitHub }
@@ -540,22 +540,10 @@ func validEndpointURL(value string) error {
 
 // validUUIDv7 mirrors credbound's registration rule so misconfiguration
 // surfaces at adapter construction instead of at credbound.New.
-func validUUIDv7(value string) bool {
-	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' || value[14] != '7' {
-		return false
-	}
-	if !strings.ContainsRune("89ab", rune(value[19])) {
-		return false
-	}
-	for index, character := range value {
-		if index == 8 || index == 13 || index == 18 || index == 23 {
-			continue
-		}
-		if !strings.ContainsRune("0123456789abcdef", character) {
-			return false
-		}
-	}
-	return true
+// validUUIDv7 reports whether the identifier was minted by Credbound: present,
+// version 7, and carrying the RFC 9562 variant.
+func validUUIDv7(id credbound.UUID) bool {
+	return id[6]&0xf0 == 0x70 && id[8]&0xc0 == 0x80
 }
 
 func truncate(value string, limit int) string {

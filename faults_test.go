@@ -119,7 +119,7 @@ func TestCreateUserAndAuditAuthorizationFailures(t *testing.T) {
 	ctx := context.Background()
 	stepUp := aal2(authn.UserID, f.now)
 	invalid := []credbound.CreateUserInput{
-		{Email: "bad", DisplayName: "Name", Password: "another secure password", Role: credbound.RoleMember},
+		{Email: "00000000-0000-4000-8000-000000000000", DisplayName: "Name", Password: "another secure password", Role: credbound.RoleMember},
 		{Email: "new@example.com", Password: "another secure password", Role: credbound.RoleMember},
 		{Email: "new@example.com", DisplayName: "Name", Password: "short", Role: credbound.RoleMember},
 		{Email: "new@example.com", DisplayName: "Name", Password: "another secure password", Role: credbound.Role("owner")},
@@ -212,12 +212,12 @@ func TestMutationAndAuthorizationInfrastructureFailures(t *testing.T) {
 	fault.replacePasswordErr = nil
 
 	fault.userByIDErr = errors.New("user lookup offline")
-	if err := manager.SetInstanceRole(ctx, stepUp, credbound.TrustedRequest{}, "target", credbound.InstanceRoleDeveloper); err == nil || err.Error() != "user lookup offline" {
+	if err := manager.SetInstanceRole(ctx, stepUp, credbound.TrustedRequest{}, credbound.MustParseUUID("0198b463-0000-7000-8000-34a04005bcaf"), credbound.InstanceRoleDeveloper); err == nil || err.Error() != "user lookup offline" {
 		t.Fatalf("set instance role lookup failure = %v", err)
 	}
 	fault.userByIDErr = nil
 	fault.removeRoleErr = credbound.ErrAuditUnavailable
-	if err := manager.RemoveInstanceRole(ctx, stepUp, credbound.TrustedRequest{}, "target"); !errors.Is(err, credbound.ErrAuditUnavailable) {
+	if err := manager.RemoveInstanceRole(ctx, stepUp, credbound.TrustedRequest{}, credbound.MustParseUUID("0198b463-0000-7000-8000-34a04005bcaf")); !errors.Is(err, credbound.ErrAuditUnavailable) {
 		t.Fatalf("remove role audit failure = %v", err)
 	}
 }
@@ -268,7 +268,7 @@ func TestPATPasskeyAndTOTPFailurePaths(t *testing.T) {
 	}
 	fault.useTOTPErr = nil
 	fault.consumeRecoveryErr = credbound.ErrAuditUnavailable
-	if _, err := manager.VerifyTOTP(ctx, authn, "invalid"); !errors.Is(err, credbound.ErrAuditUnavailable) {
+	if _, err := manager.VerifyTOTP(ctx, authn, "00000000-0000-4000-8000-000000000000"); !errors.Is(err, credbound.ErrAuditUnavailable) {
 		t.Fatalf("recovery audit failure = %v", err)
 	}
 	fault.consumeRecoveryErr = nil
@@ -291,7 +291,7 @@ func TestPATPasskeyAndTOTPFailurePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	passkeys.finishAuthenticationErr = errors.New("invalid assertion")
-	if _, err := manager.FinishPasskeyAuthentication(ctx, login.Continuation, []byte("bad")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+	if _, err := manager.FinishPasskeyAuthentication(ctx, login.Continuation, []byte("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("passkey finish authentication failure = %v", err)
 	}
 	passkeys.finishAuthenticationErr = nil
@@ -375,12 +375,12 @@ func TestSCIMInfrastructureFailures(t *testing.T) {
 		t.Fatal("SCIM user update failure ignored")
 	}
 	fault.scimOperation = "group.upsert"
-	groupInput := credbound.SCIMGroupInput{ExternalID: "group", DisplayName: "Group", MemberIDs: []string{link.ID}}
-	if _, err := manager.UpsertSCIMGroup(ctx, principal, "", groupInput); err == nil {
+	groupInput := credbound.SCIMGroupInput{ExternalID: "group", DisplayName: "Group", MemberIDs: []credbound.UUID{link.ID}}
+	if _, err := manager.UpsertSCIMGroup(ctx, principal, credbound.UUID{}, groupInput); err == nil {
 		t.Fatal("SCIM group storage failure ignored")
 	}
 	fault.scimOperation = ""
-	group, err := manager.UpsertSCIMGroup(ctx, principal, "", groupInput)
+	group, err := manager.UpsertSCIMGroup(ctx, principal, credbound.UUID{}, groupInput)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +432,7 @@ func (s *faultStore) EmailByAddress(ctx context.Context, address string) (credbo
 	return s.Store.EmailByAddress(ctx, address)
 }
 
-func (s *faultStore) ReissueEmailVerification(ctx context.Context, emailID string, verification credbound.EmailVerificationCredential, commit credbound.Commit) error {
+func (s *faultStore) ReissueEmailVerification(ctx context.Context, emailID credbound.UUID, verification credbound.EmailVerificationCredential, commit credbound.Commit) error {
 	if s.reissueEmailErr != nil {
 		return s.reissueEmailErr
 	}
@@ -445,19 +445,19 @@ func (s *faultStore) UserByEmail(ctx context.Context, email string) (credbound.U
 	}
 	return s.Store.UserByEmail(ctx, email)
 }
-func (s *faultStore) UserByID(ctx context.Context, userID string) (credbound.User, error) {
+func (s *faultStore) UserByID(ctx context.Context, userID credbound.UUID) (credbound.User, error) {
 	if s.userByIDErr != nil {
 		return credbound.User{}, s.userByIDErr
 	}
 	return s.Store.UserByID(ctx, userID)
 }
-func (s *faultStore) PasswordByUserID(ctx context.Context, userID string) (credbound.PasswordCredential, error) {
+func (s *faultStore) PasswordByUserID(ctx context.Context, userID credbound.UUID) (credbound.PasswordCredential, error) {
 	if s.passwordErr != nil {
 		return credbound.PasswordCredential{}, s.passwordErr
 	}
 	return s.Store.PasswordByUserID(ctx, userID)
 }
-func (s *faultStore) TOTPByUserID(ctx context.Context, userID string) (credbound.TOTPFactor, error) {
+func (s *faultStore) TOTPByUserID(ctx context.Context, userID credbound.UUID) (credbound.TOTPFactor, error) {
 	if s.totpErr != nil {
 		return credbound.TOTPFactor{}, s.totpErr
 	}
@@ -470,28 +470,28 @@ func (s *faultStore) AppendAudit(ctx context.Context, commit credbound.Commit) e
 	return s.Store.AppendAudit(ctx, commit)
 }
 
-func (s *faultStore) RecordAuthentication(ctx context.Context, userID string, seenAt time.Time, commit credbound.Commit) error {
+func (s *faultStore) RecordAuthentication(ctx context.Context, userID credbound.UUID, seenAt time.Time, commit credbound.Commit) error {
 	if s.appendAuditErr != nil {
 		return s.appendAuditErr
 	}
 	return s.Store.RecordAuthentication(ctx, userID, seenAt, commit)
 }
 
-func (s *faultStore) RecordPasswordAuthentication(ctx context.Context, userID, currentHash string, seenAt time.Time, commit credbound.Commit) error {
+func (s *faultStore) RecordPasswordAuthentication(ctx context.Context, userID credbound.UUID, currentHash string, seenAt time.Time, commit credbound.Commit) error {
 	if s.appendAuditErr != nil {
 		return s.appendAuditErr
 	}
 	return s.Store.RecordPasswordAuthentication(ctx, userID, currentHash, seenAt, commit)
 }
 
-func (s *faultStore) Membership(ctx context.Context, workspaceID, userID string) (credbound.Membership, error) {
+func (s *faultStore) Membership(ctx context.Context, workspaceID, userID credbound.UUID) (credbound.Membership, error) {
 	if s.membershipErr != nil {
 		return credbound.Membership{}, s.membershipErr
 	}
 	return s.Store.Membership(ctx, workspaceID, userID)
 }
 
-func (s *faultStore) InstanceAdministrator(ctx context.Context, userID string) (credbound.InstanceAdministrator, error) {
+func (s *faultStore) InstanceAdministrator(ctx context.Context, userID credbound.UUID) (credbound.InstanceAdministrator, error) {
 	if s.adminErr != nil {
 		return credbound.InstanceAdministrator{}, s.adminErr
 	}
@@ -512,7 +512,7 @@ func (s *faultStore) RehashPassword(ctx context.Context, password credbound.Pass
 	return s.Store.RehashPassword(ctx, password, previousHash, commit)
 }
 
-func (s *faultStore) LoginThrottleByUserID(ctx context.Context, userID string) (credbound.LoginThrottle, error) {
+func (s *faultStore) LoginThrottleByUserID(ctx context.Context, userID credbound.UUID) (credbound.LoginThrottle, error) {
 	if s.loginThrottleErr != nil {
 		return credbound.LoginThrottle{}, s.loginThrottleErr
 	}
@@ -540,21 +540,21 @@ func (s *faultStore) ActivateTOTP(ctx context.Context, factor credbound.TOTPFact
 	return s.Store.ActivateTOTP(ctx, factor, recovery, commit)
 }
 
-func (s *faultStore) UseTOTP(ctx context.Context, userID string, step int64, commit credbound.Commit) (bool, error) {
+func (s *faultStore) UseTOTP(ctx context.Context, userID credbound.UUID, step int64, commit credbound.Commit) (bool, error) {
 	if s.useTOTPErr != nil {
 		return false, s.useTOTPErr
 	}
 	return s.Store.UseTOTP(ctx, userID, step, commit)
 }
 
-func (s *faultStore) ConsumeRecoveryCode(ctx context.Context, userID string, digest []byte, usedAt time.Time, commit credbound.Commit) (bool, error) {
+func (s *faultStore) ConsumeRecoveryCode(ctx context.Context, userID credbound.UUID, digest []byte, usedAt time.Time, commit credbound.Commit) (bool, error) {
 	if s.consumeRecoveryErr != nil {
 		return false, s.consumeRecoveryErr
 	}
 	return s.Store.ConsumeRecoveryCode(ctx, userID, digest, usedAt, commit)
 }
 
-func (s *faultStore) DisableTOTP(ctx context.Context, userID string, commit credbound.Commit) error {
+func (s *faultStore) DisableTOTP(ctx context.Context, userID credbound.UUID, commit credbound.Commit) error {
 	if s.disableTOTPErr != nil {
 		return s.disableTOTPErr
 	}
@@ -568,21 +568,21 @@ func (s *faultStore) CreatePAT(ctx context.Context, pat credbound.PAT, commit cr
 	return s.Store.CreatePAT(ctx, pat, commit)
 }
 
-func (s *faultStore) TouchPAT(ctx context.Context, id string, usedAt time.Time, commit credbound.Commit) error {
+func (s *faultStore) TouchPAT(ctx context.Context, id credbound.UUID, usedAt time.Time, commit credbound.Commit) error {
 	if s.touchPATErr != nil {
 		return s.touchPATErr
 	}
 	return s.Store.TouchPAT(ctx, id, usedAt, commit)
 }
 
-func (s *faultStore) RevokePAT(ctx context.Context, userID, id string, revokedAt time.Time, commit credbound.Commit) error {
+func (s *faultStore) RevokePAT(ctx context.Context, userID, id credbound.UUID, revokedAt time.Time, commit credbound.Commit) error {
 	if s.revokePATErr != nil {
 		return s.revokePATErr
 	}
 	return s.Store.RevokePAT(ctx, userID, id, revokedAt, commit)
 }
 
-func (s *faultStore) RemoveInstanceRole(ctx context.Context, userID string, commit credbound.Commit) error {
+func (s *faultStore) RemoveInstanceRole(ctx context.Context, userID credbound.UUID, commit credbound.Commit) error {
 	if s.removeRoleErr != nil {
 		return s.removeRoleErr
 	}
@@ -596,7 +596,7 @@ func (s *faultStore) CreateSCIMConfiguration(ctx context.Context, configuration 
 	return s.Store.CreateSCIMConfiguration(ctx, configuration, credential, commit)
 }
 
-func (s *faultStore) SCIMConfiguration(ctx context.Context, id string) (credbound.SCIMConfiguration, error) {
+func (s *faultStore) SCIMConfiguration(ctx context.Context, id credbound.UUID) (credbound.SCIMConfiguration, error) {
 	if s.scimOperation == "configuration.get" {
 		return credbound.SCIMConfiguration{}, s.scimErr
 	}
@@ -617,14 +617,14 @@ func (s *faultStore) SaveSCIMCredential(ctx context.Context, credential credboun
 	return s.Store.SaveSCIMCredential(ctx, credential, commit)
 }
 
-func (s *faultStore) TouchSCIMCredential(ctx context.Context, id string, usedAt time.Time, commit credbound.Commit) error {
+func (s *faultStore) TouchSCIMCredential(ctx context.Context, id credbound.UUID, usedAt time.Time, commit credbound.Commit) error {
 	if s.scimOperation == "credential.touch" {
 		return s.scimErr
 	}
 	return s.Store.TouchSCIMCredential(ctx, id, usedAt, commit)
 }
 
-func (s *faultStore) DisableSCIMConfiguration(ctx context.Context, id string, disabledAt time.Time, commit credbound.Commit) error {
+func (s *faultStore) DisableSCIMConfiguration(ctx context.Context, id credbound.UUID, disabledAt time.Time, commit credbound.Commit) error {
 	if s.scimOperation == "configuration.disable" {
 		return s.scimErr
 	}

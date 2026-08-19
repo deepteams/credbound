@@ -15,7 +15,7 @@ import (
 func (m *Manager) RecordAudit(ctx context.Context, actor Authentication, input AuditInput) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "audit.record", started, err) }()
-	if actor.UserID == "" {
+	if actor.UserID == (UUID{}) {
 		return ErrUnauthorized
 	}
 	input.Action = strings.TrimSpace(input.Action)
@@ -28,7 +28,7 @@ func (m *Manager) RecordAudit(ctx context.Context, actor Authentication, input A
 	if input.Outcome != AuditSucceeded && input.Outcome != AuditFailed {
 		return fmt.Errorf("%w: invalid audit outcome", ErrInvalidInput)
 	}
-	if input.WorkspaceID != "" {
+	if input.WorkspaceID != (UUID{}) {
 		if err := m.AuthorizePermission(ctx, actor, input.WorkspaceID, PermissionWorkspaceAccess); err != nil {
 			return err
 		}

@@ -33,6 +33,21 @@ Requirements and conventions:
 - Generated code is never edited by hand: `internal/sqlc/` comes from `sqlc`
   and `events_generated.go` from `genevents`. Change the source (SQL files,
   `events.go`, or the generators) and run `make generate`.
+- Identifiers are `credbound.UUID` — the sixteen raw bytes, comparable and
+  usable as a map key — not strings. Text is parsed at the edges with
+  `ParseUUID` and rendered with `String()`; nothing carries an identifier as a
+  string in between. `internal/uuid` is the package accepted for the Go
+  standard library (golang/go#62026), vendored verbatim: never edit it, never
+  add a file beside it, and see its README before touching anything there.
+  The generated queries bind `dbtype.UUID` (pgx's `pgtype.UUID`), which carries
+  the database interfaces the identifier type deliberately lacks; the store
+  converts at the row boundary with `dbID` and `domainID`. A nullable uuid
+  column must scan into `dbtype.UUID`, because pgx will not put NULL in sixteen
+  bytes.
+- Two identifier representations are frozen because they live outside the
+  process: the audit chain hashes identifiers as canonical text, and the
+  WebAuthn user handle derives from that same text. Changing either invalidates
+  what is already stored — chains become unverifiable, passkeys stop resolving.
 - PostgreSQL is the only SQL engine. The store writes PostgreSQL SQL directly —
   typed `uuid` parameters, `jsonb` operators, `SELECT … FOR UPDATE` for the
   read-then-write invariants — with no portability layer to work around. The

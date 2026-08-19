@@ -87,13 +87,13 @@ func TestEventRegistryErrorBoundaries(t *testing.T) {
 func TestUUIDv7SequenceOverflowAndClockRollback(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	m := &Manager{clock: func() time.Time { return now }, random: bytes.NewReader(make([]byte, 16*4100))}
-	previous := ""
+	previous := UUID{}
 	for range 4097 {
 		id, err := m.newID()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if previous != "" && id <= previous {
+		if previous != (UUID{}) && id.Compare(previous) <= 0 {
 			t.Fatalf("UUIDv7 is not monotonic: %q <= %q", id, previous)
 		}
 		previous = id
@@ -116,7 +116,7 @@ func TestContinuationAndEncryptionBoundaries(t *testing.T) {
 		random:       bytes.NewReader(bytes.Repeat([]byte{2}, 256)),
 	}
 	continuation, err := m.encodeContinuation(ceremonyContinuation{
-		UserID: "user", Operation: "register", ExpiresAt: now.Add(time.Minute), Session: []byte("session"),
+		UserID: MustParseUUID("0198b463-0000-7000-8000-04f8996da763"), Operation: "register", ExpiresAt: now.Add(time.Minute), Session: []byte("session"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +161,7 @@ func TestSSOContinuationBoundaries(t *testing.T) {
 		random:       bytes.NewReader(bytes.Repeat([]byte{2}, 512)),
 	}
 	valid := ssoContinuation{
-		ProviderConfigurationID: "0198b463-0000-7000-8000-000000000001",
+		ProviderConfigurationID: MustParseUUID("0198b463-0000-7000-8000-000000000001"),
 		Operation:               ssoLogin, ExpiresAt: now.Add(time.Minute), Session: []byte("session"),
 	}
 	encoded, err := m.encodeSSOContinuation(valid)
@@ -186,7 +186,7 @@ func TestSSOContinuationBoundaries(t *testing.T) {
 		t.Fatalf("invalid SSO JSON = %v", err)
 	}
 	cases := []ssoContinuation{
-		{ProviderConfigurationID: "0198b463-0000-4000-8000-000000000001", Operation: ssoLogin, ExpiresAt: now.Add(time.Minute), Session: []byte("session")},
+		{ProviderConfigurationID: MustParseUUID("0198b463-0000-4000-8000-000000000001"), Operation: ssoLogin, ExpiresAt: now.Add(time.Minute), Session: []byte("session")},
 		{ProviderConfigurationID: valid.ProviderConfigurationID, Operation: ssoLogin, ExpiresAt: now.Add(time.Minute)},
 		{ProviderConfigurationID: valid.ProviderConfigurationID, Operation: "unknown", ExpiresAt: now.Add(time.Minute), Session: []byte("session")},
 		{ProviderConfigurationID: valid.ProviderConfigurationID, Operation: ssoLink, ExpiresAt: now.Add(time.Minute), Session: []byte("session")},
@@ -288,13 +288,13 @@ func TestSCIMValueHelpers(t *testing.T) {
 	}
 	group, err := normalizeSCIMGroupInput(SCIMGroupInput{
 		ExternalID: " external ", DisplayName: " Group ",
-		MemberIDs: []string{"0198b463-0000-7000-8000-000000000001", "0198b463-0000-7000-8000-000000000001"},
+		MemberIDs: []UUID{MustParseUUID("0198b463-0000-7000-8000-000000000001"), MustParseUUID("0198b463-0000-7000-8000-000000000001")},
 	})
 	if err != nil || len(group.MemberIDs) != 1 || group.DisplayName != "Group" {
 		t.Fatalf("normalized SCIM group = %#v, %v", group, err)
 	}
 	for _, group := range []SCIMGroupInput{
-		{}, {DisplayName: strings.Repeat("x", 256)}, {DisplayName: "Group", ExternalID: strings.Repeat("x", 256)}, {DisplayName: "Group", MemberIDs: []string{"invalid"}},
+		{}, {DisplayName: strings.Repeat("x", 256)}, {DisplayName: "Group", ExternalID: strings.Repeat("x", 256)}, {DisplayName: "Group", MemberIDs: []UUID{MustParseUUID("00000000-0000-4000-8000-000000000000")}},
 	} {
 		if _, err := normalizeSCIMGroupInput(group); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("invalid SCIM group = %v", err)
@@ -344,7 +344,7 @@ func TestKeySeparationLegacyFallback(t *testing.T) {
 // continuations sealed before ceremony ids existed consume nothing and stay
 // bounded by their TTL alone.
 func TestLegacyContinuationsCarryNoConsumption(t *testing.T) {
-	if consumption := (ceremonyContinuation{ID: "x", ExpiresAt: time.Unix(1, 0)}).consumption(); consumption == nil || consumption.ID != "x" {
+	if consumption := (ceremonyContinuation{ID: MustParseUUID("0198b463-0000-7000-8000-0000000000ff"), ExpiresAt: time.Unix(1, 0)}).consumption(); consumption == nil || consumption.ID == (UUID{}) {
 		t.Fatalf("ceremony consumption = %#v", consumption)
 	}
 	if consumption := (ceremonyContinuation{}).consumption(); consumption != nil {

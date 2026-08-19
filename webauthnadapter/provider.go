@@ -318,7 +318,10 @@ func (u user) WebAuthnCredentials() []webauthn.Credential { return slices.Clone(
 
 func (p *Provider) convertUser(input credbound.PasskeyUser) (user, error) {
 	handle := hmac.New(sha256.New, p.userHandleKey)
-	_, _ = handle.Write([]byte(input.User.ID))
+	// The derived handle is stored by the authenticator itself, so it must keep
+	// deriving from the identifier's canonical text: hashing the raw bytes
+	// instead would orphan every passkey already registered.
+	_, _ = handle.Write([]byte(input.User.ID.String()))
 	result := user{id: handle.Sum(nil), name: input.User.Email, displayName: input.User.DisplayName}
 	for passkey, err := range input.Credentials {
 		if err != nil {

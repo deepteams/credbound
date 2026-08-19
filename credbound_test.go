@@ -35,7 +35,7 @@ func newFixture(t *testing.T, ssoProviders ...credbound.SSOProvider) *fixture {
 	// policy; the fixture trusts every provider it registers so link/JIT/
 	// step-up paths keep exercising AAL2. TestSSOAAL1WithoutAssurance covers
 	// the fail-safe default separately.
-	assurance := make(map[string]credbound.SSOAssurancePolicy, len(ssoProviders))
+	assurance := make(map[credbound.UUID]credbound.SSOAssurancePolicy, len(ssoProviders))
 	for _, provider := range ssoProviders {
 		assurance[provider.ConfigurationID()] = credbound.SSOAssurancePolicy{TrustUnverified: true}
 	}
@@ -78,10 +78,10 @@ func (f *fixture) bootstrap(t *testing.T) (credbound.Authentication, credbound.W
 func TestBootstrapPasswordAndUUIDv7(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
-	if !uuidV7.MatchString(authn.UserID) || !uuidV7.MatchString(workspace.ID) {
+	if !uuidV7.MatchString(authn.UserID.String()) || !uuidV7.MatchString(workspace.ID.String()) {
 		t.Fatalf("non UUIDv7 ids: %q %q", authn.UserID, workspace.ID)
 	}
-	if authn.UserID >= workspace.ID {
+	if authn.UserID.Compare(workspace.ID) >= 0 {
 		t.Fatalf("UUIDv7 ids are not monotonic: %q >= %q", authn.UserID, workspace.ID)
 	}
 	// ADMIN-002: the first account created by Bootstrap receives the
@@ -192,11 +192,11 @@ func TestPATLifecycleAndPagination(t *testing.T) {
 		t.Fatal("PAT unexpectedly satisfied step-up")
 	}
 
-	first := collectPage(t, f.manager.PATs(context.Background(), stepUp, "", credbound.PageRequest{Limit: 2}))
+	first := collectPage(t, f.manager.PATs(context.Background(), stepUp, credbound.UUID{}, credbound.PageRequest{Limit: 2}))
 	if len(first.items) != 2 || first.end == nil || !first.end.HasMore || first.end.NextCursor == "" {
 		t.Fatalf("first page = %#v", first)
 	}
-	second := collectPage(t, f.manager.PATs(context.Background(), stepUp, "", credbound.PageRequest{Limit: 2, Cursor: first.end.NextCursor}))
+	second := collectPage(t, f.manager.PATs(context.Background(), stepUp, credbound.UUID{}, credbound.PageRequest{Limit: 2, Cursor: first.end.NextCursor}))
 	if len(second.items) != 1 || second.end == nil || second.end.HasMore {
 		t.Fatalf("second page = %#v", second)
 	}
@@ -219,7 +219,7 @@ func TestPasskeyCeremoniesEncryptStoredCredential(t *testing.T) {
 		t.Fatalf("challenge = %#v, %v", challenge, err)
 	}
 	passkey, err := f.manager.FinishPasskeyRegistration(context.Background(), authn, challenge.Continuation, []byte("valid"))
-	if err != nil || passkey.CredentialJSON != nil || !uuidV7.MatchString(passkey.ID) {
+	if err != nil || passkey.CredentialJSON != nil || !uuidV7.MatchString(passkey.ID.String()) {
 		t.Fatalf("passkey = %#v, %v", passkey, err)
 	}
 	// The registration ceremony is single use: replaying the continuation
@@ -403,7 +403,7 @@ func TestAuditFailureFailsMutationClosed(t *testing.T) {
 		t.Fatalf("audit failure error = %v", err)
 	}
 	f.store.SetAuditFailure(nil)
-	page := collectPage(t, f.manager.PATs(context.Background(), authn, "", credbound.PageRequest{}))
+	page := collectPage(t, f.manager.PATs(context.Background(), authn, credbound.UUID{}, credbound.PageRequest{}))
 	if len(page.items) != 0 {
 		t.Fatalf("mutation committed despite audit failure: %#v", page.items)
 	}
@@ -470,19 +470,19 @@ func TestConfigurationValidation(t *testing.T) {
 	if _, err := credbound.New(bad); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("inert email cooldown accepted = %v", err)
 	}
-	validProvider := &fakeSSOProvider{configurationID: "0198b463-0000-7000-8000-0000000000aa", kind: credbound.SSOProviderGoogle}
+	validProvider := &fakeSSOProvider{configurationID: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000aa"), kind: credbound.SSOProviderGoogle}
 	bad = valid
 	bad.SSOProviders = []credbound.SSOProvider{validProvider, validProvider}
 	if _, err := credbound.New(bad); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("duplicate SSO provider = %v", err)
 	}
 	bad = valid
-	bad.SSOProviders = []credbound.SSOProvider{&fakeSSOProvider{configurationID: "0198b463-0000-4000-8000-0000000000aa", kind: credbound.SSOProviderOIDC}}
+	bad.SSOProviders = []credbound.SSOProvider{&fakeSSOProvider{configurationID: credbound.MustParseUUID("0198b463-0000-4000-8000-0000000000aa"), kind: credbound.SSOProviderOIDC}}
 	if _, err := credbound.New(bad); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("non UUIDv7 SSO provider = %v", err)
 	}
 	bad = valid
-	bad.SSOProviders = []credbound.SSOProvider{&fakeSSOProvider{configurationID: "0198b463-0000-7000-8000-0000000000ab", kind: credbound.SSOProviderKind("ldap")}}
+	bad.SSOProviders = []credbound.SSOProvider{&fakeSSOProvider{configurationID: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000ab"), kind: credbound.SSOProviderKind("ldap")}}
 	if _, err := credbound.New(bad); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("unsupported SSO provider = %v", err)
 	}
@@ -550,7 +550,7 @@ func firstPasskey(t *testing.T, sequence func(func(credbound.Passkey, error) boo
 	return credbound.Passkey{}
 }
 
-func aal2(userID string, at time.Time) credbound.Authentication {
+func aal2(userID credbound.UUID, at time.Time) credbound.Authentication {
 	return credbound.Authentication{UserID: userID, Method: credbound.MethodTOTP, Level: credbound.AAL2, AuthenticatedAt: at}
 }
 
@@ -739,7 +739,7 @@ func TestExportUserData(t *testing.T) {
 
 	// Self-export: profile, at least the primary email, the admin membership,
 	// and the PAT, with the digest scrubbed.
-	export, err := f.manager.ExportUserData(ctx, rootActor, "")
+	export, err := f.manager.ExportUserData(ctx, rootActor, credbound.UUID{})
 	if err != nil {
 		t.Fatalf("self export = %v", err)
 	}
@@ -773,31 +773,31 @@ func TestExportUserData(t *testing.T) {
 	// Privacy sections: a SCIM profile linked to the member and the invitation
 	// the member accepted appear in the export, with the invitation digest
 	// scrubbed (PRIV-002).
-	exportCommit := func(id, action string) credbound.Commit {
+	exportCommit := func(id credbound.UUID, action string) credbound.Commit {
 		return credbound.Commit{Audit: credbound.AuditEvent{
 			ID: id, OccurredAt: f.now, ActorID: authn.UserID,
-			Action: action, ResourceType: "test", ResourceID: member.ID, WorkspaceID: workspace.ID, Outcome: credbound.AuditSucceeded,
+			Action: action, ResourceType: "test", ResourceID: member.ID.String(), WorkspaceID: workspace.ID, Outcome: credbound.AuditSucceeded,
 		}}
 	}
-	configuration := credbound.SCIMConfiguration{ID: "0198b463-0000-7000-8000-0000000e5c01", WorkspaceID: workspace.ID, Enabled: true, DefaultRole: credbound.RoleMember, CreatedAt: f.now, UpdatedAt: f.now}
-	credential := credbound.SCIMCredential{ID: "0198b463-0000-7000-8000-0000000e5c02", ConfigurationID: configuration.ID, Prefix: "abcdef012345", Digest: []byte("digest"), CreatedAt: f.now}
-	if err := f.store.CreateSCIMConfiguration(ctx, configuration, credential, exportCommit("0198b463-0000-7000-8000-0000000e5c03", "scim.configuration.create")); err != nil {
+	configuration := credbound.SCIMConfiguration{ID: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000e5c01"), WorkspaceID: workspace.ID, Enabled: true, DefaultRole: credbound.RoleMember, CreatedAt: f.now, UpdatedAt: f.now}
+	credential := credbound.SCIMCredential{ID: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000e5c02"), ConfigurationID: configuration.ID, Prefix: "abcdef012345", Digest: []byte("digest"), CreatedAt: f.now}
+	if err := f.store.CreateSCIMConfiguration(ctx, configuration, credential, exportCommit(credbound.MustParseUUID("0198b463-0000-7000-8000-0000000e5c03"), "scim.configuration.create")); err != nil {
 		t.Fatal(err)
 	}
 	membership, err := f.store.Membership(ctx, workspace.ID, member.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	membership.ProvisioningSource, membership.UpdatedAt = configuration.ID, f.now
-	link := credbound.SCIMUser{ID: "0198b463-0000-7000-8000-0000000e5c04", ConfigurationID: configuration.ID, UserID: member.ID, UserName: "member@example.com", DisplayName: "Member", Active: true, CreatedAt: f.now, UpdatedAt: f.now}
-	if err := f.store.AdoptSCIMUser(ctx, membership, link, exportCommit("0198b463-0000-7000-8000-0000000e5c05", "scim.user.adopt")); err != nil {
+	membership.ProvisioningSource, membership.UpdatedAt = configuration.ID.String(), f.now
+	link := credbound.SCIMUser{ID: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000e5c04"), ConfigurationID: configuration.ID, UserID: member.ID, UserName: "member@example.com", DisplayName: "Member", Active: true, CreatedAt: f.now, UpdatedAt: f.now}
+	if err := f.store.AdoptSCIMUser(ctx, membership, link, exportCommit(credbound.MustParseUUID("0198b463-0000-7000-8000-0000000e5c05"), "scim.user.adopt")); err != nil {
 		t.Fatal(err)
 	}
-	invitation := credbound.WorkspaceInvitation{ID: "0198b463-0000-7000-8000-0000000e5c06", WorkspaceID: workspace.ID, Email: "member@example.com", Role: credbound.RoleMember, InvitedBy: authn.UserID, Digest: []byte("digest"), CreatedAt: f.now, ExpiresAt: f.now.Add(time.Hour)}
-	if err := f.store.CreateWorkspaceInvitation(ctx, invitation, exportCommit("0198b463-0000-7000-8000-0000000e5c07", "invite.create")); err != nil {
+	invitation := credbound.WorkspaceInvitation{ID: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000e5c06"), WorkspaceID: workspace.ID, Email: "member@example.com", Role: credbound.RoleMember, InvitedBy: authn.UserID, Digest: []byte("digest"), CreatedAt: f.now, ExpiresAt: f.now.Add(time.Hour)}
+	if err := f.store.CreateWorkspaceInvitation(ctx, invitation, exportCommit(credbound.MustParseUUID("0198b463-0000-7000-8000-0000000e5c07"), "invite.create")); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.AcceptWorkspaceInvitation(ctx, invitation.ID, member.ID, f.now, membership, exportCommit("0198b463-0000-7000-8000-0000000e5c08", "invite.accept")); err != nil {
+	if err := f.store.AcceptWorkspaceInvitation(ctx, invitation.ID, member.ID, f.now, membership, exportCommit(credbound.MustParseUUID("0198b463-0000-7000-8000-0000000e5c08"), "invite.accept")); err != nil {
 		t.Fatal(err)
 	}
 	privacyExport, err := f.manager.ExportUserData(ctx, rootActor, member.ID)

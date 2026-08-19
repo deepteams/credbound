@@ -28,7 +28,7 @@ func (m *Manager) BeginEmailAuthentication(ctx context.Context, email string) (_
 	if allowed, err := m.allowEmailIssuance(ctx, normalized, "email_authentication.request"); err != nil {
 		return IssuedEmailAuthentication{}, err
 	} else if !allowed {
-		if auditErr := m.appendAuthenticationAudit(ctx, "", "email_authentication.request", AuditFailed, "throttled"); auditErr != nil {
+		if auditErr := m.appendAuthenticationAudit(ctx, UUID{}, "email_authentication.request", AuditFailed, "throttled"); auditErr != nil {
 			return IssuedEmailAuthentication{}, auditErr
 		}
 		return IssuedEmailAuthentication{}, nil
@@ -44,13 +44,13 @@ func (m *Manager) BeginEmailAuthentication(ctx context.Context, email string) (_
 	if err != nil {
 		return IssuedEmailAuthentication{}, err
 	}
-	raw := emailAuthenticationPrefix + "_" + id + "_" + base64.RawURLEncoding.EncodeToString(secret)
+	raw := emailAuthenticationPrefix + "_" + id.String() + "_" + base64.RawURLEncoding.EncodeToString(secret)
 	tokenDigest := m.tokenDigest("email-authentication:" + raw)
 	if lookupErr != nil {
 		if !errors.Is(lookupErr, ErrNotFound) {
 			return IssuedEmailAuthentication{}, lookupErr
 		}
-		if auditErr := m.appendAuthenticationAudit(ctx, "", "email_authentication.request", AuditFailed, "unknown_email"); auditErr != nil {
+		if auditErr := m.appendAuthenticationAudit(ctx, UUID{}, "email_authentication.request", AuditFailed, "unknown_email"); auditErr != nil {
 			return IssuedEmailAuthentication{}, auditErr
 		}
 		return IssuedEmailAuthentication{}, nil
@@ -76,11 +76,11 @@ func (m *Manager) BeginEmailAuthentication(ctx context.Context, email string) (_
 		ID: id, UserID: user.ID, EmailID: emailID, Digest: tokenDigest,
 		CreatedAt: now, ExpiresAt: now.Add(m.emailAuthTTL),
 	}
-	event, err := m.newAudit(ctx, user.ID, "email_authentication.request", "user", user.ID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, user.ID, "email_authentication.request", "user", user.ID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return IssuedEmailAuthentication{}, err
 	}
-	meta, err := m.newEventMeta(EventEmailAuthenticationRequested, "auth.email_link.begin", user.ID, "", event)
+	meta, err := m.newEventMeta(EventEmailAuthenticationRequested, "auth.email_link.begin", user.ID, UUID{}, event)
 	if err != nil {
 		return IssuedEmailAuthentication{}, err
 	}
@@ -159,7 +159,7 @@ func (m *Manager) CompleteEmailAuthentication(ctx context.Context, raw string) (
 		return Authentication{}, factorErr
 	}
 	now := m.now()
-	event, err := m.newAudit(ctx, user.ID, "auth.email_link", "user", user.ID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, user.ID, "auth.email_link", "user", user.ID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, err
 	}
@@ -186,7 +186,7 @@ func (m *Manager) CompleteEmailAuthentication(ctx context.Context, raw string) (
 }
 
 // emailAddressByID resolves one of the user's address records by ID.
-func (m *Manager) emailAddressByID(ctx context.Context, userID, emailID string) (string, error) {
+func (m *Manager) emailAddressByID(ctx context.Context, userID, emailID UUID) (string, error) {
 	for email, err := range m.userEmails(ctx, userID) {
 		if err != nil {
 			return "", err
@@ -199,14 +199,14 @@ func (m *Manager) emailAddressByID(ctx context.Context, userID, emailID string) 
 }
 
 // verifiedEmailID resolves the verified address record used by a magic link.
-func (m *Manager) verifiedEmailID(ctx context.Context, userID, address string) (string, error) {
+func (m *Manager) verifiedEmailID(ctx context.Context, userID UUID, address string) (UUID, error) {
 	for email, err := range m.userEmails(ctx, userID) {
 		if err != nil {
-			return "", err
+			return UUID{}, err
 		}
 		if email.Address == address && email.VerifiedAt != nil {
 			return email.ID, nil
 		}
 	}
-	return "", ErrNotFound
+	return UUID{}, ErrNotFound
 }

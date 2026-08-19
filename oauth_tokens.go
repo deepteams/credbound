@@ -59,13 +59,13 @@ func (m *Manager) ExchangeOAuthAuthorizationCode(ctx context.Context, input Exch
 	var refresh *OAuthRefreshToken
 	rawRefresh := ""
 	if slices.Contains(grant.Scopes, "offline_access") && slices.Contains(client.GrantTypes, "refresh_token") {
-		value, raw, createErr := m.newOAuthRefreshToken(grant, "", issuer.RefreshTokenTTL)
+		value, raw, createErr := m.newOAuthRefreshToken(grant, UUID{}, issuer.RefreshTokenTTL)
 		if createErr != nil {
 			return OAuthTokenResponse{}, createErr
 		}
 		refresh, rawRefresh = &value, raw
 	}
-	audit, err := m.newAudit(ctx, client.ID, "oauth.token.issued", "oauth_grant", grant.ID, grant.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, client.ID, "oauth.token.issued", "oauth_grant", grant.ID.String(), grant.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return OAuthTokenResponse{}, err
 	}
@@ -141,7 +141,7 @@ func (m *Manager) IssueOAuthClientCredentials(ctx context.Context, input OAuthCl
 		ClientRecordID: client.ID, IssuerID: issuer.ID, ResourceID: resource.ID, WorkspaceID: resource.WorkspaceID,
 		Scopes: scopes, CreatedAt: now, ExpiresAt: now.Add(issuer.AccessTokenTTL),
 	}
-	audit, err := m.newAudit(ctx, client.ID, "oauth.token.client_credentials", "oauth_client", client.ID, resource.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, client.ID, "oauth.token.client_credentials", "oauth_client", client.ID.String(), resource.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return OAuthTokenResponse{}, err
 	}
@@ -242,7 +242,7 @@ func (m *Manager) RefreshOAuthToken(ctx context.Context, input RefreshOAuthToken
 	if err != nil {
 		return OAuthTokenResponse{}, err
 	}
-	audit, err := m.newAudit(ctx, client.ID, "oauth.token.refreshed", "oauth_grant", grant.ID, grant.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, client.ID, "oauth.token.refreshed", "oauth_grant", grant.ID.String(), grant.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return OAuthTokenResponse{}, err
 	}
@@ -294,7 +294,7 @@ func (m *Manager) RevokeOAuthToken(ctx context.Context, input RevokeOAuthTokenIn
 			// matches, so a caller cannot probe another client's tokens.
 			return m.revokeOAuthClientAccessToken(ctx, store, client, prefix, input.Token, now)
 		}
-		audit, auditErr := m.newAudit(ctx, client.ID, "oauth.token.revoked", "oauth_access_token", token.ID, token.WorkspaceID, AuditSucceeded, "")
+		audit, auditErr := m.newAudit(ctx, client.ID, "oauth.token.revoked", "oauth_access_token", token.ID.String(), token.WorkspaceID, AuditSucceeded, "")
 		if auditErr != nil {
 			return auditErr
 		}
@@ -327,12 +327,12 @@ func (m *Manager) revokeOAuthClientAccessToken(ctx context.Context, store OAuthS
 	if err != nil || token.ClientRecordID != client.ID || token.RevokedAt != nil || !hmac.Equal(token.Digest, m.oauthDigest("access-token", raw)) {
 		return nil
 	}
-	audit, err := m.newAudit(ctx, client.ID, "oauth.token.revoked", "oauth_client_access_token", token.ID, token.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, client.ID, "oauth.token.revoked", "oauth_client_access_token", token.ID.String(), token.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
 	audit.ActorKind = ActorService
-	change, commit, err := m.newOAuthChange(EventOAuthTokenRevoked, "oauth.token.revoke", audit, client, "", token.ID, token.ResourceID, token.WorkspaceID, token.Scopes)
+	change, commit, err := m.newOAuthChange(EventOAuthTokenRevoked, "oauth.token.revoke", audit, client, UUID{}, token.ID, token.ResourceID, token.WorkspaceID, token.Scopes)
 	if err != nil {
 		return err
 	}
@@ -606,7 +606,7 @@ func (m *Manager) authenticateOAuthClient(ctx context.Context, issuerURL, client
 	return issuer, client, nil
 }
 
-func (m *Manager) activeOAuthGrant(ctx context.Context, grantID string, client OAuthClient, resourceURI string) (OAuthGrant, OAuthProtectedResource, error) {
+func (m *Manager) activeOAuthGrant(ctx context.Context, grantID UUID, client OAuthClient, resourceURI string) (OAuthGrant, OAuthProtectedResource, error) {
 	// A disabled client is refused here, on the shared validation path, so
 	// the admin kill switch takes effect immediately for already-issued
 	// bearer tokens too, not only at the authorization and token endpoints.
@@ -674,12 +674,12 @@ func (m *Manager) newOAuthAccessToken(grant OAuthGrant, ttl time.Duration) (OAut
 	}, raw, nil
 }
 
-func (m *Manager) newOAuthRefreshToken(grant OAuthGrant, familyID string, ttl time.Duration) (OAuthRefreshToken, string, error) {
+func (m *Manager) newOAuthRefreshToken(grant OAuthGrant, familyID UUID, ttl time.Duration) (OAuthRefreshToken, string, error) {
 	id, err := m.newID()
 	if err != nil {
 		return OAuthRefreshToken{}, "", err
 	}
-	if familyID == "" {
+	if familyID == (UUID{}) {
 		familyID, err = m.newID()
 		if err != nil {
 			return OAuthRefreshToken{}, "", err
@@ -707,12 +707,12 @@ func (m *Manager) revokeOAuthGrantForCodeReplay(ctx context.Context, client OAut
 	if err != nil || grant.RevokedAt != nil {
 		return
 	}
-	audit, err := m.newAudit(ctx, client.ID, "oauth.code.reuse_detected", "oauth_grant", grant.ID, grant.WorkspaceID, AuditSucceeded, "reuse_detected")
+	audit, err := m.newAudit(ctx, client.ID, "oauth.code.reuse_detected", "oauth_grant", grant.ID.String(), grant.WorkspaceID, AuditSucceeded, "reuse_detected")
 	if err != nil {
 		return
 	}
 	audit.ActorKind = ActorService
-	change, commit, err := m.newOAuthChange(EventOAuthCodeReuseDetected, "oauth.code.reuse_detected", audit, client, grant.ID, "", grant.ResourceID, grant.WorkspaceID, grant.Scopes)
+	change, commit, err := m.newOAuthChange(EventOAuthCodeReuseDetected, "oauth.code.reuse_detected", audit, client, grant.ID, UUID{}, grant.ResourceID, grant.WorkspaceID, grant.Scopes)
 	if err != nil {
 		return
 	}
@@ -723,7 +723,7 @@ func (m *Manager) revokeOAuthGrantForCodeReplay(ctx context.Context, client OAut
 }
 
 func (m *Manager) revokeOAuthRefreshFamily(ctx context.Context, token OAuthRefreshToken, client OAuthClient, reason string) error {
-	audit, err := m.newAudit(ctx, client.ID, "oauth.refresh_family.revoked", "oauth_refresh_family", token.FamilyID, token.WorkspaceID, AuditSucceeded, reason)
+	audit, err := m.newAudit(ctx, client.ID, "oauth.refresh_family.revoked", "oauth_refresh_family", token.FamilyID.String(), token.WorkspaceID, AuditSucceeded, reason)
 	if err != nil {
 		return err
 	}
@@ -764,13 +764,13 @@ func (m *Manager) oauthIDToken(ctx context.Context, issuer OAuthIssuer, client O
 	return m.oauth.OIDCSigner.SignIDToken(ctx, claims)
 }
 
-func (m *Manager) oauthPairwiseSubject(issuerID, sectorIdentifier, userID string) string {
+func (m *Manager) oauthPairwiseSubject(issuerID UUID, sectorIdentifier string, userID UUID) string {
 	mac := hmac.New(sha256.New, m.oauth.Pepper)
-	_, _ = mac.Write([]byte("oidc-subject\x00" + issuerID + "\x00" + sectorIdentifier + "\x00" + userID))
+	_, _ = mac.Write([]byte("oidc-subject\x00" + issuerID.String() + "\x00" + sectorIdentifier + "\x00" + userID.String()))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func (m *Manager) oauthPrimaryEmail(ctx context.Context, userID string) (string, *bool) {
+func (m *Manager) oauthPrimaryEmail(ctx context.Context, userID UUID) (string, *bool) {
 	user, err := m.store.UserByID(ctx, userID)
 	if err != nil || user.Email == "" {
 		return "", nil

@@ -111,7 +111,7 @@ func TestWorkspaceDomainStoreLifecycle(t *testing.T) {
 func TestWorkspaceDomainStorePagination(t *testing.T) {
 	f := newStoreFixture(t)
 	ctx := context.Background()
-	var ids []string
+	var ids []credbound.UUID
 	for _, name := range []string{"a.example.com", "b.example.com", "c.example.com"} {
 		domain := f.domain(name)
 		if err := f.store.CreateWorkspaceDomain(ctx, domain, time.Time{}, f.event("domain.create."+name)); err != nil {
@@ -163,7 +163,7 @@ func TestWorkspaceDomainStoreJITProvision(t *testing.T) {
 		email := credbound.EmailAddress{ID: f.id(), UserID: user.ID, Address: address, Primary: true, VerifiedAt: &f.now, CreatedAt: f.now, UpdatedAt: f.now}
 		membership := credbound.Membership{WorkspaceID: f.workspace.ID, UserID: user.ID, Role: credbound.RoleMember, Status: credbound.MembershipActive, ProvisioningSource: "jit:domain", CreatedAt: f.now, UpdatedAt: f.now}
 		identity := credbound.SSOIdentity{
-			ID: f.id(), UserID: user.ID, ProviderConfigurationID: "0198b463-0000-7000-8000-0000000000aa",
+			ID: f.id(), UserID: user.ID, ProviderConfigurationID: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000aa"),
 			ProviderKind: credbound.SSOProviderOIDC, Issuer: "https://idp.example.com", Subject: subject,
 			Email: address, CreatedAt: f.now, LastUsedAt: &f.now,
 		}

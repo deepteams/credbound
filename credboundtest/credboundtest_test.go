@@ -17,7 +17,7 @@ import (
 func TestCredboundtestBootstrapAndPasswordAuthentication(t *testing.T) {
 	manager := credboundtest.NewManager(t)
 	authn, workspace := credboundtest.Bootstrap(t, manager)
-	if authn.UserID == "" || workspace.ID == "" || workspace.Name != credboundtest.BootstrapWorkspaceName {
+	if authn.UserID == (credbound.UUID{}) || workspace.ID == (credbound.UUID{}) || workspace.Name != credboundtest.BootstrapWorkspaceName {
 		t.Fatalf("bootstrap = %#v, %#v", authn, workspace)
 	}
 	loggedIn, err := manager.AuthenticatePassword(context.Background(), credboundtest.BootstrapEmail, credboundtest.BootstrapPassword)
@@ -156,7 +156,7 @@ func TestCredboundtestWithConfig(t *testing.T) {
 		Email: "founder@example.com", DisplayName: "Founder",
 		Password: "another strong password", WorkspaceName: "Startup",
 	})
-	if err != nil || result.Authentication.UserID == "" || result.ExistingAccount {
+	if err != nil || result.Authentication.UserID == (credbound.UUID{}) || result.ExistingAccount {
 		t.Fatalf("signup through WithConfig = %#v, %v", result, err)
 	}
 }
@@ -174,10 +174,10 @@ func (p blockingPolicy) ValidatePassword(_ context.Context, password string) err
 
 // stubSSOProvider is the smallest provider the manager accepts; the ceremony
 // itself is covered by the adapter packages.
-type stubSSOProvider struct{ id string }
+type stubSSOProvider struct{ id credbound.UUID }
 
-func (p stubSSOProvider) ConfigurationID() string       { return p.id }
-func (stubSSOProvider) Kind() credbound.SSOProviderKind { return credbound.SSOProviderOIDC }
+func (p stubSSOProvider) ConfigurationID() credbound.UUID { return p.id }
+func (stubSSOProvider) Kind() credbound.SSOProviderKind   { return credbound.SSOProviderOIDC }
 func (stubSSOProvider) Begin(context.Context, credbound.SSORequest) (credbound.SSOProviderChallenge, error) {
 	return credbound.SSOProviderChallenge{RedirectURL: "https://idp.example.com/authorize", Session: []byte("session")}, nil
 }
@@ -228,13 +228,13 @@ func TestCredboundtestRemainingOptions(t *testing.T) {
 
 	// WithSSOProviders: a registered provider is reachable by its
 	// configuration identifier, an unknown one is not.
-	provider := stubSSOProvider{id: "0198b463-0000-7000-8000-0000000000aa"}
+	provider := stubSSOProvider{id: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000aa")}
 	sso := credboundtest.NewManager(t, credboundtest.WithSSOProviders(provider))
 	credboundtest.Bootstrap(t, sso)
 	if _, err := sso.BeginSSO(ctx, provider.id); err != nil {
 		t.Fatalf("begin sso: %v", err)
 	}
-	if _, err := sso.BeginSSO(ctx, "0198b463-0000-7000-8000-0000000000bb"); err == nil {
+	if _, err := sso.BeginSSO(ctx, credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000bb")); err == nil {
 		t.Fatal("an unregistered provider started a ceremony")
 	}
 

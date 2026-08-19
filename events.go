@@ -48,7 +48,7 @@ type Commit struct {
 // consumed by a Commit. ID is the UUIDv7 minted when the ceremony began and
 // ExpiresAt bounds how long the store must remember it.
 type CeremonyConsumption struct {
-	ID        string
+	ID        UUID
 	ExpiresAt time.Time
 }
 
@@ -160,13 +160,13 @@ const (
 // audit event committed with the change (empty for advisory events that have
 // no audit of their own).
 type EventMeta struct {
-	ID          string
+	ID          UUID
 	Name        EventName
 	Operation   string
 	OccurredAt  time.Time
-	ActorID     string
-	WorkspaceID string
-	AuditID     string
+	ActorID     UUID
+	WorkspaceID UUID
+	AuditID     UUID
 }
 
 // Transaction payloads deliberately contain no passwords, credential hashes,
@@ -191,7 +191,7 @@ type WorkspaceCreateChange struct {
 // tells them apart, as does the EventMeta name.
 type UserStatusChange struct {
 	EventMeta
-	UserID   string
+	UserID   UUID
 	Disabled bool
 }
 
@@ -239,7 +239,7 @@ type WorkspaceDomainChange struct {
 
 type PasswordChange struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 type EmailAddition struct {
@@ -254,64 +254,64 @@ type EmailConfirmation struct {
 
 type PrimaryEmailChange struct {
 	EventMeta
-	UserID  string
-	EmailID string
+	UserID  UUID
+	EmailID UUID
 }
 
 type EmailRemoval struct {
 	EventMeta
-	UserID  string
-	EmailID string
+	UserID  UUID
+	EmailID UUID
 }
 
 type TOTPEnrollmentChange struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 type TOTPActivation struct {
 	EventMeta
-	UserID            string
+	UserID            UUID
 	RecoveryCodeCount int
 }
 
 type TOTPDisable struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 type PasskeyRegistration struct {
 	EventMeta
-	PasskeyID   string
-	UserID      string
+	PasskeyID   UUID
+	UserID      UUID
 	PasskeyName string
 }
 
 type PasskeyDeletion struct {
 	EventMeta
-	PasskeyID string
-	UserID    string
+	PasskeyID UUID
+	UserID    UUID
 }
 
 type PATCreation struct {
 	EventMeta
-	PATID            string
-	UserID           string
+	PATID            UUID
+	UserID           UUID
 	PATName          string
-	BoundWorkspaceID string
+	BoundWorkspaceID UUID
 	Scopes           []string
 	ExpiresAt        *time.Time
 }
 
 type PATRevocation struct {
 	EventMeta
-	PATID  string
-	UserID string
+	PATID  UUID
+	UserID UUID
 }
 
 type UserCredentialRevocation struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 // SecondFactorReset reports the administrative removal of every second
@@ -319,7 +319,7 @@ type UserCredentialRevocation struct {
 // passkeys, with the user's sessions revoked in the same transaction.
 type SecondFactorReset struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 // UserAnonymization is the transactional-hook change for AnonymizeUser: the
@@ -327,14 +327,14 @@ type SecondFactorReset struct {
 // the same transaction, while the append-only audit chain is preserved.
 type UserAnonymization struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 // RecoveryCodeRegeneration reports the replacement of a user's recovery
 // codes; payloads carry only the count, never code material.
 type RecoveryCodeRegeneration struct {
 	EventMeta
-	UserID            string
+	UserID            UUID
 	RecoveryCodeCount int
 }
 
@@ -349,14 +349,14 @@ type SessionCreation struct {
 
 type SessionRevocation struct {
 	EventMeta
-	SessionID string
-	UserID    string
+	SessionID UUID
+	UserID    UUID
 }
 
 // UserSessionRevocation reports a bulk "log out everywhere" for one user.
 type UserSessionRevocation struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 type SSOLink struct {
@@ -366,27 +366,27 @@ type SSOLink struct {
 
 type SSOUnlink struct {
 	EventMeta
-	UserID     string
-	IdentityID string
+	UserID     UUID
+	IdentityID UUID
 }
 
 type RoleGrant struct {
 	EventMeta
-	UserID       string
+	UserID       UUID
 	Role         Role
 	PreviousRole Role
 }
 
 type InstanceRoleChange struct {
 	EventMeta
-	UserID       string
+	UserID       UUID
 	Role         InstanceRole
 	PreviousRole InstanceRole
 }
 
 type InstanceRoleRemoval struct {
 	EventMeta
-	UserID       string
+	UserID       UUID
 	PreviousRole InstanceRole
 }
 
@@ -417,13 +417,16 @@ type SCIMGroupChange struct {
 // tokens and secrets never appear.
 type OAuthChange struct {
 	EventMeta
-	IssuerID     string
-	ClientID     string
-	ClientSource OAuthClientSource
-	GrantID      string
-	TokenID      string
-	ResourceID   string
-	Scopes       []string
+	IssuerID UUID
+	// ClientRecordID is Credbound's client record, like the other identifiers
+	// here. The protocol client_id is a different value — text, and a Client
+	// Identifier URL for CIMD clients — and is not carried by this payload.
+	ClientRecordID UUID
+	ClientSource   OAuthClientSource
+	GrantID        UUID
+	TokenID        UUID
+	ResourceID     UUID
+	Scopes         []string
 }
 
 // Listener event payloads mirror the committed fact they announce: the
@@ -462,14 +465,14 @@ type WorkspaceCreatedEvent struct {
 
 type PasswordChangedEvent struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 // PasswordRehashedEvent reports the transparent hash renewal performed after
 // a successful authentication when the hashing parameters changed.
 type PasswordRehashedEvent struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 // AuthenticationEvent reports every successful authentication, whatever the
@@ -488,7 +491,7 @@ type AuthenticationEvent struct {
 type AuthenticationFailureEvent struct {
 	EventMeta
 	Method AuthMethod
-	UserID string
+	UserID UUID
 	Reason string
 	// Request carries the client network context supplied by the host through
 	// WithRequestMetadata, so listeners can throttle or alert by address
@@ -500,7 +503,7 @@ type AuthenticationFailureEvent struct {
 // lack of a fresh AAL2 authentication; it carries no audit of its own.
 type StepUpDeniedEvent struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 // AuthorizationDeniedEvent is an advisory signal that a workspace
@@ -508,7 +511,7 @@ type StepUpDeniedEvent struct {
 // empty for permission-based checks.
 type AuthorizationDeniedEvent struct {
 	EventMeta
-	UserID       string
+	UserID       UUID
 	RequiredRole Role
 }
 
@@ -529,85 +532,85 @@ type EmailVerificationResentEvent struct {
 
 type PrimaryEmailChangedEvent struct {
 	EventMeta
-	UserID  string
-	EmailID string
+	UserID  UUID
+	EmailID UUID
 }
 
 type EmailRemovedEvent struct {
 	EventMeta
-	UserID  string
-	EmailID string
+	UserID  UUID
+	EmailID UUID
 }
 
 type TOTPEnrollmentStartedEvent struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 type TOTPActivatedEvent struct {
 	EventMeta
-	UserID            string
+	UserID            UUID
 	RecoveryCodeCount int
 }
 
 type TOTPDisabledEvent struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 type TOTPVerifiedEvent struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 type TOTPReplayRejectedEvent struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 type RecoveryCodeConsumedEvent struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 type PasskeyRegisteredEvent struct {
 	EventMeta
-	PasskeyID   string
-	UserID      string
+	PasskeyID   UUID
+	UserID      UUID
 	PasskeyName string
 }
 
 type PasskeyDeletedEvent struct {
 	EventMeta
-	PasskeyID string
-	UserID    string
+	PasskeyID UUID
+	UserID    UUID
 }
 
 type PasskeyAuthenticatedEvent struct {
 	EventMeta
-	PasskeyID string
-	UserID    string
+	PasskeyID UUID
+	UserID    UUID
 }
 
 type PATCreatedEvent struct {
 	EventMeta
-	PATID            string
-	UserID           string
+	PATID            UUID
+	UserID           UUID
 	PATName          string
-	BoundWorkspaceID string
+	BoundWorkspaceID UUID
 	Scopes           []string
 	ExpiresAt        *time.Time
 }
 
 type PATRevokedEvent struct {
 	EventMeta
-	PATID  string
-	UserID string
+	PATID  UUID
+	UserID UUID
 }
 
 type UserCredentialsRevokedEvent struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 // UserAnonymizedEvent reports that an instance administrator pseudonymized a
@@ -618,7 +621,7 @@ type UserCredentialsRevokedEvent struct {
 // separately.
 type UserAnonymizedEvent struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 // SecondFactorResetEvent reports that an instance administrator removed
@@ -627,14 +630,14 @@ type UserAnonymizedEvent struct {
 // notify the affected user out of band.
 type SecondFactorResetEvent struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 // RecoveryCodesRegeneratedEvent reports that the user replaced their
 // recovery codes; the previous set stopped working in the same transaction.
 type RecoveryCodesRegeneratedEvent struct {
 	EventMeta
-	UserID            string
+	UserID            UUID
 	RecoveryCodeCount int
 }
 
@@ -653,15 +656,15 @@ type SessionCreatedEvent struct {
 
 type SessionRevokedEvent struct {
 	EventMeta
-	SessionID string
-	UserID    string
+	SessionID UUID
+	UserID    UUID
 }
 
 // UserSessionsRevokedEvent reports that every active session of the user was
 // revoked in one operation ("log out everywhere").
 type UserSessionsRevokedEvent struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 // UserLockedEvent is emitted once when consecutive failures reach the
@@ -669,7 +672,7 @@ type UserSessionsRevokedEvent struct {
 // themselves.
 type UserLockedEvent struct {
 	EventMeta
-	UserID      string
+	UserID      UUID
 	LockedUntil time.Time
 	// Request carries the client network context supplied by the host through
 	// WithRequestMetadata, so listeners can throttle or alert by address
@@ -679,27 +682,27 @@ type UserLockedEvent struct {
 
 type PasswordResetRequestedEvent struct {
 	EventMeta
-	UserID    string
-	ResetID   string
+	UserID    UUID
+	ResetID   UUID
 	ExpiresAt time.Time
 }
 
 type PasswordResetCompletedEvent struct {
 	EventMeta
-	UserID string
+	UserID UUID
 }
 
 type EmailAuthenticationRequestedEvent struct {
 	EventMeta
-	UserID    string
-	EmailID   string
+	UserID    UUID
+	EmailID   UUID
 	ExpiresAt time.Time
 }
 
 type PATAuthenticatedEvent struct {
 	EventMeta
-	PATID  string
-	UserID string
+	PATID  UUID
+	UserID UUID
 }
 
 // PATRejectedEvent reports a rejected PAT authentication. The token owner,
@@ -712,7 +715,7 @@ type PATRejectedEvent struct {
 
 type SSOChallengeIssuedEvent struct {
 	EventMeta
-	ProviderConfigurationID string
+	ProviderConfigurationID UUID
 	ProviderKind            SSOProviderKind
 	Purpose                 string
 }
@@ -724,13 +727,13 @@ type SSOLinkedEvent struct {
 
 type SSOUnlinkedEvent struct {
 	EventMeta
-	UserID     string
-	IdentityID string
+	UserID     UUID
+	IdentityID UUID
 }
 
 type SSOAuthenticatedEvent struct {
 	EventMeta
-	IdentityID     string
+	IdentityID     UUID
 	Authentication Authentication
 }
 
@@ -747,7 +750,7 @@ type SSOJITProvisionedEvent struct {
 	Identity   SSOIdentity
 	// DomainID references the confirmed workspace domain whose auto-join
 	// policy produced the account.
-	DomainID string
+	DomainID UUID
 }
 
 // WorkspaceDomainEvent is the shared payload of the workspace-domain
@@ -761,21 +764,21 @@ type WorkspaceDomainEvent struct {
 
 type RoleGrantedEvent struct {
 	EventMeta
-	UserID       string
+	UserID       UUID
 	Role         Role
 	PreviousRole Role
 }
 
 type InstanceRoleChangedEvent struct {
 	EventMeta
-	UserID       string
+	UserID       UUID
 	Role         InstanceRole
 	PreviousRole InstanceRole
 }
 
 type InstanceRoleRemovedEvent struct {
 	EventMeta
-	UserID       string
+	UserID       UUID
 	PreviousRole InstanceRole
 }
 
@@ -820,14 +823,14 @@ type OAuthEvent struct {
 // tells the directions apart.
 type UserStatusEvent struct {
 	EventMeta
-	UserID   string
+	UserID   UUID
 	Disabled bool
 }
 
 // UserProfileUpdatedEvent reports a profile display-name update.
 type UserProfileUpdatedEvent struct {
 	EventMeta
-	UserID          string
+	UserID          UUID
 	DisplayName     string
 	PreviousProfile string
 }
@@ -1210,7 +1213,7 @@ func mapTransactionError(err error) error {
 	return fmt.Errorf("%w: %v", ErrTransactionRejected, err)
 }
 
-func (m *Manager) newEventMeta(name EventName, operation, actorID, workspaceID string, audit AuditEvent) (EventMeta, error) {
+func (m *Manager) newEventMeta(name EventName, operation string, actorID, workspaceID UUID, audit AuditEvent) (EventMeta, error) {
 	id, err := m.newID()
 	if err != nil {
 		return EventMeta{}, err
@@ -1241,7 +1244,7 @@ func (m *Manager) mapStoreError(ctx context.Context, operation string, err error
 }
 
 func (m *Manager) emitAuditUnavailable(ctx context.Context, operation string) {
-	meta, err := m.newEventMeta(EventAuditUnavailable, operation, "", "", AuditEvent{})
+	meta, err := m.newEventMeta(EventAuditUnavailable, operation, UUID{}, UUID{}, AuditEvent{})
 	if err != nil {
 		return
 	}
@@ -1262,8 +1265,8 @@ func (m *Manager) emitAuthenticationSucceeded(ctx context.Context, operation str
 	})
 }
 
-func (m *Manager) emitAuthenticationFailed(ctx context.Context, operation string, audit AuditEvent, method AuthMethod, userID, reason string) {
-	meta, err := m.newEventMeta(EventAuthenticationFailed, operation, userID, "", audit)
+func (m *Manager) emitAuthenticationFailed(ctx context.Context, operation string, audit AuditEvent, method AuthMethod, userID UUID, reason string) {
+	meta, err := m.newEventMeta(EventAuthenticationFailed, operation, userID, UUID{}, audit)
 	if err != nil {
 		return
 	}

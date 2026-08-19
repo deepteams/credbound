@@ -88,7 +88,7 @@ type OAuthScopeDefinition struct {
 // and OIDC policy, and token lifetimes. A disabled issuer refuses every
 // discovery, authorization and token operation.
 type OAuthIssuer struct {
-	ID                       string
+	ID                       UUID
 	Issuer                   string
 	OIDCEnabled              bool
 	CIMDMode                 OAuthCIMDMode
@@ -108,9 +108,9 @@ type OAuthIssuer struct {
 // Access tokens are bound to its Resource URI and workspace and cannot be
 // replayed elsewhere.
 type OAuthProtectedResource struct {
-	ID          string
-	IssuerID    string
-	WorkspaceID string
+	ID          UUID
+	IssuerID    UUID
+	WorkspaceID UUID
 	Resource    string
 	Scopes      []OAuthScopeDefinition
 	CreatedAt   time.Time
@@ -123,8 +123,8 @@ type OAuthProtectedResource struct {
 // (equal to ID for pre-registered and DCR clients, the Client Identifier URL
 // for CIMD clients).
 type OAuthClient struct {
-	ID              string
-	IssuerID        string
+	ID              UUID
+	IssuerID        UUID
 	ClientID        string
 	Source          OAuthClientSource
 	Name            string
@@ -174,8 +174,8 @@ type IssuedOAuthClient struct {
 // registrations, and granting no authority over any resource. Only the HMAC
 // Digest of the raw token is stored.
 type OAuthInitialAccessToken struct {
-	ID                string
-	IssuerID          string
+	ID                UUID
+	IssuerID          UUID
 	Prefix            string
 	Digest            []byte
 	MaxRegistrations  int
@@ -197,12 +197,12 @@ type IssuedOAuthInitialAccessToken struct {
 // authorizing session for OIDC claims, and MetadataHash pins the client
 // metadata that was consented to. Revoking the grant kills its tokens.
 type OAuthGrant struct {
-	ID             string
-	IssuerID       string
-	ClientRecordID string
-	UserID         string
-	WorkspaceID    string
-	ResourceID     string
+	ID             UUID
+	IssuerID       UUID
+	ClientRecordID UUID
+	UserID         UUID
+	WorkspaceID    UUID
+	ResourceID     UUID
 	Scopes         []string
 	MetadataHash   []byte
 	AuthTime       time.Time
@@ -217,13 +217,13 @@ type OAuthGrant struct {
 // authorization, stored as an HMAC digest with its PKCE challenge and exact
 // redirect URI.
 type OAuthAuthorizationCode struct {
-	ID             string
+	ID             UUID
 	Prefix         string
 	Digest         []byte
-	GrantID        string
-	ClientRecordID string
+	GrantID        UUID
+	ClientRecordID UUID
 	RedirectURI    string
-	ResourceID     string
+	ResourceID     UUID
 	Scopes         []string
 	CodeChallenge  string
 	Nonce          string
@@ -236,14 +236,14 @@ type OAuthAuthorizationCode struct {
 // bound to one grant, resource and workspace. Only the HMAC Digest of the
 // raw token is stored.
 type OAuthAccessToken struct {
-	ID             string
+	ID             UUID
 	Prefix         string
 	Digest         []byte
-	GrantID        string
-	ClientRecordID string
-	UserID         string
-	WorkspaceID    string
-	ResourceID     string
+	GrantID        UUID
+	ClientRecordID UUID
+	UserID         UUID
+	WorkspaceID    UUID
+	ResourceID     UUID
 	Scopes         []string
 	CreatedAt      time.Time
 	ExpiresAt      time.Time
@@ -256,13 +256,13 @@ type OAuthAccessToken struct {
 // the owning client revokes it individually through RevokeOAuthToken, and
 // disabling the client, resource or issuer retires it implicitly.
 type OAuthClientAccessToken struct {
-	ID             string
+	ID             UUID
 	Prefix         string
 	Digest         []byte
-	ClientRecordID string
-	IssuerID       string
-	ResourceID     string
-	WorkspaceID    string
+	ClientRecordID UUID
+	IssuerID       UUID
+	ResourceID     UUID
+	WorkspaceID    UUID
 	Scopes         []string
 	CreatedAt      time.Time
 	ExpiresAt      time.Time
@@ -273,20 +273,20 @@ type OAuthClientAccessToken struct {
 // Tokens descending from the same initial issuance share a FamilyID; reuse
 // of a rotated token revokes the whole family.
 type OAuthRefreshToken struct {
-	ID             string
-	FamilyID       string
+	ID             UUID
+	FamilyID       UUID
 	Prefix         string
 	Digest         []byte
-	GrantID        string
-	ClientRecordID string
-	UserID         string
-	WorkspaceID    string
-	ResourceID     string
+	GrantID        UUID
+	ClientRecordID UUID
+	UserID         UUID
+	WorkspaceID    UUID
+	ResourceID     UUID
 	Scopes         []string
 	CreatedAt      time.Time
 	ExpiresAt      time.Time
 	UsedAt         *time.Time
-	ReplacedByID   string
+	ReplacedByID   UUID
 	RevokedAt      *time.Time
 }
 
@@ -295,12 +295,12 @@ type OAuthRefreshToken struct {
 // resource and scopes a request may act with. Like Authentication, it must
 // never be rebuilt from client-supplied data.
 type OAuthAuthentication struct {
-	TokenID         string
-	GrantID         string
-	ClientRecordID  string
+	TokenID         UUID
+	GrantID         UUID
+	ClientRecordID  UUID
 	ClientID        string
-	UserID          string
-	WorkspaceID     string
+	UserID          UUID
+	WorkspaceID     UUID
 	Resource        string
 	Scopes          []string
 	AuthenticatedAt time.Time
@@ -400,7 +400,7 @@ type CreateOAuthIssuerInput struct {
 // CreateOAuthProtectedResourceInput describes a new MCP resource: its
 // issuer, HTTPS resource URI and scope definitions.
 type CreateOAuthProtectedResourceInput struct {
-	IssuerID string
+	IssuerID UUID
 	Resource string
 	Scopes   []OAuthScopeDefinition
 }
@@ -511,7 +511,7 @@ type OAuthConsent struct {
 	RedirectURI  string
 	RedirectHost string
 	Resource     string
-	WorkspaceID  string
+	WorkspaceID  UUID
 	Scopes       []OAuthConsentScope
 	// RequiresStepUp signals that a requested scope demands a stronger or
 	// fresher authentication than the current session; the host should

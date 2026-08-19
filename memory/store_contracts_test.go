@@ -90,7 +90,7 @@ func TestAnonymizeUserScrubsSCIMAndInvitations(t *testing.T) {
 		t.Fatal(err)
 	}
 	user := credbound.User{ID: f.id(), Email: "worker@example.com", DisplayName: "Worker", CreatedAt: f.now, UpdatedAt: f.now}
-	membership := credbound.Membership{WorkspaceID: f.workspace.ID, UserID: user.ID, Role: credbound.RoleMember, Status: credbound.MembershipActive, ProvisioningSource: configuration.ID, CreatedAt: f.now, UpdatedAt: f.now}
+	membership := credbound.Membership{WorkspaceID: f.workspace.ID, UserID: user.ID, Role: credbound.RoleMember, Status: credbound.MembershipActive, ProvisioningSource: configuration.ID.String(), CreatedAt: f.now, UpdatedAt: f.now}
 	link := credbound.SCIMUser{
 		ID: f.id(), ConfigurationID: configuration.ID, UserID: user.ID, ExternalID: "worker", UserName: "worker@example.com", DisplayName: "Worker",
 		Emails:     []credbound.SCIMEmail{{Value: "worker@example.com", Primary: true}},
@@ -118,7 +118,7 @@ func TestAnonymizeUserScrubsSCIMAndInvitations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scrubbed.UserName != "anonymized-"+link.ID || scrubbed.DisplayName != "" || scrubbed.ExternalID != "" ||
+	if scrubbed.UserName != "anonymized-"+link.ID.String() || scrubbed.DisplayName != "" || scrubbed.ExternalID != "" ||
 		len(scrubbed.Emails) != 0 || len(scrubbed.Attributes) != 0 || scrubbed.Active || scrubbed.DeprovisionedAt == nil {
 		t.Fatalf("SCIM profile kept personal data: %#v", scrubbed)
 	}
@@ -140,7 +140,7 @@ func TestAnonymizeUserScrubsSCIMAndInvitations(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if value.ID != invitation.ID || value.Email != "anonymized-"+invitation.ID+"@invalid" {
+		if value.ID != invitation.ID || value.Email != "anonymized-"+invitation.ID.String()+"@invalid" {
 			t.Fatalf("accepted invitation kept its address: %#v", value)
 		}
 		accepted++

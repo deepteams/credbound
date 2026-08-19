@@ -77,7 +77,7 @@ func (m *Manager) SignUp(ctx context.Context, input SignUpInput) (_ SignUpResult
 		if secretErr != nil {
 			return SignUpResult{}, secretErr
 		}
-		rawToken = emailVerificationPrefix + "_" + emailID + "_" + base64.RawURLEncoding.EncodeToString(secret)
+		rawToken = emailVerificationPrefix + "_" + emailID.String() + "_" + base64.RawURLEncoding.EncodeToString(secret)
 		verification = &EmailVerificationCredential{
 			EmailID: emailID, Digest: m.tokenDigest("email-verification:" + rawToken), ExpiresAt: now.Add(m.emailVerificationTTL),
 		}
@@ -96,7 +96,7 @@ func (m *Manager) SignUp(ctx context.Context, input SignUpInput) (_ SignUpResult
 	}
 	workspace := Workspace{ID: workspaceID, Name: workspaceName, CreatedAt: now, UpdatedAt: now}
 	membership := Membership{WorkspaceID: workspaceID, UserID: userID, Role: RoleAdmin, Status: MembershipActive, ProvisioningSource: ProvisioningSourceLocal, CreatedAt: now, UpdatedAt: now}
-	event, err := m.newAudit(ctx, userID, "signup", "workspace", workspaceID, workspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, userID, "signup", "workspace", workspaceID.String(), workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return SignUpResult{}, err
 	}
@@ -130,7 +130,7 @@ func (m *Manager) SignUp(ctx context.Context, input SignUpInput) (_ SignUpResult
 			// UserByEmail) claimed the address first: report it exactly like
 			// the lookup collision. The existing owner is unknown here, so
 			// the audit carries no actor.
-			return m.signUpCollision(ctx, "")
+			return m.signUpCollision(ctx, UUID{})
 		}
 		return SignUpResult{}, m.mapStoreError(ctx, "auth.signup", err)
 	}
@@ -151,7 +151,7 @@ func (m *Manager) SignUp(ctx context.Context, input SignUpInput) (_ SignUpResult
 
 // signUpCollision audits a registration against a taken address and returns
 // the outwardly successful result the host relays to the end user.
-func (m *Manager) signUpCollision(ctx context.Context, ownerID string) (SignUpResult, error) {
+func (m *Manager) signUpCollision(ctx context.Context, ownerID UUID) (SignUpResult, error) {
 	if auditErr := m.appendAuthenticationAudit(ctx, ownerID, "signup", AuditFailed, "email_taken"); auditErr != nil {
 		return SignUpResult{}, auditErr
 	}

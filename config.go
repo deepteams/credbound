@@ -174,7 +174,7 @@ type Config struct {
 	// policy (use TrustUnverified to trust an IdP that asserts no ACR or
 	// AMR). Every key must name a registered provider and every policy must
 	// require something.
-	SSOAssurance map[string]SSOAssurancePolicy
+	SSOAssurance map[UUID]SSOAssurancePolicy
 	// TransactionHooks run inside every mutation's store transaction, after
 	// the mutation and before the audit write. A hook error aborts the
 	// commit. More hooks can be added later with AddTransactionHook.
@@ -256,8 +256,8 @@ type Manager struct {
 	sessionIdleTimeout    time.Duration
 	sessionTouchInterval  time.Duration
 	emailIssuanceCooldown time.Duration
-	ssoProviders          map[string]SSOProvider
-	ssoAssurance          map[string]SSOAssurancePolicy
+	ssoProviders          map[UUID]SSOProvider
+	ssoAssurance          map[UUID]SSOAssurancePolicy
 	events                *eventRegistry
 	scimStore             SCIMStore
 	privacyStore          PrivacyStore
@@ -362,7 +362,7 @@ func New(cfg Config) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	ssoProviders := make(map[string]SSOProvider, len(cfg.SSOProviders))
+	ssoProviders := make(map[UUID]SSOProvider, len(cfg.SSOProviders))
 	for _, provider := range cfg.SSOProviders {
 		if nilSSOProvider(provider) || !validUUIDv7(provider.ConfigurationID()) || !validSSOProviderKind(provider.Kind()) {
 			return nil, fmt.Errorf("%w: invalid SSO provider registration", ErrInvalidInput)
@@ -372,7 +372,7 @@ func New(cfg Config) (*Manager, error) {
 		}
 		ssoProviders[provider.ConfigurationID()] = provider
 	}
-	ssoAssurance := make(map[string]SSOAssurancePolicy, len(cfg.SSOAssurance))
+	ssoAssurance := make(map[UUID]SSOAssurancePolicy, len(cfg.SSOAssurance))
 	for configurationID, policy := range cfg.SSOAssurance {
 		if _, registered := ssoProviders[configurationID]; !registered {
 			return nil, fmt.Errorf("%w: SSO assurance policy for unregistered provider configuration", ErrInvalidInput)

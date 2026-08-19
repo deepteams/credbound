@@ -141,7 +141,7 @@ func TestSignUpVerificationFlow(t *testing.T) {
 	if result.ExistingAccount {
 		t.Fatal("fresh signup reported an existing account")
 	}
-	if !uuidV7.MatchString(result.User.ID) || !uuidV7.MatchString(result.Workspace.ID) {
+	if !uuidV7.MatchString(result.User.ID.String()) || !uuidV7.MatchString(result.Workspace.ID.String()) {
 		t.Fatalf("non UUIDv7 ids: %q %q", result.User.ID, result.Workspace.ID)
 	}
 	if result.User.Email != "visitor@example.com" || result.User.DisplayName != "Visitor" || result.User.LastSeenAt != nil {
@@ -150,7 +150,7 @@ func TestSignUpVerificationFlow(t *testing.T) {
 	if result.Workspace.Name != "Startup" {
 		t.Fatalf("workspace = %#v", result.Workspace)
 	}
-	if result.Authentication.UserID != "" {
+	if result.Authentication.UserID != (credbound.UUID{}) {
 		t.Fatalf("verification-pending signup returned an authentication: %#v", result.Authentication)
 	}
 	verification := result.EmailVerification
@@ -277,7 +277,7 @@ func TestSignUpExistingAccountIsIndistinguishable(t *testing.T) {
 	if err != nil || !race.ExistingAccount {
 		t.Fatalf("race collision = %#v, %v", race, err)
 	}
-	if race.User.ID != "" || race.Workspace.ID != "" || race.EmailVerification.Token != "" || race.Authentication.UserID != "" {
+	if race.User.ID != (credbound.UUID{}) || race.Workspace.ID != (credbound.UUID{}) || race.EmailVerification.Token != "" || race.Authentication.UserID != (credbound.UUID{}) {
 		t.Fatalf("race collision leaked data: %#v", race)
 	}
 	if _, err := f.manager.ConfirmEmail(ctx, first.EmailVerification.Token); err != nil {

@@ -47,13 +47,13 @@ type UserDataExport struct {
 // OAuth grants only with the OAuth capability. Token digests, sealed passkey
 // credentials and the audit log are never included; the audit log stays
 // available through AuditEvents under its own retention policy.
-func (m *Manager) ExportUserData(ctx context.Context, actor Authentication, userID string) (_ UserDataExport, err error) {
+func (m *Manager) ExportUserData(ctx context.Context, actor Authentication, userID UUID) (_ UserDataExport, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "user.data.export", started, err) }()
-	if actor.UserID == "" {
+	if actor.UserID == (UUID{}) {
 		return UserDataExport{}, ErrUnauthorized
 	}
-	if userID == "" {
+	if userID == (UUID{}) {
 		userID = actor.UserID
 	}
 	if userID == actor.UserID {
@@ -150,7 +150,7 @@ func (m *Manager) ExportUserData(ctx context.Context, actor Authentication, user
 
 	if m.oauthStore != nil {
 		if export.OAuthGrants, err = drainPages(func(page PageRequest) iter.Seq2[PageEvent[OAuthGrant], error] {
-			return m.oauthStore.OAuthGrants(ctx, userID, "", page)
+			return m.oauthStore.OAuthGrants(ctx, userID, UUID{}, page)
 		}); err != nil {
 			return UserDataExport{}, err
 		}

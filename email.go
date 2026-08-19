@@ -35,17 +35,17 @@ func (m *Manager) BeginEmailAddition(ctx context.Context, actor Authentication, 
 	if err != nil {
 		return IssuedEmailVerification{}, err
 	}
-	raw := emailVerificationPrefix + "_" + id + "_" + base64.RawURLEncoding.EncodeToString(secret)
+	raw := emailVerificationPrefix + "_" + id.String() + "_" + base64.RawURLEncoding.EncodeToString(secret)
 	now := m.now()
 	email := EmailAddress{ID: id, UserID: actor.UserID, Address: address, CreatedAt: now, UpdatedAt: now}
 	verification := EmailVerificationCredential{
 		EmailID: id, Digest: m.tokenDigest("email-verification:" + raw), ExpiresAt: now.Add(m.emailVerificationTTL),
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "email.add", "email", id, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "email.add", "email", id.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return IssuedEmailVerification{}, err
 	}
-	meta, err := m.newEventMeta(EventEmailAdded, "auth.email.add.begin", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventEmailAdded, "auth.email.add.begin", actor.UserID, UUID{}, event)
 	if err != nil {
 		return IssuedEmailVerification{}, err
 	}
@@ -82,7 +82,7 @@ func (m *Manager) ResendEmailVerification(ctx context.Context, address string) (
 	if allowed, err := m.allowEmailIssuance(ctx, normalized, "email.verification.resend"); err != nil {
 		return IssuedEmailVerification{}, err
 	} else if !allowed {
-		if auditErr := m.appendAuthenticationAudit(ctx, "", "email.verification.resend", AuditFailed, "throttled"); auditErr != nil {
+		if auditErr := m.appendAuthenticationAudit(ctx, UUID{}, "email.verification.resend", AuditFailed, "throttled"); auditErr != nil {
 			return IssuedEmailVerification{}, auditErr
 		}
 		return IssuedEmailVerification{}, nil
@@ -104,13 +104,13 @@ func (m *Manager) ResendEmailVerification(ctx context.Context, address string) (
 	if pending {
 		emailID = email.ID
 	}
-	raw := emailVerificationPrefix + "_" + emailID + "_" + base64.RawURLEncoding.EncodeToString(secret)
+	raw := emailVerificationPrefix + "_" + emailID.String() + "_" + base64.RawURLEncoding.EncodeToString(secret)
 	tokenDigest := m.tokenDigest("email-verification:" + raw)
 	if lookupErr != nil {
 		if !errors.Is(lookupErr, ErrNotFound) {
 			return IssuedEmailVerification{}, lookupErr
 		}
-		if auditErr := m.appendAuthenticationAudit(ctx, "", "email.verification.resend", AuditFailed, "unknown_email"); auditErr != nil {
+		if auditErr := m.appendAuthenticationAudit(ctx, UUID{}, "email.verification.resend", AuditFailed, "unknown_email"); auditErr != nil {
 			return IssuedEmailVerification{}, auditErr
 		}
 		return IssuedEmailVerification{}, nil
@@ -125,11 +125,11 @@ func (m *Manager) ResendEmailVerification(ctx context.Context, address string) (
 	verification := EmailVerificationCredential{
 		EmailID: email.ID, Digest: tokenDigest, ExpiresAt: now.Add(m.emailVerificationTTL),
 	}
-	event, err := m.newAudit(ctx, email.UserID, "email.verification.resend", "email", email.ID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, email.UserID, "email.verification.resend", "email", email.ID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return IssuedEmailVerification{}, err
 	}
-	meta, err := m.newEventMeta(EventEmailVerificationResent, "auth.email.verification.resend", email.UserID, "", event)
+	meta, err := m.newEventMeta(EventEmailVerificationResent, "auth.email.verification.resend", email.UserID, UUID{}, event)
 	if err != nil {
 		return IssuedEmailVerification{}, err
 	}
@@ -177,13 +177,13 @@ func (m *Manager) ConfirmEmail(ctx context.Context, raw string) (_ EmailAddress,
 		return EmailAddress{}, ErrInvalidCredentials
 	}
 	verifiedAt := m.now()
-	event, err := m.newAudit(ctx, email.UserID, "email.verify", "email", email.ID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, email.UserID, "email.verify", "email", email.ID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return EmailAddress{}, err
 	}
 	email.VerifiedAt = &verifiedAt
 	email.UpdatedAt = verifiedAt
-	meta, err := m.newEventMeta(EventEmailConfirmed, "auth.email.add.confirm", email.UserID, "", event)
+	meta, err := m.newEventMeta(EventEmailConfirmed, "auth.email.add.confirm", email.UserID, UUID{}, event)
 	if err != nil {
 		return EmailAddress{}, err
 	}
@@ -202,7 +202,7 @@ func (m *Manager) ConfirmEmail(ctx context.Context, raw string) (_ EmailAddress,
 // SetPrimaryEmail makes one of the actor's verified addresses the primary
 // address, atomically with the audit event. It requires a fresh AAL2
 // step-up; an unverified address is rejected by the store.
-func (m *Manager) SetPrimaryEmail(ctx context.Context, actor Authentication, emailID string) (err error) {
+func (m *Manager) SetPrimaryEmail(ctx context.Context, actor Authentication, emailID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.email.primary.set", started, err) }()
 	if err := m.requireStepUp(ctx, actor, "auth.email.primary.set"); err != nil {
@@ -211,11 +211,11 @@ func (m *Manager) SetPrimaryEmail(ctx context.Context, actor Authentication, ema
 	if !validUUIDv7(emailID) {
 		return fmt.Errorf("%w: invalid email id", ErrInvalidInput)
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "email.primary.set", "email", emailID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "email.primary.set", "email", emailID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
-	meta, err := m.newEventMeta(EventPrimaryEmailChanged, "auth.email.primary.set", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventPrimaryEmailChanged, "auth.email.primary.set", actor.UserID, UUID{}, event)
 	if err != nil {
 		return err
 	}
@@ -234,7 +234,7 @@ func (m *Manager) SetPrimaryEmail(ctx context.Context, actor Authentication, ema
 // RemoveEmail deletes one of the actor's addresses, atomically with the
 // audit event. It requires a fresh AAL2 step-up; the primary address and the
 // last verified address cannot be removed.
-func (m *Manager) RemoveEmail(ctx context.Context, actor Authentication, emailID string) (err error) {
+func (m *Manager) RemoveEmail(ctx context.Context, actor Authentication, emailID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.email.remove", started, err) }()
 	if err := m.requireStepUp(ctx, actor, "auth.email.remove"); err != nil {
@@ -243,11 +243,11 @@ func (m *Manager) RemoveEmail(ctx context.Context, actor Authentication, emailID
 	if !validUUIDv7(emailID) {
 		return fmt.Errorf("%w: invalid email id", ErrInvalidInput)
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "email.remove", "email", emailID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "email.remove", "email", emailID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
-	meta, err := m.newEventMeta(EventEmailRemoved, "auth.email.remove", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventEmailRemoved, "auth.email.remove", actor.UserID, UUID{}, event)
 	if err != nil {
 		return err
 	}
@@ -266,11 +266,11 @@ func (m *Manager) RemoveEmail(ctx context.Context, actor Authentication, emailID
 // Emails streams a user's email addresses. An empty userID means the actor,
 // which requires a recent interactive authentication; reading another user
 // requires admin users read.
-func (m *Manager) Emails(ctx context.Context, actor Authentication, userID string, page PageRequest) iter.Seq2[PageEvent[EmailAddress], error] {
-	if actor.UserID == "" {
+func (m *Manager) Emails(ctx context.Context, actor Authentication, userID UUID, page PageRequest) iter.Seq2[PageEvent[EmailAddress], error] {
+	if actor.UserID == (UUID{}) {
 		return errorSeq[PageEvent[EmailAddress]](ErrUnauthorized)
 	}
-	if userID == "" {
+	if userID == (UUID{}) {
 		userID = actor.UserID
 	}
 	if userID == actor.UserID {
@@ -291,7 +291,7 @@ func (m *Manager) Emails(ctx context.Context, actor Authentication, userID strin
 // cursor across all pages. Internal predicates must range over this — not a
 // single fixed-limit page — so an account holding more addresses than one
 // page never has an address silently skipped.
-func (m *Manager) userEmails(ctx context.Context, userID string) iter.Seq2[EmailAddress, error] {
+func (m *Manager) userEmails(ctx context.Context, userID UUID) iter.Seq2[EmailAddress, error] {
 	return func(yield func(EmailAddress, error) bool) {
 		cursor := ""
 		for {
@@ -335,20 +335,29 @@ func (m *Manager) allowEmailIssuance(ctx context.Context, address, purpose strin
 	return m.emailThrottle.ClaimEmailIssuance(ctx, key, purpose, now, now.Add(-m.emailIssuanceCooldown))
 }
 
-func parseEmailVerification(raw string) (string, bool) {
+func parseEmailVerification(raw string) (UUID, bool) {
 	return parseSecretToken(emailVerificationPrefix, raw)
 }
 
 // parseSecretToken validates the shared `<prefix>_<uuidv7>_<43 chars>` token
 // shape and returns the embedded identifier.
-func parseSecretToken(prefix, raw string) (string, bool) {
+// parseSecretToken splits a single-display token into the record it addresses
+// and validates its shape. The identifier travels as canonical text inside the
+// token, so this is where it is parsed back: a token whose identifier is
+// malformed, or not one Credbound minted, is rejected here rather than reaching
+// a store lookup.
+func parseSecretToken(prefix, raw string) (UUID, bool) {
 	parts := strings.SplitN(raw, "_", 3)
-	if len(parts) != 3 || parts[0] != prefix || !validUUIDv7(parts[1]) || len(parts[2]) != 43 {
-		return "", false
+	if len(parts) != 3 || parts[0] != prefix || len(parts[2]) != 43 {
+		return UUID{}, false
+	}
+	id, err := ParseUUID(parts[1])
+	if err != nil || !validUUIDv7(id) {
+		return UUID{}, false
 	}
 	secret, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil || len(secret) != 32 {
-		return "", false
+		return UUID{}, false
 	}
-	return parts[1], true
+	return id, true
 }

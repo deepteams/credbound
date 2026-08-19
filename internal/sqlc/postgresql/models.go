@@ -8,6 +8,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"time"
+
+	"github.com/deepteams/credbound/internal/dbtype"
 )
 
 type CredboundAuditChain struct {
@@ -17,32 +19,32 @@ type CredboundAuditChain struct {
 }
 
 type CredboundAuditEvent struct {
-	ID           string         `json:"id"`
-	OccurredAt   time.Time      `json:"occurred_at"`
-	ActorKind    string         `json:"actor_kind"`
-	ActorID      sql.NullString `json:"actor_id"`
-	Action       string         `json:"action"`
-	ResourceType string         `json:"resource_type"`
-	ResourceID   string         `json:"resource_id"`
-	WorkspaceID  sql.NullString `json:"workspace_id"`
-	Outcome      string         `json:"outcome"`
-	Reason       string         `json:"reason"`
-	IpAddress    string         `json:"ip_address"`
-	UserAgent    string         `json:"user_agent"`
-	Sequence     sql.NullInt64  `json:"sequence"`
-	PreviousHash []byte         `json:"previous_hash"`
-	Hash         []byte         `json:"hash"`
+	ID           dbtype.UUID   `json:"id"`
+	OccurredAt   time.Time     `json:"occurred_at"`
+	ActorKind    string        `json:"actor_kind"`
+	ActorID      dbtype.UUID   `json:"actor_id"`
+	Action       string        `json:"action"`
+	ResourceType string        `json:"resource_type"`
+	ResourceID   string        `json:"resource_id"`
+	WorkspaceID  dbtype.UUID   `json:"workspace_id"`
+	Outcome      string        `json:"outcome"`
+	Reason       string        `json:"reason"`
+	IpAddress    string        `json:"ip_address"`
+	UserAgent    string        `json:"user_agent"`
+	Sequence     sql.NullInt64 `json:"sequence"`
+	PreviousHash []byte        `json:"previous_hash"`
+	Hash         []byte        `json:"hash"`
 }
 
 type CredboundConsumedCeremony struct {
-	ID        string    `json:"id"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ID        dbtype.UUID `json:"id"`
+	ExpiresAt time.Time   `json:"expires_at"`
 }
 
 type CredboundEmailAuthentication struct {
-	ID        string       `json:"id"`
-	UserID    string       `json:"user_id"`
-	EmailID   string       `json:"email_id"`
+	ID        dbtype.UUID  `json:"id"`
+	UserID    dbtype.UUID  `json:"user_id"`
+	EmailID   dbtype.UUID  `json:"email_id"`
 	Digest    []byte       `json:"digest"`
 	CreatedAt time.Time    `json:"created_at"`
 	ExpiresAt time.Time    `json:"expires_at"`
@@ -61,73 +63,73 @@ type CredboundInstance struct {
 }
 
 type CredboundInstanceAdministrator struct {
-	UserID    string    `json:"user_id"`
-	Role      string    `json:"role"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	UserID    dbtype.UUID `json:"user_id"`
+	Role      string      `json:"role"`
+	CreatedAt time.Time   `json:"created_at"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 type CredboundLoginThrottle struct {
-	UserID         string       `json:"user_id"`
+	UserID         dbtype.UUID  `json:"user_id"`
 	FailedAttempts int64        `json:"failed_attempts"`
 	LockedUntil    sql.NullTime `json:"locked_until"`
 	UpdatedAt      time.Time    `json:"updated_at"`
 }
 
 type CredboundMembership struct {
-	WorkspaceID        string    `json:"workspace_id"`
-	UserID             string    `json:"user_id"`
-	Role               string    `json:"role"`
-	Status             string    `json:"status"`
-	ProvisioningSource string    `json:"provisioning_source"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	WorkspaceID        dbtype.UUID `json:"workspace_id"`
+	UserID             dbtype.UUID `json:"user_id"`
+	Role               string      `json:"role"`
+	Status             string      `json:"status"`
+	ProvisioningSource string      `json:"provisioning_source"`
+	CreatedAt          time.Time   `json:"created_at"`
+	UpdatedAt          time.Time   `json:"updated_at"`
 }
 
 type CredboundOauthAccessToken struct {
-	ID       string          `json:"id"`
+	ID       dbtype.UUID     `json:"id"`
 	Prefix   string          `json:"prefix"`
-	GrantID  string          `json:"grant_id"`
+	GrantID  dbtype.UUID     `json:"grant_id"`
 	DataJson json.RawMessage `json:"data_json"`
 }
 
 type CredboundOauthAuthorizationCode struct {
-	ID        string          `json:"id"`
+	ID        dbtype.UUID     `json:"id"`
 	Prefix    string          `json:"prefix"`
-	GrantID   string          `json:"grant_id"`
+	GrantID   dbtype.UUID     `json:"grant_id"`
 	UsedAt    sql.NullTime    `json:"used_at"`
 	ExpiresAt time.Time       `json:"expires_at"`
 	DataJson  json.RawMessage `json:"data_json"`
 }
 
 type CredboundOauthClient struct {
-	ID        string          `json:"id"`
-	IssuerID  string          `json:"issuer_id"`
+	ID        dbtype.UUID     `json:"id"`
+	IssuerID  dbtype.UUID     `json:"issuer_id"`
 	ClientID  string          `json:"client_id"`
 	CreatedAt time.Time       `json:"created_at"`
 	DataJson  json.RawMessage `json:"data_json"`
 }
 
 type CredboundOauthClientAccessToken struct {
-	ID             string          `json:"id"`
+	ID             dbtype.UUID     `json:"id"`
 	Prefix         string          `json:"prefix"`
-	ClientRecordID string          `json:"client_record_id"`
+	ClientRecordID dbtype.UUID     `json:"client_record_id"`
 	DataJson       json.RawMessage `json:"data_json"`
 }
 
 type CredboundOauthGrant struct {
-	ID             string          `json:"id"`
-	ClientRecordID string          `json:"client_record_id"`
-	ResourceID     string          `json:"resource_id"`
-	UserID         string          `json:"user_id"`
-	WorkspaceID    string          `json:"workspace_id"`
+	ID             dbtype.UUID     `json:"id"`
+	ClientRecordID dbtype.UUID     `json:"client_record_id"`
+	ResourceID     dbtype.UUID     `json:"resource_id"`
+	UserID         dbtype.UUID     `json:"user_id"`
+	WorkspaceID    dbtype.UUID     `json:"workspace_id"`
 	CreatedAt      time.Time       `json:"created_at"`
 	DataJson       json.RawMessage `json:"data_json"`
 }
 
 type CredboundOauthInitialAccessToken struct {
-	ID                string          `json:"id"`
-	IssuerID          string          `json:"issuer_id"`
+	ID                dbtype.UUID     `json:"id"`
+	IssuerID          dbtype.UUID     `json:"issuer_id"`
 	Prefix            string          `json:"prefix"`
 	RegistrationCount int32           `json:"registration_count"`
 	MaxRegistrations  int32           `json:"max_registrations"`
@@ -137,17 +139,17 @@ type CredboundOauthInitialAccessToken struct {
 }
 
 type CredboundOauthIssuer struct {
-	ID        string          `json:"id"`
+	ID        dbtype.UUID     `json:"id"`
 	Issuer    string          `json:"issuer"`
 	CreatedAt time.Time       `json:"created_at"`
 	DataJson  json.RawMessage `json:"data_json"`
 }
 
 type CredboundOauthRefreshToken struct {
-	ID        string          `json:"id"`
-	FamilyID  string          `json:"family_id"`
+	ID        dbtype.UUID     `json:"id"`
+	FamilyID  dbtype.UUID     `json:"family_id"`
 	Prefix    string          `json:"prefix"`
-	GrantID   string          `json:"grant_id"`
+	GrantID   dbtype.UUID     `json:"grant_id"`
 	UsedAt    sql.NullTime    `json:"used_at"`
 	RevokedAt sql.NullTime    `json:"revoked_at"`
 	ExpiresAt time.Time       `json:"expires_at"`
@@ -155,17 +157,17 @@ type CredboundOauthRefreshToken struct {
 }
 
 type CredboundOauthResource struct {
-	ID          string          `json:"id"`
-	IssuerID    string          `json:"issuer_id"`
-	WorkspaceID string          `json:"workspace_id"`
+	ID          dbtype.UUID     `json:"id"`
+	IssuerID    dbtype.UUID     `json:"issuer_id"`
+	WorkspaceID dbtype.UUID     `json:"workspace_id"`
 	Resource    string          `json:"resource"`
 	CreatedAt   time.Time       `json:"created_at"`
 	DataJson    json.RawMessage `json:"data_json"`
 }
 
 type CredboundPasskey struct {
-	ID             string       `json:"id"`
-	UserID         string       `json:"user_id"`
+	ID             dbtype.UUID  `json:"id"`
+	UserID         dbtype.UUID  `json:"user_id"`
 	Name           string       `json:"name"`
 	CredentialID   []byte       `json:"credential_id"`
 	CredentialJson []byte       `json:"credential_json"`
@@ -174,14 +176,14 @@ type CredboundPasskey struct {
 }
 
 type CredboundPasswordCredential struct {
-	UserID    string    `json:"user_id"`
-	Hash      string    `json:"hash"`
-	UpdatedAt time.Time `json:"updated_at"`
+	UserID    dbtype.UUID `json:"user_id"`
+	Hash      string      `json:"hash"`
+	UpdatedAt time.Time   `json:"updated_at"`
 }
 
 type CredboundPasswordReset struct {
-	ID        string       `json:"id"`
-	UserID    string       `json:"user_id"`
+	ID        dbtype.UUID  `json:"id"`
+	UserID    dbtype.UUID  `json:"user_id"`
 	Digest    []byte       `json:"digest"`
 	CreatedAt time.Time    `json:"created_at"`
 	ExpiresAt time.Time    `json:"expires_at"`
@@ -189,12 +191,12 @@ type CredboundPasswordReset struct {
 }
 
 type CredboundPersonalAccessToken struct {
-	ID          string          `json:"id"`
-	UserID      string          `json:"user_id"`
+	ID          dbtype.UUID     `json:"id"`
+	UserID      dbtype.UUID     `json:"user_id"`
 	Name        string          `json:"name"`
 	Prefix      string          `json:"prefix"`
 	Digest      []byte          `json:"digest"`
-	WorkspaceID sql.NullString  `json:"workspace_id"`
+	WorkspaceID dbtype.UUID     `json:"workspace_id"`
 	ScopesJson  json.RawMessage `json:"scopes_json"`
 	CreatedAt   time.Time       `json:"created_at"`
 	ExpiresAt   sql.NullTime    `json:"expires_at"`
@@ -203,14 +205,14 @@ type CredboundPersonalAccessToken struct {
 }
 
 type CredboundRecoveryCode struct {
-	UserID string       `json:"user_id"`
+	UserID dbtype.UUID  `json:"user_id"`
 	Digest []byte       `json:"digest"`
 	UsedAt sql.NullTime `json:"used_at"`
 }
 
 type CredboundScimConfiguration struct {
-	ID                    string          `json:"id"`
-	WorkspaceID           string          `json:"workspace_id"`
+	ID                    dbtype.UUID     `json:"id"`
+	WorkspaceID           dbtype.UUID     `json:"workspace_id"`
 	Enabled               bool            `json:"enabled"`
 	DefaultRole           string          `json:"default_role"`
 	TrustDirectoryEmails  bool            `json:"trust_directory_emails"`
@@ -220,8 +222,8 @@ type CredboundScimConfiguration struct {
 }
 
 type CredboundScimCredential struct {
-	ID              string       `json:"id"`
-	ConfigurationID string       `json:"configuration_id"`
+	ID              dbtype.UUID  `json:"id"`
+	ConfigurationID dbtype.UUID  `json:"configuration_id"`
 	Prefix          string       `json:"prefix"`
 	Digest          []byte       `json:"digest"`
 	CreatedAt       time.Time    `json:"created_at"`
@@ -231,8 +233,8 @@ type CredboundScimCredential struct {
 }
 
 type CredboundScimGroup struct {
-	ID              string          `json:"id"`
-	ConfigurationID string          `json:"configuration_id"`
+	ID              dbtype.UUID     `json:"id"`
+	ConfigurationID dbtype.UUID     `json:"configuration_id"`
 	ExternalID      sql.NullString  `json:"external_id"`
 	DisplayName     string          `json:"display_name"`
 	MemberIdsJson   json.RawMessage `json:"member_ids_json"`
@@ -242,9 +244,9 @@ type CredboundScimGroup struct {
 }
 
 type CredboundScimUser struct {
-	ID                 string          `json:"id"`
-	ConfigurationID    string          `json:"configuration_id"`
-	UserID             string          `json:"user_id"`
+	ID                 dbtype.UUID     `json:"id"`
+	ConfigurationID    dbtype.UUID     `json:"configuration_id"`
+	UserID             dbtype.UUID     `json:"user_id"`
 	ExternalID         sql.NullString  `json:"external_id"`
 	NormalizedUserName string          `json:"normalized_user_name"`
 	DisplayName        string          `json:"display_name"`
@@ -257,8 +259,8 @@ type CredboundScimUser struct {
 }
 
 type CredboundSession struct {
-	ID                   string       `json:"id"`
-	UserID               string       `json:"user_id"`
+	ID                   dbtype.UUID  `json:"id"`
+	UserID               dbtype.UUID  `json:"user_id"`
 	Method               string       `json:"method"`
 	Level                int16        `json:"level"`
 	AuthenticatedAt      time.Time    `json:"authenticated_at"`
@@ -273,9 +275,9 @@ type CredboundSession struct {
 }
 
 type CredboundSsoIdentity struct {
-	ID                      string       `json:"id"`
-	UserID                  string       `json:"user_id"`
-	ProviderConfigurationID string       `json:"provider_configuration_id"`
+	ID                      dbtype.UUID  `json:"id"`
+	UserID                  dbtype.UUID  `json:"user_id"`
+	ProviderConfigurationID dbtype.UUID  `json:"provider_configuration_id"`
 	ProviderKind            string       `json:"provider_kind"`
 	Issuer                  string       `json:"issuer"`
 	Subject                 string       `json:"subject"`
@@ -285,16 +287,16 @@ type CredboundSsoIdentity struct {
 }
 
 type CredboundTotpFactor struct {
-	UserID          string    `json:"user_id"`
-	EncryptedSecret []byte    `json:"encrypted_secret"`
-	Active          bool      `json:"active"`
-	LastUsedStep    int64     `json:"last_used_step"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	UserID          dbtype.UUID `json:"user_id"`
+	EncryptedSecret []byte      `json:"encrypted_secret"`
+	Active          bool        `json:"active"`
+	LastUsedStep    int64       `json:"last_used_step"`
+	CreatedAt       time.Time   `json:"created_at"`
+	UpdatedAt       time.Time   `json:"updated_at"`
 }
 
 type CredboundUser struct {
-	ID          string       `json:"id"`
+	ID          dbtype.UUID  `json:"id"`
 	DisplayName string       `json:"display_name"`
 	Disabled    bool         `json:"disabled"`
 	LastSeenAt  sql.NullTime `json:"last_seen_at"`
@@ -303,8 +305,8 @@ type CredboundUser struct {
 }
 
 type CredboundUserEmail struct {
-	ID                    string       `json:"id"`
-	UserID                string       `json:"user_id"`
+	ID                    dbtype.UUID  `json:"id"`
+	UserID                dbtype.UUID  `json:"user_id"`
 	Address               string       `json:"address"`
 	IsPrimary             bool         `json:"is_primary"`
 	VerifiedAt            sql.NullTime `json:"verified_at"`
@@ -315,7 +317,7 @@ type CredboundUserEmail struct {
 }
 
 type CredboundWorkspace struct {
-	ID         string       `json:"id"`
+	ID         dbtype.UUID  `json:"id"`
 	Name       string       `json:"name"`
 	CreatedAt  time.Time    `json:"created_at"`
 	UpdatedAt  time.Time    `json:"updated_at"`
@@ -324,29 +326,29 @@ type CredboundWorkspace struct {
 }
 
 type CredboundWorkspaceDomain struct {
-	ID                         string       `json:"id"`
-	WorkspaceID                string       `json:"workspace_id"`
+	ID                         dbtype.UUID  `json:"id"`
+	WorkspaceID                dbtype.UUID  `json:"workspace_id"`
 	Domain                     string       `json:"domain"`
 	Challenge                  string       `json:"challenge"`
 	ConfirmedAt                sql.NullTime `json:"confirmed_at"`
 	AutoJoin                   bool         `json:"auto_join"`
 	AutoJoinRole               string       `json:"auto_join_role"`
-	SsoProviderConfigurationID string       `json:"sso_provider_configuration_id"`
+	SsoProviderConfigurationID dbtype.UUID  `json:"sso_provider_configuration_id"`
 	EnforceSso                 bool         `json:"enforce_sso"`
 	CreatedAt                  time.Time    `json:"created_at"`
 	UpdatedAt                  time.Time    `json:"updated_at"`
 }
 
 type CredboundWorkspaceInvitation struct {
-	ID             string         `json:"id"`
-	WorkspaceID    string         `json:"workspace_id"`
-	Email          string         `json:"email"`
-	Role           string         `json:"role"`
-	InvitedBy      string         `json:"invited_by"`
-	Digest         []byte         `json:"digest"`
-	CreatedAt      time.Time      `json:"created_at"`
-	ExpiresAt      time.Time      `json:"expires_at"`
-	AcceptedAt     sql.NullTime   `json:"accepted_at"`
-	AcceptedUserID sql.NullString `json:"accepted_user_id"`
-	RevokedAt      sql.NullTime   `json:"revoked_at"`
+	ID             dbtype.UUID  `json:"id"`
+	WorkspaceID    dbtype.UUID  `json:"workspace_id"`
+	Email          string       `json:"email"`
+	Role           string       `json:"role"`
+	InvitedBy      dbtype.UUID  `json:"invited_by"`
+	Digest         []byte       `json:"digest"`
+	CreatedAt      time.Time    `json:"created_at"`
+	ExpiresAt      time.Time    `json:"expires_at"`
+	AcceptedAt     sql.NullTime `json:"accepted_at"`
+	AcceptedUserID dbtype.UUID  `json:"accepted_user_id"`
+	RevokedAt      sql.NullTime `json:"revoked_at"`
 }

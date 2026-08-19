@@ -32,7 +32,7 @@ func (m *Manager) CreatePAT(ctx context.Context, actor Authentication, input Cre
 	if input.ExpiresAt != nil && !input.ExpiresAt.After(m.now()) {
 		return IssuedPAT{}, &ValidationError{Field: "expires_at", Rule: "past", Message: "PAT expiration must be in the future"}
 	}
-	if input.WorkspaceID != "" {
+	if input.WorkspaceID != (UUID{}) {
 		if err := m.AuthorizePermission(ctx, actor, input.WorkspaceID, PermissionWorkspaceAccess); err != nil {
 			return IssuedPAT{}, err
 		}
@@ -61,7 +61,7 @@ func (m *Manager) CreatePAT(ctx context.Context, actor Authentication, input Cre
 		Digest: digest(m.patPepper, raw), WorkspaceID: input.WorkspaceID,
 		Scopes: scopes, CreatedAt: now, ExpiresAt: cloneTime(input.ExpiresAt),
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "pat.create", "pat", id, input.WorkspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "pat.create", "pat", id.String(), input.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return IssuedPAT{}, err
 	}
@@ -108,15 +108,15 @@ func (m *Manager) AuthenticatePAT(ctx context.Context, raw string) (_ Authentica
 		valid = false
 	}
 	if !valid {
-		actor := ""
-		if pat.ID != "" {
+		actor := UUID{}
+		if pat.ID != (UUID{}) {
 			actor = pat.UserID
 		}
 		audit, auditErr := m.recordAuthenticationAudit(ctx, actor, "auth.pat", AuditFailed, "invalid_credentials")
 		if auditErr != nil {
 			return Authentication{}, auditErr
 		}
-		if meta, metaErr := m.newEventMeta(EventPATRejected, "auth.pat.authenticate", actor, "", audit); metaErr == nil {
+		if meta, metaErr := m.newEventMeta(EventPATRejected, "auth.pat.authenticate", actor, UUID{}, audit); metaErr == nil {
 			rejected := PATRejectedEvent{EventMeta: meta, Reason: "invalid_credentials"}
 			m.events.emit(ctx, EventPATRejected, func(listener EventListener) error { return listener.OnPATRejected(ctx, rejected) })
 		}
@@ -136,13 +136,13 @@ func (m *Manager) AuthenticatePAT(ctx context.Context, raw string) (_ Authentica
 		m.emitAuthenticationFailed(ctx, "auth.pat.authenticate", audit, MethodPAT, pat.UserID, "invalid_credentials")
 		return Authentication{}, ErrInvalidCredentials
 	}
-	if pat.WorkspaceID != "" {
+	if pat.WorkspaceID != (UUID{}) {
 		workspaceActor := Authentication{UserID: pat.UserID, WorkspaceID: pat.WorkspaceID}
 		if err := m.AuthorizePermission(ctx, workspaceActor, pat.WorkspaceID, PermissionWorkspaceAccess); err != nil {
 			return Authentication{}, ErrInvalidCredentials
 		}
 	}
-	event, err := m.newAudit(ctx, pat.UserID, "auth.pat", "pat", pat.ID, pat.WorkspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, pat.UserID, "auth.pat", "pat", pat.ID.String(), pat.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, err
 	}
@@ -164,20 +164,20 @@ func (m *Manager) AuthenticatePAT(ctx context.Context, raw string) (_ Authentica
 // RevokePAT revokes one of the actor's own tokens, atomically with the audit
 // event. It requires a fresh AAL2 step-up; a token belonging to another user
 // is reported as ErrNotFound by the store.
-func (m *Manager) RevokePAT(ctx context.Context, actor Authentication, patID string) (err error) {
+func (m *Manager) RevokePAT(ctx context.Context, actor Authentication, patID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.pat.revoke", started, err) }()
 	if err := m.requireStepUp(ctx, actor, "auth.pat.revoke"); err != nil {
 		return err
 	}
-	if patID == "" {
+	if patID == (UUID{}) {
 		return fmt.Errorf("%w: PAT id is required", ErrInvalidInput)
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "pat.revoke", "pat", patID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "pat.revoke", "pat", patID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
-	meta, err := m.newEventMeta(EventPATRevoked, "auth.pat.revoke", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventPATRevoked, "auth.pat.revoke", actor.UserID, UUID{}, event)
 	if err != nil {
 		return err
 	}
@@ -197,11 +197,11 @@ func (m *Manager) RevokePAT(ctx context.Context, actor Authentication, patID str
 // secret. An empty userID means the actor, which requires a recent
 // interactive authentication; reading another user requires admin users
 // read — the same scoping as Sessions, Emails and Passkeys.
-func (m *Manager) PATs(ctx context.Context, actor Authentication, userID string, page PageRequest) iter.Seq2[PageEvent[PAT], error] {
-	if actor.UserID == "" {
+func (m *Manager) PATs(ctx context.Context, actor Authentication, userID UUID, page PageRequest) iter.Seq2[PageEvent[PAT], error] {
+	if actor.UserID == (UUID{}) {
 		return errorSeq[PageEvent[PAT]](ErrUnauthorized)
 	}
-	if userID == "" {
+	if userID == (UUID{}) {
 		userID = actor.UserID
 	}
 	if userID == actor.UserID {

@@ -30,7 +30,7 @@ func (m *Manager) BeginPasswordReset(ctx context.Context, email string) (_ Issue
 	if allowed, err := m.allowEmailIssuance(ctx, normalized, "password.reset.request"); err != nil {
 		return IssuedPasswordReset{}, err
 	} else if !allowed {
-		if auditErr := m.appendAuthenticationAudit(ctx, "", "password.reset.request", AuditFailed, "throttled"); auditErr != nil {
+		if auditErr := m.appendAuthenticationAudit(ctx, UUID{}, "password.reset.request", AuditFailed, "throttled"); auditErr != nil {
 			return IssuedPasswordReset{}, auditErr
 		}
 		return IssuedPasswordReset{}, nil
@@ -46,13 +46,13 @@ func (m *Manager) BeginPasswordReset(ctx context.Context, email string) (_ Issue
 	if err != nil {
 		return IssuedPasswordReset{}, err
 	}
-	raw := passwordResetPrefix + "_" + id + "_" + base64.RawURLEncoding.EncodeToString(secret)
+	raw := passwordResetPrefix + "_" + id.String() + "_" + base64.RawURLEncoding.EncodeToString(secret)
 	tokenDigest := m.tokenDigest("password-reset:" + raw)
 	if lookupErr != nil {
 		if !errors.Is(lookupErr, ErrNotFound) {
 			return IssuedPasswordReset{}, lookupErr
 		}
-		if auditErr := m.appendAuthenticationAudit(ctx, "", "password.reset.request", AuditFailed, "unknown_email"); auditErr != nil {
+		if auditErr := m.appendAuthenticationAudit(ctx, UUID{}, "password.reset.request", AuditFailed, "unknown_email"); auditErr != nil {
 			return IssuedPasswordReset{}, auditErr
 		}
 		return IssuedPasswordReset{}, nil
@@ -68,11 +68,11 @@ func (m *Manager) BeginPasswordReset(ctx context.Context, email string) (_ Issue
 		ID: id, UserID: user.ID, Digest: tokenDigest,
 		CreatedAt: now, ExpiresAt: now.Add(m.passwordResetTTL),
 	}
-	event, err := m.newAudit(ctx, user.ID, "password.reset.request", "user", user.ID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, user.ID, "password.reset.request", "user", user.ID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return IssuedPasswordReset{}, err
 	}
-	meta, err := m.newEventMeta(EventPasswordResetRequested, "auth.password.reset.begin", user.ID, "", event)
+	meta, err := m.newEventMeta(EventPasswordResetRequested, "auth.password.reset.begin", user.ID, UUID{}, event)
 	if err != nil {
 		return IssuedPasswordReset{}, err
 	}
@@ -151,15 +151,15 @@ func (m *Manager) CompletePasswordReset(ctx context.Context, raw, newPassword st
 		return User{}, fmt.Errorf("hash password: %w", err)
 	}
 	now := m.now()
-	event, err := m.newAudit(ctx, user.ID, "password.reset.complete", "user", user.ID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, user.ID, "password.reset.complete", "user", user.ID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return User{}, err
 	}
-	resetMeta, err := m.newEventMeta(EventPasswordResetCompleted, "auth.password.reset.complete", user.ID, "", event)
+	resetMeta, err := m.newEventMeta(EventPasswordResetCompleted, "auth.password.reset.complete", user.ID, UUID{}, event)
 	if err != nil {
 		return User{}, err
 	}
-	revokeMeta, err := m.newEventMeta(EventUserCredentialsRevoked, "auth.password.reset.complete", user.ID, "", event)
+	revokeMeta, err := m.newEventMeta(EventUserCredentialsRevoked, "auth.password.reset.complete", user.ID, UUID{}, event)
 	if err != nil {
 		return User{}, err
 	}

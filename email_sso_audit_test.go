@@ -30,7 +30,7 @@ func TestMultipleEmailLifecycleAndLastSeen(t *testing.T) {
 	}
 
 	issued, err := f.manager.BeginEmailAddition(ctx, authn, " Alias@Example.com ")
-	if err != nil || !uuidV7.MatchString(issued.Email.ID) || issued.Email.VerifiedAt != nil || issued.Token == "" {
+	if err != nil || !uuidV7.MatchString(issued.Email.ID.String()) || issued.Email.VerifiedAt != nil || issued.Token == "" {
 		t.Fatalf("issued secondary email = %#v, %v", issued, err)
 	}
 	if _, err := f.manager.AuthenticatePassword(ctx, "alias@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrInvalidCredentials) {
@@ -67,7 +67,7 @@ func TestMultipleEmailLifecycleAndLastSeen(t *testing.T) {
 	if len(emails) != 2 || countPrimary(emails) != 1 {
 		t.Fatalf("email list = %#v", emails)
 	}
-	var oldPrimaryID string
+	var oldPrimaryID credbound.UUID
 	for _, email := range emails {
 		if email.Address == "root@example.com" {
 			oldPrimaryID = email.ID
@@ -110,7 +110,7 @@ func TestClientAuditAPIControlsEnvelope(t *testing.T) {
 			recorded = &page.items[index]
 		}
 	}
-	if recorded == nil || recorded.ActorID != authn.UserID || !uuidV7.MatchString(recorded.ID) || !recorded.OccurredAt.Equal(f.now) {
+	if recorded == nil || recorded.ActorID != authn.UserID || !uuidV7.MatchString(recorded.ID.String()) || !recorded.OccurredAt.Equal(f.now) {
 		t.Fatalf("manager-controlled audit envelope = %#v", recorded)
 	}
 	if err := f.manager.RecordAudit(ctx, authn, credbound.AuditInput{
@@ -130,7 +130,7 @@ func TestClientAuditAPIControlsEnvelope(t *testing.T) {
 	}
 	if err := f.manager.RecordAudit(ctx, authn, credbound.AuditInput{
 		Action: "billing.invoice.sent", ResourceType: "invoice", ResourceID: "inv_123",
-		WorkspaceID: "0198b463-0000-7000-8000-0000000000ee", Outcome: credbound.AuditFailed,
+		WorkspaceID: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000ee"), Outcome: credbound.AuditFailed,
 	}); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("foreign workspace audit = %v", err)
 	}
@@ -167,7 +167,7 @@ func TestClientAuditAPIControlsEnvelope(t *testing.T) {
 // step-up forces IdP reauthentication (SSO-003, SSO-004).
 func TestSSOLinkLoginStepUpAndUnlink(t *testing.T) {
 	provider := &fakeSSOProvider{
-		configurationID: "0198b463-0000-7000-8000-0000000000aa", kind: credbound.SSOProviderOIDC,
+		configurationID: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000aa"), kind: credbound.SSOProviderOIDC,
 		claims: credbound.SSOClaims{Issuer: "https://idp.example.com", Subject: "subject-1", Email: "root@example.com", EmailVerified: true},
 	}
 	f := newFixture(t, provider)
@@ -197,8 +197,8 @@ func TestSSOLinkLoginStepUpAndUnlink(t *testing.T) {
 	if _, err := f.manager.FinishSSO(ctx, duplicateLink.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("duplicate SSO link = %v", err)
 	}
-	identities := collectSSOIdentities(t, f.manager.SSOIdentities(ctx, linked, "", credbound.PageRequest{}))
-	if len(identities) != 1 || !uuidV7.MatchString(identities[0].ID) || identities[0].ProviderKind != credbound.SSOProviderOIDC {
+	identities := collectSSOIdentities(t, f.manager.SSOIdentities(ctx, linked, credbound.UUID{}, credbound.PageRequest{}))
+	if len(identities) != 1 || !uuidV7.MatchString(identities[0].ID.String()) || identities[0].ProviderKind != credbound.SSOProviderOIDC {
 		t.Fatalf("SSO identities = %#v", identities)
 	}
 
@@ -248,17 +248,17 @@ func TestEmailAndSSOFailureBoundaries(t *testing.T) {
 	if _, err := emailFixture.manager.BeginEmailAddition(ctx, credbound.Authentication{}, "alias@example.com"); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("anonymous email addition = %v", err)
 	}
-	if _, err := emailFixture.manager.BeginEmailAddition(ctx, authn, "invalid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if _, err := emailFixture.manager.BeginEmailAddition(ctx, authn, "00000000-0000-4000-8000-000000000000"); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid secondary email = %v", err)
 	}
-	if err := emailFixture.manager.SetPrimaryEmail(ctx, aal2(authn.UserID, emailFixture.now), "invalid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := emailFixture.manager.SetPrimaryEmail(ctx, aal2(authn.UserID, emailFixture.now), credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid primary email id = %v", err)
 	}
 	// EMAIL-003: removing an address requires an AAL2 step-up.
-	if err := emailFixture.manager.RemoveEmail(ctx, authn, "invalid"); !errors.Is(err, credbound.ErrStepUpRequired) {
+	if err := emailFixture.manager.RemoveEmail(ctx, authn, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("email removal without step-up = %v", err)
 	}
-	if err := emailFixture.manager.RemoveEmail(ctx, aal2(authn.UserID, emailFixture.now), "invalid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := emailFixture.manager.RemoveEmail(ctx, aal2(authn.UserID, emailFixture.now), credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid removed email id = %v", err)
 	}
 	missingToken := "cbe_0198b463-0000-7000-8000-0000000000ff_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -281,21 +281,21 @@ func TestEmailAndSSOFailureBoundaries(t *testing.T) {
 	if _, err := emailFixture.manager.ConfirmEmail(ctx, issued.Token); !errors.Is(err, credbound.ErrExpired) {
 		t.Fatalf("expired email proof = %v", err)
 	}
-	assertEmailSequenceError(t, emailFixture.manager.Emails(ctx, credbound.Authentication{}, "", credbound.PageRequest{}), credbound.ErrUnauthorized)
-	assertEmailSequenceError(t, emailFixture.manager.Emails(ctx, authn, "", credbound.PageRequest{Limit: 101}), credbound.ErrStepUpRequired)
+	assertEmailSequenceError(t, emailFixture.manager.Emails(ctx, credbound.Authentication{}, credbound.UUID{}, credbound.PageRequest{}), credbound.ErrUnauthorized)
+	assertEmailSequenceError(t, emailFixture.manager.Emails(ctx, authn, credbound.UUID{}, credbound.PageRequest{Limit: 101}), credbound.ErrStepUpRequired)
 	freshAuth := authn
 	freshAuth.AuthenticatedAt = emailFixture.now
-	assertEmailSequenceError(t, emailFixture.manager.Emails(ctx, freshAuth, "", credbound.PageRequest{Limit: 101}), credbound.ErrInvalidInput)
-	if values := collectEmails(t, emailFixture.manager.Emails(ctx, freshAuth, "", credbound.PageRequest{})); len(values) != 2 {
+	assertEmailSequenceError(t, emailFixture.manager.Emails(ctx, freshAuth, credbound.UUID{}, credbound.PageRequest{Limit: 101}), credbound.ErrInvalidInput)
+	if values := collectEmails(t, emailFixture.manager.Emails(ctx, freshAuth, credbound.UUID{}, credbound.PageRequest{})); len(values) != 2 {
 		t.Fatalf("default self email list = %#v", values)
 	}
 	admin := aal2(authn.UserID, emailFixture.now)
-	if values := collectEmails(t, emailFixture.manager.Emails(ctx, admin, "0198b463-0000-7000-8000-0000000000ee", credbound.PageRequest{})); len(values) != 0 {
+	if values := collectEmails(t, emailFixture.manager.Emails(ctx, admin, credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000ee"), credbound.PageRequest{})); len(values) != 0 {
 		t.Fatalf("missing user's emails = %#v", values)
 	}
 
 	provider := &fakeSSOProvider{
-		configurationID: "0198b463-0000-7000-8000-0000000000bb", kind: credbound.SSOProviderGitHub,
+		configurationID: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000bb"), kind: credbound.SSOProviderGitHub,
 		claims: credbound.SSOClaims{Issuer: "https://github.com", Subject: "42"},
 	}
 	ssoFixture := newFixture(t, provider)
@@ -306,7 +306,7 @@ func TestEmailAndSSOFailureBoundaries(t *testing.T) {
 	if _, err := ssoFixture.manager.BeginSSOStepUp(ctx, credbound.Authentication{}, provider.configurationID); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("anonymous SSO step-up = %v", err)
 	}
-	if _, err := ssoFixture.manager.BeginSSO(ctx, "0198b463-0000-7000-8000-0000000000ff"); !errors.Is(err, credbound.ErrNotFound) {
+	if _, err := ssoFixture.manager.BeginSSO(ctx, credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000ff")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("unknown SSO provider = %v", err)
 	}
 	provider.beginErr = errors.New("provider offline")
@@ -348,14 +348,14 @@ func TestEmailAndSSOFailureBoundaries(t *testing.T) {
 	if _, err := ssoFixture.manager.FinishSSO(ctx, expiring.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrExpired) {
 		t.Fatalf("expired SSO continuation = %v", err)
 	}
-	if err := ssoFixture.manager.UnlinkSSO(ctx, authn, "invalid"); !errors.Is(err, credbound.ErrStepUpRequired) {
+	if err := ssoFixture.manager.UnlinkSSO(ctx, authn, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("SSO unlink without step-up = %v", err)
 	}
-	if err := ssoFixture.manager.UnlinkSSO(ctx, aal2(authn.UserID, ssoFixture.now), "invalid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := ssoFixture.manager.UnlinkSSO(ctx, aal2(authn.UserID, ssoFixture.now), credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid SSO identity id = %v", err)
 	}
-	assertSSOSequenceError(t, ssoFixture.manager.SSOIdentities(ctx, credbound.Authentication{}, "", credbound.PageRequest{}), credbound.ErrUnauthorized)
-	assertSSOSequenceError(t, ssoFixture.manager.SSOIdentities(ctx, aal2(authn.UserID, ssoFixture.now), "", credbound.PageRequest{Limit: 101}), credbound.ErrInvalidInput)
+	assertSSOSequenceError(t, ssoFixture.manager.SSOIdentities(ctx, credbound.Authentication{}, credbound.UUID{}, credbound.PageRequest{}), credbound.ErrUnauthorized)
+	assertSSOSequenceError(t, ssoFixture.manager.SSOIdentities(ctx, aal2(authn.UserID, ssoFixture.now), credbound.UUID{}, credbound.PageRequest{Limit: 101}), credbound.ErrInvalidInput)
 }
 
 func collectEmails(t *testing.T, sequence func(func(credbound.PageEvent[credbound.EmailAddress], error) bool)) []credbound.EmailAddress {
@@ -419,7 +419,7 @@ func assertSSOSequenceError(t *testing.T, sequence func(func(credbound.PageEvent
 }
 
 type fakeSSOProvider struct {
-	configurationID string
+	configurationID credbound.UUID
 	kind            credbound.SSOProviderKind
 	claims          credbound.SSOClaims
 	lastRequest     credbound.SSORequest
@@ -428,7 +428,7 @@ type fakeSSOProvider struct {
 	incomplete      bool
 }
 
-func (f *fakeSSOProvider) ConfigurationID() string         { return f.configurationID }
+func (f *fakeSSOProvider) ConfigurationID() credbound.UUID { return f.configurationID }
 func (f *fakeSSOProvider) Kind() credbound.SSOProviderKind { return f.kind }
 func (f *fakeSSOProvider) Begin(_ context.Context, request credbound.SSORequest) (credbound.SSOProviderChallenge, error) {
 	f.lastRequest = request
@@ -455,7 +455,7 @@ func (f *fakeSSOProvider) Finish(_ context.Context, session, response []byte) (c
 // sentinel, and only the asserted authentication context grants AAL2.
 func TestSSOAssurancePolicy(t *testing.T) {
 	provider := &fakeSSOProvider{
-		configurationID: "0198b463-0000-7000-8000-0000000000bb", kind: credbound.SSOProviderOIDC,
+		configurationID: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000bb"), kind: credbound.SSOProviderOIDC,
 		claims: credbound.SSOClaims{Issuer: "https://idp.example.com", Subject: "subject-2"},
 	}
 	store := memory.New()
@@ -465,7 +465,7 @@ func TestSSOAssurancePolicy(t *testing.T) {
 		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
 		Clock: func() time.Time { return now }, Random: &counterReader{next: 0x51},
 		SSOProviders: []credbound.SSOProvider{provider},
-		SSOAssurance: map[string]credbound.SSOAssurancePolicy{
+		SSOAssurance: map[credbound.UUID]credbound.SSOAssurancePolicy{
 			provider.configurationID: {AcceptedACR: []string{"urn:example:mfa"}, RequiredAMR: []string{"mfa"}},
 		},
 	})
@@ -521,7 +521,7 @@ func TestSSOAssurancePolicy(t *testing.T) {
 		Store: store, Passwords: &fakePasswords{},
 		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
 		SSOProviders: []credbound.SSOProvider{provider},
-		SSOAssurance: map[string]credbound.SSOAssurancePolicy{"0198b463-0000-7000-8000-0000000000cc": {AcceptedACR: []string{"x"}}},
+		SSOAssurance: map[credbound.UUID]credbound.SSOAssurancePolicy{credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000cc"): {AcceptedACR: []string{"x"}}},
 	}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("unregistered policy error = %v", err)
 	}
@@ -529,7 +529,7 @@ func TestSSOAssurancePolicy(t *testing.T) {
 		Store: store, Passwords: &fakePasswords{},
 		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
 		SSOProviders: []credbound.SSOProvider{provider},
-		SSOAssurance: map[string]credbound.SSOAssurancePolicy{provider.configurationID: {}},
+		SSOAssurance: map[credbound.UUID]credbound.SSOAssurancePolicy{provider.configurationID: {}},
 	}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("empty policy error = %v", err)
 	}
@@ -539,7 +539,7 @@ func TestSSOAssurancePolicy(t *testing.T) {
 		Store: store, Passwords: &fakePasswords{},
 		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
 		SSOProviders: []credbound.SSOProvider{provider},
-		SSOAssurance: map[string]credbound.SSOAssurancePolicy{provider.configurationID: {AcceptedACR: []string{""}}},
+		SSOAssurance: map[credbound.UUID]credbound.SSOAssurancePolicy{provider.configurationID: {AcceptedACR: []string{""}}},
 	}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("blank ACR policy error = %v", err)
 	}
@@ -547,7 +547,7 @@ func TestSSOAssurancePolicy(t *testing.T) {
 		Store: store, Passwords: &fakePasswords{},
 		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
 		SSOProviders: []credbound.SSOProvider{provider},
-		SSOAssurance: map[string]credbound.SSOAssurancePolicy{provider.configurationID: {RequiredAMR: []string{"  "}}},
+		SSOAssurance: map[credbound.UUID]credbound.SSOAssurancePolicy{provider.configurationID: {RequiredAMR: []string{"  "}}},
 	}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("blank AMR policy error = %v", err)
 	}
@@ -558,7 +558,7 @@ func TestSSOAssurancePolicy(t *testing.T) {
 // cannot satisfy a RequireMFA workspace or a step-up on its own word.
 func TestSSOAAL1WithoutAssurance(t *testing.T) {
 	provider := &fakeSSOProvider{
-		configurationID: "0198b463-0000-7000-8000-0000000000dd", kind: credbound.SSOProviderOIDC,
+		configurationID: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000dd"), kind: credbound.SSOProviderOIDC,
 		claims: credbound.SSOClaims{Issuer: "https://idp.example.com", Subject: "subject-3", Email: "root@example.com", EmailVerified: true},
 	}
 	store := memory.New()

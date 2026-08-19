@@ -64,7 +64,7 @@ func TestPostgreSQLMigrationsAndStore(t *testing.T) {
 	workspace := credbound.Workspace{ID: pgID(3), Name: "Main", CreatedAt: now, UpdatedAt: now}
 	membership := credbound.Membership{WorkspaceID: workspace.ID, UserID: user.ID, Role: credbound.RoleAdmin, Status: credbound.MembershipActive, CreatedAt: now, UpdatedAt: now}
 	administrator := credbound.InstanceAdministrator{UserID: user.ID, Role: credbound.InstanceRoleRoot, CreatedAt: now, UpdatedAt: now}
-	commit := pgCommit(now, pgID(4), user.ID, "instance.bootstrap", workspace.ID, workspace.ID)
+	commit := pgCommit(now, pgID(4), user.ID, "instance.bootstrap", workspace.ID.String(), workspace.ID)
 	if err := store.Bootstrap(ctx, user, email, credbound.PasswordCredential{UserID: user.ID, Hash: "hash", UpdatedAt: now}, workspace, membership, administrator, commit); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestPostgreSQLMigrationsAndStore(t *testing.T) {
 		t.Fatalf("workspace = %#v, %v", got, err)
 	}
 	issuer := credbound.OAuthIssuer{ID: pgID(5), Issuer: "https://auth.example.com", CreatedAt: now, UpdatedAt: now}
-	if err := store.CreateOAuthIssuer(ctx, issuer, pgCommit(now, pgID(6), user.ID, "oauth.issuer.created", issuer.ID, "")); err != nil {
+	if err := store.CreateOAuthIssuer(ctx, issuer, pgCommit(now, pgID(6), user.ID, "oauth.issuer.created", issuer.ID.String(), credbound.UUID{})); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := store.OAuthIssuerByURL(ctx, issuer.Issuer); err != nil || got.ID != issuer.ID {
@@ -97,7 +97,7 @@ func TestPostgreSQLMigrationsAndStore(t *testing.T) {
 	assertPostgreSQLSequence(t, store.OAuthIssuers(ctx, page))
 	assertPostgreSQLSequence(t, store.OAuthProtectedResources(ctx, workspace.ID, page))
 	assertPostgreSQLSequence(t, store.OAuthClients(ctx, issuer.ID, page))
-	assertPostgreSQLSequence(t, store.OAuthGrants(ctx, "", "", page))
+	assertPostgreSQLSequence(t, store.OAuthGrants(ctx, credbound.UUID{}, credbound.UUID{}, page))
 	assertPostgreSQLSequence(t, store.OAuthGrants(ctx, user.ID, workspace.ID, page))
 	configurationID := pgID(7)
 	assertPostgreSQLSequence(t, store.SCIMUsers(ctx, configurationID, credbound.SCIMFilter{}, page))
@@ -123,52 +123,52 @@ func TestPostgreSQLMigrationsAndStore(t *testing.T) {
 	second := credbound.User{ID: pgID(8), Email: "second@example.com", DisplayName: "Second", CreatedAt: now, UpdatedAt: now}
 	secondEmail := credbound.EmailAddress{ID: pgID(9), UserID: second.ID, Address: second.Email, Primary: true, VerifiedAt: &now, CreatedAt: now, UpdatedAt: now}
 	secondMembership := credbound.Membership{WorkspaceID: workspace.ID, UserID: second.ID, Role: credbound.RoleAdmin, Status: credbound.MembershipActive, CreatedAt: now, UpdatedAt: now}
-	if err := store.CreateUser(ctx, second, secondEmail, credbound.PasswordCredential{UserID: second.ID, Hash: "hash", UpdatedAt: now}, secondMembership, pgCommit(now, pgID(10), user.ID, "user.created", second.ID, workspace.ID)); err != nil {
+	if err := store.CreateUser(ctx, second, secondEmail, credbound.PasswordCredential{UserID: second.ID, Hash: "hash", UpdatedAt: now}, secondMembership, pgCommit(now, pgID(10), user.ID, "user.created", second.ID.String(), workspace.ID)); err != nil {
 		t.Fatal(err)
 	}
 	assertConcurrentPostgreSQLInvariant(t,
 		func() error {
 			value := membership
 			value.Role, value.UpdatedAt = credbound.RoleMember, now.Add(time.Second)
-			return store.UpsertMembership(ctx, value, pgCommit(now.Add(time.Second), pgID(11), user.ID, "membership.demote", user.ID, workspace.ID))
+			return store.UpsertMembership(ctx, value, pgCommit(now.Add(time.Second), pgID(11), user.ID, "membership.demote", user.ID.String(), workspace.ID))
 		},
 		func() error {
 			value := secondMembership
 			value.Role, value.UpdatedAt = credbound.RoleMember, now.Add(time.Second)
-			return store.UpsertMembership(ctx, value, pgCommit(now.Add(time.Second), pgID(12), user.ID, "membership.demote", second.ID, workspace.ID))
+			return store.UpsertMembership(ctx, value, pgCommit(now.Add(time.Second), pgID(12), user.ID, "membership.demote", second.ID.String(), workspace.ID))
 		},
 	)
 
 	secondRoot := credbound.InstanceAdministrator{UserID: second.ID, Role: credbound.InstanceRoleRoot, CreatedAt: now, UpdatedAt: now}
-	if err := store.SetInstanceRole(ctx, secondRoot, pgCommit(now.Add(2*time.Second), pgID(13), user.ID, "admin.root.add", second.ID, "")); err != nil {
+	if err := store.SetInstanceRole(ctx, secondRoot, pgCommit(now.Add(2*time.Second), pgID(13), user.ID, "admin.root.add", second.ID.String(), credbound.UUID{})); err != nil {
 		t.Fatal(err)
 	}
 	assertConcurrentPostgreSQLInvariant(t,
 		func() error {
 			value := administrator
 			value.Role, value.UpdatedAt = credbound.InstanceRoleDeveloper, now.Add(3*time.Second)
-			return store.SetInstanceRole(ctx, value, pgCommit(now.Add(3*time.Second), pgID(14), user.ID, "admin.root.demote", user.ID, ""))
+			return store.SetInstanceRole(ctx, value, pgCommit(now.Add(3*time.Second), pgID(14), user.ID, "admin.root.demote", user.ID.String(), credbound.UUID{}))
 		},
 		func() error {
 			value := secondRoot
 			value.Role, value.UpdatedAt = credbound.InstanceRoleDeveloper, now.Add(3*time.Second)
-			return store.SetInstanceRole(ctx, value, pgCommit(now.Add(3*time.Second), pgID(15), user.ID, "admin.root.demote", second.ID, ""))
+			return store.SetInstanceRole(ctx, value, pgCommit(now.Add(3*time.Second), pgID(15), user.ID, "admin.root.demote", second.ID.String(), credbound.UUID{}))
 		},
 	)
 
 	// Credential-currency guards: a finalization whose verified hash moved is
 	// refused, the current hash finalizes and clears the throttle, and session
 	// creation validates the credential fingerprint inside the transaction.
-	if _, err := store.RecordLoginFailure(ctx, second.ID, now, 5, now.Add(time.Hour), pgCommit(now, pgID(16), second.ID, "auth.failure", second.ID, "")); err != nil {
+	if _, err := store.RecordLoginFailure(ctx, second.ID, now, 5, now.Add(time.Hour), pgCommit(now, pgID(16), second.ID, "auth.failure", second.ID.String(), credbound.UUID{})); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.RecordPasswordAuthentication(ctx, second.ID, "stale", now, pgCommit(now, pgID(17), second.ID, "auth.password.stale", second.ID, "")); !errors.Is(err, credbound.ErrConflict) {
+	if err := store.RecordPasswordAuthentication(ctx, second.ID, "stale", now, pgCommit(now, pgID(17), second.ID, "auth.password.stale", second.ID.String(), credbound.UUID{})); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("stale finalization error = %v", err)
 	}
 	if _, err := store.LoginThrottleByUserID(ctx, second.ID); err != nil {
 		t.Fatalf("throttle vanished on refused finalization: %v", err)
 	}
-	if err := store.RecordPasswordAuthentication(ctx, second.ID, "hash", now, pgCommit(now, pgID(18), second.ID, "auth.password", second.ID, "")); err != nil {
+	if err := store.RecordPasswordAuthentication(ctx, second.ID, "hash", now, pgCommit(now, pgID(18), second.ID, "auth.password", second.ID.String(), credbound.UUID{})); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.LoginThrottleByUserID(ctx, second.ID); !errors.Is(err, credbound.ErrNotFound) {
@@ -179,7 +179,7 @@ func TestPostgreSQLMigrationsAndStore(t *testing.T) {
 		AuthenticatedAt: now, UserAgent: "agent", IPAddress: "203.0.113.7", Digest: []byte("digest"),
 		CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(24 * time.Hour),
 	}
-	if err := store.CreateSession(ctx, staleSession, credbound.CredentialFingerprint("previous"), pgCommit(now, pgID(20), second.ID, "session.create.stale", staleSession.ID, "")); !errors.Is(err, credbound.ErrConflict) {
+	if err := store.CreateSession(ctx, staleSession, credbound.CredentialFingerprint("previous"), pgCommit(now, pgID(20), second.ID, "session.create.stale", staleSession.ID.String(), credbound.UUID{})); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("stale session error = %v", err)
 	}
 
@@ -192,9 +192,9 @@ func TestPostgreSQLMigrationsAndStore(t *testing.T) {
 	changeAt := now.Add(4 * time.Second)
 	results := make(chan error, 1)
 	go func() {
-		results <- store.ChangePassword(ctx, credbound.PasswordCredential{UserID: second.ID, Hash: "hash2", UpdatedAt: changeAt}, changeAt, pgCommit(changeAt, pgID(22), second.ID, "password.change", second.ID, ""))
+		results <- store.ChangePassword(ctx, credbound.PasswordCredential{UserID: second.ID, Hash: "hash2", UpdatedAt: changeAt}, changeAt, pgCommit(changeAt, pgID(22), second.ID, "password.change", second.ID.String(), credbound.UUID{}))
 	}()
-	createErr := store.CreateSession(ctx, raceSession, credbound.CredentialFingerprint("hash"), pgCommit(now, pgID(23), second.ID, "session.create.race", raceSession.ID, ""))
+	createErr := store.CreateSession(ctx, raceSession, credbound.CredentialFingerprint("hash"), pgCommit(now, pgID(23), second.ID, "session.create.race", raceSession.ID.String(), credbound.UUID{}))
 	if err := <-results; err != nil {
 		t.Fatalf("racing password change = %v", err)
 	}
@@ -220,35 +220,35 @@ func TestPostgreSQLMigrationsAndStore(t *testing.T) {
 	// memory suite pins.
 	configuration := credbound.SCIMConfiguration{ID: pgID(24), WorkspaceID: workspace.ID, Enabled: true, DefaultRole: credbound.RoleMember, CreatedAt: now, UpdatedAt: now}
 	scimCredential := credbound.SCIMCredential{ID: pgID(25), ConfigurationID: configuration.ID, Prefix: "abcdef012345", Digest: []byte("digest"), CreatedAt: now}
-	if err := store.CreateSCIMConfiguration(ctx, configuration, scimCredential, pgCommit(now, pgID(26), user.ID, "scim.configuration.create", configuration.ID, workspace.ID)); err != nil {
+	if err := store.CreateSCIMConfiguration(ctx, configuration, scimCredential, pgCommit(now, pgID(26), user.ID, "scim.configuration.create", configuration.ID.String(), workspace.ID)); err != nil {
 		t.Fatal(err)
 	}
 	worker := credbound.User{ID: pgID(27), Email: "worker@example.com", DisplayName: "Worker", CreatedAt: now, UpdatedAt: now}
-	workerMembership := credbound.Membership{WorkspaceID: workspace.ID, UserID: worker.ID, Role: credbound.RoleMember, Status: credbound.MembershipActive, ProvisioningSource: configuration.ID, CreatedAt: now, UpdatedAt: now}
+	workerMembership := credbound.Membership{WorkspaceID: workspace.ID, UserID: worker.ID, Role: credbound.RoleMember, Status: credbound.MembershipActive, ProvisioningSource: configuration.ID.String(), CreatedAt: now, UpdatedAt: now}
 	link := credbound.SCIMUser{
 		ID: pgID(28), ConfigurationID: configuration.ID, UserID: worker.ID, ExternalID: "worker", UserName: "worker@example.com", DisplayName: "Worker",
 		Emails:     []credbound.SCIMEmail{{Value: "worker@example.com", Primary: true}},
 		Attributes: map[string]json.RawMessage{"title": json.RawMessage(`"Engineer"`)}, Active: true, CreatedAt: now, UpdatedAt: now,
 	}
 	workerEmail := credbound.EmailAddress{ID: pgID(29), UserID: worker.ID, Address: worker.Email, Primary: true, VerifiedAt: &now, CreatedAt: now, UpdatedAt: now}
-	if err := store.CreateSCIMUser(ctx, worker, workerEmail, workerMembership, link, pgCommit(now, pgID(30), scimCredential.ID, "scim.user.provision", link.ID, workspace.ID)); err != nil {
+	if err := store.CreateSCIMUser(ctx, worker, workerEmail, workerMembership, link, pgCommit(now, pgID(30), scimCredential.ID, "scim.user.provision", link.ID.String(), workspace.ID)); err != nil {
 		t.Fatal(err)
 	}
 	invitation := credbound.WorkspaceInvitation{ID: pgID(31), WorkspaceID: workspace.ID, Email: "worker@example.com", Role: credbound.RoleMember, InvitedBy: user.ID, Digest: []byte("digest"), CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
-	if err := store.CreateWorkspaceInvitation(ctx, invitation, pgCommit(now, pgID(32), user.ID, "invite.create", invitation.ID, workspace.ID)); err != nil {
+	if err := store.CreateWorkspaceInvitation(ctx, invitation, pgCommit(now, pgID(32), user.ID, "invite.create", invitation.ID.String(), workspace.ID)); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AcceptWorkspaceInvitation(ctx, invitation.ID, worker.ID, now, workerMembership, pgCommit(now, pgID(33), worker.ID, "invite.accept", invitation.ID, workspace.ID)); err != nil {
+	if err := store.AcceptWorkspaceInvitation(ctx, invitation.ID, worker.ID, now, workerMembership, pgCommit(now, pgID(33), worker.ID, "invite.accept", invitation.ID.String(), workspace.ID)); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AnonymizeUser(ctx, worker.ID, now, pgCommit(now, pgID(34), user.ID, "user.anonymize", worker.ID, "")); err != nil {
+	if err := store.AnonymizeUser(ctx, worker.ID, now, pgCommit(now, pgID(34), user.ID, "user.anonymize", worker.ID.String(), credbound.UUID{})); err != nil {
 		t.Fatal(err)
 	}
 	scrubbed, err := store.SCIMUser(ctx, configuration.ID, link.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scrubbed.UserName != "anonymized-"+link.ID || scrubbed.DisplayName != "" || scrubbed.ExternalID != "" ||
+	if scrubbed.UserName != "anonymized-"+link.ID.String() || scrubbed.DisplayName != "" || scrubbed.ExternalID != "" ||
 		len(scrubbed.Emails) != 0 || len(scrubbed.Attributes) != 0 || scrubbed.Active || scrubbed.DeprovisionedAt == nil {
 		t.Fatalf("SCIM profile kept personal data: %#v", scrubbed)
 	}
@@ -270,7 +270,7 @@ func TestPostgreSQLMigrationsAndStore(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if value.ID != invitation.ID || value.Email != "anonymized-"+invitation.ID+"@invalid" {
+		if value.ID != invitation.ID || value.Email != "anonymized-"+invitation.ID.String()+"@invalid" {
 			t.Fatalf("accepted invitation kept its address: %#v", value)
 		}
 		accepted++
@@ -339,9 +339,11 @@ func applyPostgreSQLMigrations(t *testing.T, database *sql.DB) {
 	}
 }
 
-func pgID(value int) string { return fmt.Sprintf("0198b463-0000-7000-8000-%012x", value) }
+func pgID(value int) credbound.UUID {
+	return credbound.MustParseUUID(fmt.Sprintf("0198b463-0000-7000-8000-%012x", value))
+}
 
-func pgCommit(at time.Time, id, actor, action, resource, workspace string) credbound.Commit {
+func pgCommit(at time.Time, id, actor credbound.UUID, action, resource string, workspace credbound.UUID) credbound.Commit {
 	return credbound.Commit{Audit: credbound.AuditEvent{
 		ID: id, OccurredAt: at, ActorID: actor, Action: action, ResourceType: "test", ResourceID: resource, WorkspaceID: workspace, Outcome: credbound.AuditSucceeded,
 	}}

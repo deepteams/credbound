@@ -32,9 +32,9 @@ var oauthScopePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~+:/-]{0,127
 var pkceVerifierPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{43,128}$`)
 
 type oauthAuthorizationContinuation struct {
-	UserID         string         `json:"uid"`
-	ClientRecordID string         `json:"cid"`
-	ResourceID     string         `json:"rid"`
+	UserID         UUID           `json:"uid"`
+	ClientRecordID UUID           `json:"cid"`
+	ResourceID     UUID           `json:"rid"`
 	RedirectURI    string         `json:"redirect_uri"`
 	Scopes         []string       `json:"scopes"`
 	State          string         `json:"state"`
@@ -119,7 +119,7 @@ func (m *Manager) CreateOAuthIssuer(ctx context.Context, actor Authentication, r
 		CodeTTL:                  policy.CodeTTL, AccessTokenTTL: policy.AccessTokenTTL,
 		RefreshTokenTTL: policy.RefreshTokenTTL, CreatedAt: now, UpdatedAt: now,
 	}
-	audit, err := m.newAudit(ctx, actor.UserID, "oauth.issuer.create", "oauth_issuer", issuer.ID, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.issuer.create", "oauth_issuer", issuer.ID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return OAuthIssuer{}, err
 	}
@@ -132,7 +132,7 @@ func (m *Manager) CreateOAuthIssuer(ctx context.Context, actor Authentication, r
 // UpdateOAuthIssuer replaces the policy of an issuer (its URL is immutable),
 // atomically with the audit event, under the same authorization as
 // CreateOAuthIssuer.
-func (m *Manager) UpdateOAuthIssuer(ctx context.Context, actor Authentication, request TrustedRequest, issuerID string, input UpdateOAuthIssuerInput) (_ OAuthIssuer, err error) {
+func (m *Manager) UpdateOAuthIssuer(ctx context.Context, actor Authentication, request TrustedRequest, issuerID UUID, input UpdateOAuthIssuerInput) (_ OAuthIssuer, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.issuer.update", started, err) }()
 	store, _, err := m.requireOAuth()
@@ -166,7 +166,7 @@ func (m *Manager) UpdateOAuthIssuer(ctx context.Context, actor Authentication, r
 	issuer.AccessTokenTTL = policy.AccessTokenTTL
 	issuer.RefreshTokenTTL = policy.RefreshTokenTTL
 	issuer.UpdatedAt = m.now()
-	audit, err := m.newAudit(ctx, actor.UserID, "oauth.issuer.update", "oauth_issuer", issuer.ID, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.issuer.update", "oauth_issuer", issuer.ID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return OAuthIssuer{}, err
 	}
@@ -182,7 +182,7 @@ func (m *Manager) UpdateOAuthIssuer(ctx context.Context, actor Authentication, r
 // step-up and the oauth.resource.manage workspace permission; access tokens
 // are later bound to this resource URI and workspace. Returns
 // ErrNotSupported without the OAuth capability.
-func (m *Manager) CreateOAuthProtectedResource(ctx context.Context, actor Authentication, workspaceID string, input CreateOAuthProtectedResourceInput) (_ OAuthProtectedResource, err error) {
+func (m *Manager) CreateOAuthProtectedResource(ctx context.Context, actor Authentication, workspaceID UUID, input CreateOAuthProtectedResourceInput) (_ OAuthProtectedResource, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.resource.create", started, err) }()
 	store, _, err := m.requireOAuth()
@@ -222,7 +222,7 @@ func (m *Manager) CreateOAuthProtectedResource(ctx context.Context, actor Authen
 		ID: id, IssuerID: issuer.ID, WorkspaceID: workspaceID, Resource: resourceURL,
 		Scopes: scopes, CreatedAt: now, UpdatedAt: now,
 	}
-	audit, err := m.newAudit(ctx, actor.UserID, "oauth.resource.create", "oauth_resource", id, workspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.resource.create", "oauth_resource", id.String(), workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return OAuthProtectedResource{}, err
 	}
@@ -237,7 +237,7 @@ func (m *Manager) CreateOAuthProtectedResource(ctx context.Context, actor Authen
 // secret exactly once when client_secret_basic is requested. The actor needs
 // admin settings write and an admin mutation (fresh AAL2, or a trusted local
 // request); only pre-registered clients may be marked Trusted.
-func (m *Manager) PreRegisterOAuthClient(ctx context.Context, actor Authentication, request TrustedRequest, issuerID string, input OAuthClientRegistrationInput) (_ IssuedOAuthClient, err error) {
+func (m *Manager) PreRegisterOAuthClient(ctx context.Context, actor Authentication, request TrustedRequest, issuerID UUID, input OAuthClientRegistrationInput) (_ IssuedOAuthClient, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.client.pre_register", started, err) }()
 	store, _, err := m.requireOAuth()
@@ -258,15 +258,15 @@ func (m *Manager) PreRegisterOAuthClient(ctx context.Context, actor Authenticati
 	if err != nil {
 		return IssuedOAuthClient{}, err
 	}
-	audit, err := m.newAudit(ctx, actor.UserID, "oauth.client.pre_register", "oauth_client", client.ID, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.client.pre_register", "oauth_client", client.ID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return IssuedOAuthClient{}, err
 	}
-	change, commit, err := m.newOAuthChange(EventOAuthClientRegistered, "oauth.client.pre_register", audit, client, "", "", "", "", client.Scopes)
+	change, commit, err := m.newOAuthChange(EventOAuthClientRegistered, "oauth.client.pre_register", audit, client, UUID{}, UUID{}, UUID{}, UUID{}, client.Scopes)
 	if err != nil {
 		return IssuedOAuthClient{}, err
 	}
-	if err := store.CreateOAuthClient(ctx, client, "", m.now(), commit); err != nil {
+	if err := store.CreateOAuthClient(ctx, client, UUID{}, m.now(), commit); err != nil {
 		return IssuedOAuthClient{}, m.mapStoreError(ctx, "oauth.client.pre_register", err)
 	}
 	m.emitOAuthChange(ctx, change)
@@ -279,7 +279,7 @@ func (m *Manager) PreRegisterOAuthClient(ctx context.Context, actor Authenticati
 // actor needs admin settings write and an admin mutation (fresh AAL2, or a
 // trusted local request); an issuer whose DCR mode is not protected fails
 // with ErrNotSupported. The token grants no authority over any resource.
-func (m *Manager) CreateOAuthInitialAccessToken(ctx context.Context, actor Authentication, request TrustedRequest, issuerID string, input CreateOAuthInitialAccessTokenInput) (_ IssuedOAuthInitialAccessToken, err error) {
+func (m *Manager) CreateOAuthInitialAccessToken(ctx context.Context, actor Authentication, request TrustedRequest, issuerID UUID, input CreateOAuthInitialAccessTokenInput) (_ IssuedOAuthInitialAccessToken, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.initial_access_token.create", started, err) }()
 	store, _, err := m.requireOAuth()
@@ -321,7 +321,7 @@ func (m *Manager) CreateOAuthInitialAccessToken(ctx context.Context, actor Authe
 		Digest: m.oauthDigest("initial-access-token", raw), MaxRegistrations: input.MaxRegistrations,
 		CreatedAt: m.now(), ExpiresAt: input.ExpiresAt.UTC(),
 	}
-	audit, err := m.newAudit(ctx, actor.UserID, "oauth.initial_access_token.create", "oauth_initial_access_token", id, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.initial_access_token.create", "oauth_initial_access_token", id.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return IssuedOAuthInitialAccessToken{}, err
 	}
@@ -337,7 +337,7 @@ func (m *Manager) CreateOAuthInitialAccessToken(ctx context.Context, actor Authe
 // oldest first, revoked ones included and digests omitted, so an
 // administration interface can inventory and revoke them. The actor needs
 // admin settings read; ErrNotSupported without the OAuth capability.
-func (m *Manager) OAuthInitialAccessTokens(ctx context.Context, actor Authentication, issuerID string) iter.Seq2[OAuthInitialAccessToken, error] {
+func (m *Manager) OAuthInitialAccessTokens(ctx context.Context, actor Authentication, issuerID UUID) iter.Seq2[OAuthInitialAccessToken, error] {
 	store, _, err := m.requireOAuth()
 	if err != nil {
 		return errorSeq[OAuthInitialAccessToken](err)
@@ -354,7 +354,7 @@ func (m *Manager) OAuthInitialAccessTokens(ctx context.Context, actor Authentica
 // RevokeOAuthInitialAccessToken withdraws a DCR bootstrap credential,
 // atomically with the audit event, under the same authorization as
 // CreateOAuthInitialAccessToken.
-func (m *Manager) RevokeOAuthInitialAccessToken(ctx context.Context, actor Authentication, request TrustedRequest, tokenID string) (err error) {
+func (m *Manager) RevokeOAuthInitialAccessToken(ctx context.Context, actor Authentication, request TrustedRequest, tokenID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "oauth.initial_access_token.revoke", started, err) }()
 	store, _, err := m.requireOAuth()
@@ -370,7 +370,7 @@ func (m *Manager) RevokeOAuthInitialAccessToken(ctx context.Context, actor Authe
 	if !validUUIDv7(tokenID) {
 		return fmt.Errorf("%w: invalid initial access token id", ErrInvalidInput)
 	}
-	audit, err := m.newAudit(ctx, actor.UserID, "oauth.initial_access_token.revoke", "oauth_initial_access_token", tokenID, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.initial_access_token.revoke", "oauth_initial_access_token", tokenID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -411,9 +411,9 @@ func (m *Manager) RegisterOAuthClient(ctx context.Context, issuerURL, initialAcc
 	if err != nil {
 		return IssuedOAuthClient{}, err
 	}
-	initialID := ""
+	initialID := UUID{}
 	actorKind := ActorSystem
-	actorID := ""
+	actorID := UUID{}
 	if issuer.DCRMode == OAuthDCRProtected {
 		prefix, ok := parseOAuthBearer("cbi", initialAccessToken)
 		if !ok {
@@ -431,12 +431,12 @@ func (m *Manager) RegisterOAuthClient(ctx context.Context, issuerURL, initialAcc
 	} else if initialAccessToken != "" {
 		return IssuedOAuthClient{}, fmt.Errorf("%w: initial access token is not accepted by open DCR", ErrInvalidInput)
 	}
-	audit, err := m.newAudit(ctx, actorID, "oauth.client.dynamic_register", "oauth_client", client.ID, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actorID, "oauth.client.dynamic_register", "oauth_client", client.ID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return IssuedOAuthClient{}, err
 	}
 	audit.ActorKind = actorKind
-	change, commit, err := m.newOAuthChange(EventOAuthClientRegistered, "oauth.client.dynamic_register", audit, client, "", "", "", "", client.Scopes)
+	change, commit, err := m.newOAuthChange(EventOAuthClientRegistered, "oauth.client.dynamic_register", audit, client, UUID{}, UUID{}, UUID{}, UUID{}, client.Scopes)
 	if err != nil {
 		return IssuedOAuthClient{}, err
 	}
@@ -461,7 +461,7 @@ func (m *Manager) BeginOAuthAuthorization(ctx context.Context, actor Authenticat
 	if err != nil {
 		return OAuthConsent{}, err
 	}
-	if actor.UserID == "" || !actor.Interactive() {
+	if actor.UserID == (UUID{}) || !actor.Interactive() {
 		return OAuthConsent{}, ErrUnauthorized
 	}
 	issuerURL, err := validateIssuerURL(input.Issuer)
@@ -570,7 +570,7 @@ func (m *Manager) CompleteOAuthAuthorization(ctx context.Context, actor Authenti
 	if err != nil {
 		return OAuthAuthorizationResult{}, err
 	}
-	if actor.UserID == "" || actor.UserID != continuation.UserID || !actor.Interactive() {
+	if actor.UserID == (UUID{}) || actor.UserID != continuation.UserID || !actor.Interactive() {
 		return OAuthAuthorizationResult{}, ErrUnauthorized
 	}
 	client, err := store.OAuthClientByID(ctx, continuation.ClientRecordID)
@@ -602,11 +602,11 @@ func (m *Manager) CompleteOAuthAuthorization(ctx context.Context, actor Authenti
 	}
 	baseResult := OAuthAuthorizationResult{RedirectURI: continuation.RedirectURI, State: continuation.State, Issuer: issuer.Issuer}
 	if !approved {
-		audit, auditErr := m.newAudit(ctx, actor.UserID, "oauth.authorization.denied", "oauth_client", client.ID, resource.WorkspaceID, AuditFailed, "access_denied")
+		audit, auditErr := m.newAudit(ctx, actor.UserID, "oauth.authorization.denied", "oauth_client", client.ID.String(), resource.WorkspaceID, AuditFailed, "access_denied")
 		if auditErr != nil {
 			return OAuthAuthorizationResult{}, auditErr
 		}
-		change, commit, changeErr := m.newOAuthChange(EventOAuthAuthorizationDenied, "oauth.authorization.denied", audit, client, "", "", resource.ID, resource.WorkspaceID, continuation.Scopes)
+		change, commit, changeErr := m.newOAuthChange(EventOAuthAuthorizationDenied, "oauth.authorization.denied", audit, client, UUID{}, UUID{}, resource.ID, resource.WorkspaceID, continuation.Scopes)
 		if changeErr != nil {
 			return OAuthAuthorizationResult{}, changeErr
 		}
@@ -644,11 +644,11 @@ func (m *Manager) CompleteOAuthAuthorization(ctx context.Context, actor Authenti
 		CodeChallenge: continuation.CodeChallenge, Nonce: continuation.Nonce,
 		CreatedAt: now, ExpiresAt: now.Add(issuer.CodeTTL),
 	}
-	audit, err := m.newAudit(ctx, actor.UserID, "oauth.authorization.granted", "oauth_grant", grant.ID, resource.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "oauth.authorization.granted", "oauth_grant", grant.ID.String(), resource.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return OAuthAuthorizationResult{}, err
 	}
-	change, commit, err := m.newOAuthChange(EventOAuthAuthorizationGranted, "oauth.authorization.granted", audit, client, grant.ID, "", resource.ID, resource.WorkspaceID, grant.Scopes)
+	change, commit, err := m.newOAuthChange(EventOAuthAuthorizationGranted, "oauth.authorization.granted", audit, client, grant.ID, UUID{}, resource.ID, resource.WorkspaceID, grant.Scopes)
 	if err != nil {
 		return OAuthAuthorizationResult{}, err
 	}
@@ -853,7 +853,7 @@ func (m *Manager) newOAuthClient(issuer OAuthIssuer, source OAuthClientSource, i
 	}
 	now := m.now()
 	client := OAuthClient{
-		ID: id, IssuerID: issuer.ID, ClientID: id, Source: source, Name: input.Name,
+		ID: id, IssuerID: issuer.ID, ClientID: id.String(), Source: source, Name: input.Name,
 		ApplicationType: input.ApplicationType, RedirectURIs: redirects,
 		SectorIdentifier: sectorIdentifier,
 		GrantTypes:       grants, ResponseTypes: responses, Scopes: scopes,
@@ -908,18 +908,18 @@ func (m *Manager) resolveOAuthClient(ctx context.Context, issuer OAuthIssuer, cl
 	}
 	name := EventOAuthCIMDResolved
 	action := "oauth.cimd.resolve"
-	if client.ID != "" && !hmac.Equal(client.MetadataHash, resolved.MetadataHash) {
+	if client.ID != (UUID{}) && !hmac.Equal(client.MetadataHash, resolved.MetadataHash) {
 		name, action = EventOAuthCIMDChanged, "oauth.cimd.change"
 	}
-	if client.ID != "" {
+	if client.ID != (UUID{}) {
 		resolved.ID, resolved.CreatedAt = client.ID, client.CreatedAt
 	}
-	audit, err := m.newAudit(ctx, "", action, "oauth_client", resolved.ID, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, UUID{}, action, "oauth_client", resolved.ID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return OAuthClient{}, err
 	}
 	audit.ActorKind = ActorSystem
-	change, commit, err := m.newOAuthChange(name, action, audit, resolved, "", "", "", "", resolved.Scopes)
+	change, commit, err := m.newOAuthChange(name, action, audit, resolved, UUID{}, UUID{}, UUID{}, UUID{}, resolved.Scopes)
 	if err != nil {
 		return OAuthClient{}, err
 	}
@@ -931,13 +931,13 @@ func (m *Manager) resolveOAuthClient(ctx context.Context, issuer OAuthIssuer, cl
 }
 
 func (m *Manager) emitOAuthCIMDRejected(ctx context.Context, issuer OAuthIssuer, clientID, reason string) {
-	audit, err := m.newAudit(ctx, "", "oauth.cimd.reject", "oauth_client", clientID, "", AuditFailed, reason)
+	audit, err := m.newAudit(ctx, UUID{}, "oauth.cimd.reject", "oauth_client", clientID, UUID{}, AuditFailed, reason)
 	if err != nil {
 		return
 	}
 	audit.ActorKind = ActorSystem
 	client := OAuthClient{IssuerID: issuer.ID, ClientID: clientID, Source: OAuthClientCIMD}
-	change, commit, err := m.newOAuthChange(EventOAuthCIMDRejected, "oauth.cimd.reject", audit, client, "", "", "", "", nil)
+	change, commit, err := m.newOAuthChange(EventOAuthCIMDRejected, "oauth.cimd.reject", audit, client, UUID{}, UUID{}, UUID{}, UUID{}, nil)
 	if err != nil || m.store.AppendAudit(ctx, commit) != nil {
 		return
 	}
@@ -1022,7 +1022,7 @@ func (m *Manager) decodeOAuthContinuation(raw string) (oauthAuthorizationContinu
 		return oauthAuthorizationContinuation{}, ErrInvalidCredentials
 	}
 	var value oauthAuthorizationContinuation
-	if err := json.Unmarshal(payload, &value); err != nil || value.UserID == "" || value.ClientRecordID == "" || value.ResourceID == "" {
+	if err := json.Unmarshal(payload, &value); err != nil || value.UserID == (UUID{}) || value.ClientRecordID == (UUID{}) || value.ResourceID == (UUID{}) {
 		return oauthAuthorizationContinuation{}, ErrInvalidCredentials
 	}
 	if !m.now().Before(value.ExpiresAt) {

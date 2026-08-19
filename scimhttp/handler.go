@@ -79,11 +79,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/Users" || path == "/Users/.search":
 		h.users(w, r, principal, path == "/Users/.search")
 	case strings.HasPrefix(path, "/Users/"):
-		h.user(w, r, principal, strings.TrimPrefix(path, "/Users/"))
+		h.resource(w, r, principal, strings.TrimPrefix(path, "/Users/"), h.user)
 	case path == "/Groups" || path == "/Groups/.search":
 		h.groups(w, r, principal, path == "/Groups/.search")
 	case strings.HasPrefix(path, "/Groups/"):
-		h.group(w, r, principal, strings.TrimPrefix(path, "/Groups/"))
+		h.resource(w, r, principal, strings.TrimPrefix(path, "/Groups/"), h.group)
 	default:
 		writeError(w, credbound.ErrNotFound)
 	}
@@ -212,8 +212,8 @@ func (h *Handler) users(w http.ResponseWriter, r *http.Request, principal credbo
 	}
 }
 
-func (h *Handler) user(w http.ResponseWriter, r *http.Request, principal credbound.SCIMAuthentication, id string) {
-	if id == "" {
+func (h *Handler) user(w http.ResponseWriter, r *http.Request, principal credbound.SCIMAuthentication, id credbound.UUID) {
+	if id == (credbound.UUID{}) {
 		writeError(w, credbound.ErrNotFound)
 		return
 	}
@@ -325,7 +325,7 @@ func (h *Handler) groups(w http.ResponseWriter, r *http.Request, principal credb
 			writeError(w, fmt.Errorf("%w: core Group schema is required", credbound.ErrInvalidInput))
 			return
 		}
-		created, err := h.manager.UpsertSCIMGroup(r.Context(), principal, "", request.input())
+		created, err := h.manager.UpsertSCIMGroup(r.Context(), principal, credbound.UUID{}, request.input())
 		if err != nil {
 			writeError(w, err)
 			return
@@ -338,8 +338,32 @@ func (h *Handler) groups(w http.ResponseWriter, r *http.Request, principal credb
 	}
 }
 
-func (h *Handler) group(w http.ResponseWriter, r *http.Request, principal credbound.SCIMAuthentication, id string) {
-	if id == "" {
+// resource parses the identifier a request path addresses before handing it to
+// the resource handler. A malformed one is "not found" rather than a protocol
+// error: from a provisioning client's point of view, an identifier that cannot
+// exist addresses nothing.
+//
+// The method is checked first, because being unsupported is a property of the
+// resource rather than of the instance addressed: POST on an item answers 405
+// whatever the identifier says.
+func (h *Handler) resource(w http.ResponseWriter, r *http.Request, principal credbound.SCIMAuthentication, raw string,
+	handle func(http.ResponseWriter, *http.Request, credbound.SCIMAuthentication, credbound.UUID)) {
+	switch r.Method {
+	case http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodDelete:
+	default:
+		methodNotAllowed(w, http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodDelete)
+		return
+	}
+	id, err := credbound.ParseUUID(raw)
+	if err != nil {
+		writeError(w, credbound.ErrNotFound)
+		return
+	}
+	handle(w, r, principal, id)
+}
+
+func (h *Handler) group(w http.ResponseWriter, r *http.Request, principal credbound.SCIMAuthentication, id credbound.UUID) {
+	if id == (credbound.UUID{}) {
 		writeError(w, credbound.ErrNotFound)
 		return
 	}
@@ -492,9 +516,16 @@ type groupResource struct {
 }
 
 func (r groupResource) input() credbound.SCIMGroupInput {
-	members := make([]string, 0, len(r.Members))
+	// Member references arrive as text from the provisioning client; one that
+	// is not an identifier is dropped rather than failing the whole group, and
+	// the membership reconciliation then reports it as unknown.
+	members := make([]credbound.UUID, 0, len(r.Members))
 	for _, member := range r.Members {
-		members = append(members, member.Value)
+		id, err := credbound.ParseUUID(member.Value)
+		if err != nil {
+			continue
+		}
+		members = append(members, id)
 	}
 	return credbound.SCIMGroupInput{ExternalID: r.ExternalID, DisplayName: r.DisplayName, MemberIDs: members}
 }
@@ -502,9 +533,9 @@ func (r groupResource) input() credbound.SCIMGroupInput {
 func userFromDomain(value credbound.SCIMUser) userResource {
 	active := value.Active
 	return userResource{
-		Schemas: userSchemas(value.Schemas), ID: value.ID, ExternalID: value.ExternalID, UserName: value.UserName,
+		Schemas: userSchemas(value.Schemas), ID: value.ID.String(), ExternalID: value.ExternalID, UserName: value.UserName,
 		DisplayName: value.DisplayName, Emails: value.Emails, Active: &active, Attributes: value.Attributes,
-		Meta: meta{ResourceType: "User", Created: value.CreatedAt, LastModified: value.UpdatedAt, Location: "/Users/" + value.ID},
+		Meta: meta{ResourceType: "User", Created: value.CreatedAt, LastModified: value.UpdatedAt, Location: "/Users/" + value.ID.String()},
 	}
 }
 
@@ -521,11 +552,11 @@ func userSchemas(values []string) []string {
 func groupFromDomain(value credbound.SCIMGroup) groupResource {
 	members := make([]groupMember, len(value.MemberIDs))
 	for index, id := range value.MemberIDs {
-		members[index] = groupMember{Value: id, Ref: "/Users/" + id}
+		members[index] = groupMember{Value: id.String(), Ref: "/Users/" + id.String()}
 	}
 	return groupResource{
-		Schemas: []string{coreGroupSchema}, ID: value.ID, ExternalID: value.ExternalID, DisplayName: value.DisplayName, Members: members,
-		Meta: meta{ResourceType: "Group", Created: value.CreatedAt, LastModified: value.UpdatedAt, Location: "/Groups/" + value.ID},
+		Schemas: []string{coreGroupSchema}, ID: value.ID.String(), ExternalID: value.ExternalID, DisplayName: value.DisplayName, Members: members,
+		Meta: meta{ResourceType: "Group", Created: value.CreatedAt, LastModified: value.UpdatedAt, Location: "/Groups/" + value.ID.String()},
 	}
 }
 
@@ -644,7 +675,7 @@ func patchGroup(current credbound.SCIMGroup, request patchRequest) (credbound.SC
 	if !hasSchema(request.Schemas, patchSchema) || len(request.Operations) == 0 {
 		return credbound.SCIMGroupInput{}, fmt.Errorf("%w: invalid PatchOp", credbound.ErrInvalidInput)
 	}
-	input := credbound.SCIMGroupInput{ExternalID: current.ExternalID, DisplayName: current.DisplayName, MemberIDs: append([]string(nil), current.MemberIDs...)}
+	input := credbound.SCIMGroupInput{ExternalID: current.ExternalID, DisplayName: current.DisplayName, MemberIDs: append([]credbound.UUID(nil), current.MemberIDs...)}
 	for _, operation := range request.Operations {
 		op, path := strings.ToLower(operation.Op), strings.TrimSpace(operation.Path)
 		if op != "add" && op != "replace" && op != "remove" {
@@ -671,9 +702,13 @@ func patchGroup(current credbound.SCIMGroup, request patchRequest) (credbound.SC
 			if err := json.Unmarshal(operation.Value, &members); err != nil {
 				return input, unsupportedPatch()
 			}
-			values := make([]string, 0, len(members))
+			values := make([]credbound.UUID, 0, len(members))
 			for _, member := range members {
-				values = append(values, member.Value)
+				id, parseErr := credbound.ParseUUID(member.Value)
+				if parseErr != nil {
+					continue
+				}
+				values = append(values, id)
 			}
 			if op == "add" {
 				input.MemberIDs = append(input.MemberIDs, values...)
@@ -687,7 +722,7 @@ func patchGroup(current credbound.SCIMGroup, request patchRequest) (credbound.SC
 			}
 			filtered := input.MemberIDs[:0]
 			for _, currentID := range input.MemberIDs {
-				if currentID != id {
+				if currentID.String() != id {
 					filtered = append(filtered, currentID)
 				}
 			}

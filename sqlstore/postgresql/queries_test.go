@@ -43,15 +43,15 @@ func assertNumbering(t *testing.T, query string, args []any) {
 }
 
 func TestWorkspacesQueryNumbering(t *testing.T) {
-	after := cursor{Time: time.Now(), ID: "018f0000-0000-7000-8000-000000000001"}
+	after := cursor{Time: time.Now(), ID: credbound.MustParseUUID("018f0000-0000-7000-8000-000000000001")}
 	for name, testCase := range map[string]struct {
-		userID string
+		userID credbound.UUID
 		cursor cursor
 	}{
-		"no filter, first page":   {"", cursor{}},
-		"no filter, resumed":      {"", after},
-		"user filter, first page": {"018f0000-0000-7000-8000-000000000002", cursor{}},
-		"user filter, resumed":    {"018f0000-0000-7000-8000-000000000002", after},
+		"no filter, first page":   {credbound.UUID{}, cursor{}},
+		"no filter, resumed":      {credbound.UUID{}, after},
+		"user filter, first page": {credbound.MustParseUUID("018f0000-0000-7000-8000-000000000002"), cursor{}},
+		"user filter, resumed":    {credbound.MustParseUUID("018f0000-0000-7000-8000-000000000002"), after},
 	} {
 		t.Run(name, func(t *testing.T) {
 			query, args := workspacesQuery(testCase.userID, testCase.cursor, 51)
@@ -61,15 +61,15 @@ func TestWorkspacesQueryNumbering(t *testing.T) {
 }
 
 func TestAuditEventsQueryNumbering(t *testing.T) {
-	after := cursor{Time: time.Now(), ID: "018f0000-0000-7000-8000-000000000001"}
+	after := cursor{Time: time.Now(), ID: credbound.MustParseUUID("018f0000-0000-7000-8000-000000000001")}
 	for name, testCase := range map[string]struct {
-		workspaceID string
+		workspaceID credbound.UUID
 		cursor      cursor
 	}{
-		"instance-wide, first page": {"", cursor{}},
-		"instance-wide, resumed":    {"", after},
-		"workspace, first page":     {"018f0000-0000-7000-8000-000000000002", cursor{}},
-		"workspace, resumed":        {"018f0000-0000-7000-8000-000000000002", after},
+		"instance-wide, first page": {credbound.UUID{}, cursor{}},
+		"instance-wide, resumed":    {credbound.UUID{}, after},
+		"workspace, first page":     {credbound.MustParseUUID("018f0000-0000-7000-8000-000000000002"), cursor{}},
+		"workspace, resumed":        {credbound.MustParseUUID("018f0000-0000-7000-8000-000000000002"), after},
 	} {
 		t.Run(name, func(t *testing.T) {
 			query, args := auditEventsQuery(testCase.workspaceID, testCase.cursor, 51)
@@ -79,11 +79,11 @@ func TestAuditEventsQueryNumbering(t *testing.T) {
 }
 
 func TestSCIMListQueryNumbering(t *testing.T) {
-	const configurationID = "018f0000-0000-7000-8000-000000000002"
-	after := cursor{Time: time.Now(), ID: "018f0000-0000-7000-8000-000000000001"}
+	var configurationID = credbound.MustParseUUID("018f0000-0000-7000-8000-000000000002")
+	after := cursor{Time: time.Now(), ID: credbound.MustParseUUID("018f0000-0000-7000-8000-000000000001")}
 	userFilters := []credbound.SCIMFilter{
 		{},
-		{Attribute: "id", Value: configurationID},
+		{Attribute: "id", Value: configurationID.String()},
 		{Attribute: "externalId", Value: "ext-1"},
 		{Attribute: "userName", Value: "Someone"},
 		{Attribute: "emails.value", Value: "someone@example.test"},
@@ -100,7 +100,7 @@ func TestSCIMListQueryNumbering(t *testing.T) {
 	}
 	groupFilters := []credbound.SCIMFilter{
 		{},
-		{Attribute: "id", Value: configurationID},
+		{Attribute: "id", Value: configurationID.String()},
 		{Attribute: "externalId", Value: "ext-1"},
 		{Attribute: "displayName", Value: "Engineering"},
 	}
@@ -118,7 +118,7 @@ func TestSCIMListQueryNumbering(t *testing.T) {
 // An unsupported filter attribute must be refused rather than silently
 // widening the listing to every row the credential can reach.
 func TestSCIMListQueryRejectsUnknownFilters(t *testing.T) {
-	const configurationID = "018f0000-0000-7000-8000-000000000002"
+	var configurationID = credbound.MustParseUUID("018f0000-0000-7000-8000-000000000002")
 	if _, _, err := scimUserListQuery(configurationID, credbound.SCIMFilter{Attribute: "password"}, cursor{}, 51); err == nil {
 		t.Fatal("unsupported user filter accepted")
 	}
@@ -169,7 +169,7 @@ func TestKeysetStatementsPairUp(t *testing.T) {
 // A caller-supplied identifier that is not a UUID must produce an empty page
 // rather than failing the listing, and must never reach the uuid comparison.
 func TestSCIMIDFilterRejectsMalformedUUID(t *testing.T) {
-	const configurationID = "018f0000-0000-7000-8000-000000000002"
+	var configurationID = credbound.MustParseUUID("018f0000-0000-7000-8000-000000000002")
 	for _, value := range []string{"not-a-uuid", "", "018f0000-0000-7000-8000-00000000000", "018f0000_0000_7000_8000_000000000001", "018f0000-0000-7000-8000-00000000000g"} {
 		query, args, err := scimUserListQuery(configurationID, credbound.SCIMFilter{Attribute: "id", Value: value}, cursor{}, 51)
 		if err != nil {

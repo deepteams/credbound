@@ -9,7 +9,7 @@ import (
 	"github.com/deepteams/credbound"
 )
 
-func (f *storeFixture) session(userID string) credbound.Session {
+func (f *storeFixture) session(userID credbound.UUID) credbound.Session {
 	session := credbound.Session{
 		ID: f.id(), UserID: userID, Method: credbound.MethodPassword, Level: credbound.AAL1,
 		AuthenticatedAt: f.now, UserAgent: "agent", IPAddress: "203.0.113.7", Digest: []byte("digest"),
@@ -90,7 +90,7 @@ func TestSessionStoreLifecycle(t *testing.T) {
 func TestSessionStoreListingScrubsDigestsAndPaginates(t *testing.T) {
 	f := newStoreFixture(t)
 	ctx := context.Background()
-	var ids []string
+	var ids []credbound.UUID
 	for range 3 {
 		session := f.session(f.user.ID)
 		session.CreatedAt = f.now

@@ -95,7 +95,7 @@ func TestJWTAssertionVerifierRS256ValidationAndFailures(t *testing.T) {
 		}
 	}
 	badClient := client
-	badClient.JWKS = json.RawMessage(`{"keys":[{"kty":"RSA","kid":"rsa-key","n":"bad","e":"AQAB"}]}`)
+	badClient.JWKS = json.RawMessage(`{"keys":[{"kty":"RSA","kid":"rsa-key","n":credbound.MustParseUUID("00000000-0000-4000-8000-000000000000"),"e":"AQAB"}]}`)
 	if err := verifier.Verify(t.Context(), badClient, "https://auth.example.com/token", signRS256(t, key, map[string]any{
 		"iss": "client", "sub": "client", "aud": "https://auth.example.com/token", "exp": now.Add(time.Minute).Unix(), "iat": now.Unix(), "jti": "bad-key",
 	}), now); !errors.Is(err, credbound.ErrInvalidCredentials) {

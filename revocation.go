@@ -13,10 +13,10 @@ import (
 // another account requires an instance administrator. Sessions the host
 // service manages itself remain host-owned and must be invalidated by the
 // host alongside this call.
-func (m *Manager) RevokeUserCredentials(ctx context.Context, actor Authentication, request TrustedRequest, userID string) (err error) {
+func (m *Manager) RevokeUserCredentials(ctx context.Context, actor Authentication, request TrustedRequest, userID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.credentials.revoke", started, err) }()
-	if userID == "" {
+	if userID == (UUID{}) {
 		userID = actor.UserID
 	}
 	if !validUUIDv7(userID) {
@@ -34,11 +34,11 @@ func (m *Manager) RevokeUserCredentials(ctx context.Context, actor Authenticatio
 			return err
 		}
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "user.credentials.revoke", "user", userID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "user.credentials.revoke", "user", userID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
-	meta, err := m.newEventMeta(EventUserCredentialsRevoked, "auth.credentials.revoke", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventUserCredentialsRevoked, "auth.credentials.revoke", actor.UserID, UUID{}, event)
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func (m *Manager) RevokeUserCredentials(ctx context.Context, actor Authenticatio
 // an administrator's own factors are removed through DisableTOTP and
 // DeletePasskey, which re-prove possession. Hosts should notify the
 // affected user out of band through SecondFactorResetEvent.
-func (m *Manager) AdminResetSecondFactor(ctx context.Context, actor Authentication, request TrustedRequest, userID string) (err error) {
+func (m *Manager) AdminResetSecondFactor(ctx context.Context, actor Authentication, request TrustedRequest, userID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "admin.second_factor.reset", started, err) }()
 	if !validUUIDv7(userID) {
@@ -79,11 +79,11 @@ func (m *Manager) AdminResetSecondFactor(ctx context.Context, actor Authenticati
 	if err := m.AuthorizeAdmin(ctx, actor, PermissionUsersWrite); err != nil {
 		return err
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "user.second_factor.reset", "user", userID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "user.second_factor.reset", "user", userID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
-	meta, err := m.newEventMeta(EventSecondFactorReset, "admin.second_factor.reset", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventSecondFactorReset, "admin.second_factor.reset", actor.UserID, UUID{}, event)
 	if err != nil {
 		return err
 	}
@@ -115,7 +115,7 @@ func (m *Manager) AdminResetSecondFactor(ctx context.Context, actor Authenticati
 // disabling them would. Hosts erase their own application-owned data — and any
 // business records referencing the user — separately, per ExportUserData and
 // their retention policy. It is irreversible.
-func (m *Manager) AnonymizeUser(ctx context.Context, actor Authentication, request TrustedRequest, userID string) (err error) {
+func (m *Manager) AnonymizeUser(ctx context.Context, actor Authentication, request TrustedRequest, userID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "admin.user.anonymize", started, err) }()
 	if !validUUIDv7(userID) {
@@ -127,11 +127,11 @@ func (m *Manager) AnonymizeUser(ctx context.Context, actor Authentication, reque
 	if err := m.AuthorizeAdmin(ctx, actor, PermissionUsersWrite); err != nil {
 		return err
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "user.anonymize", "user", userID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "user.anonymize", "user", userID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
-	meta, err := m.newEventMeta(EventUserAnonymized, "admin.user.anonymize", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventUserAnonymized, "admin.user.anonymize", actor.UserID, UUID{}, event)
 	if err != nil {
 		return err
 	}

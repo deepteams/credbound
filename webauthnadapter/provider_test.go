@@ -95,7 +95,7 @@ func TestCredentialConversionAndErrors(t *testing.T) {
 	if copyID[0] == converted.WebAuthnID()[0] {
 		t.Fatal("WebAuthn ID was not cloned")
 	}
-	if _, err := provider.convertUser(userWith(credbound.Passkey{CredentialID: []byte("credential"), CredentialJSON: []byte("bad")})); err == nil {
+	if _, err := provider.convertUser(userWith(credbound.Passkey{CredentialID: []byte("credential"), CredentialJSON: []byte("00000000-0000-4000-8000-000000000000")})); err == nil {
 		t.Fatal("invalid credential JSON accepted")
 	}
 	if _, err := provider.convertUser(userWith(credbound.Passkey{CredentialID: []byte("other"), CredentialJSON: encoded})); err == nil {
@@ -139,10 +139,10 @@ func TestProviderValidationAndMalformedFinishes(t *testing.T) {
 	if _, _, err := provider.FinishAuthentication(ctx, emptyUser(), nil, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled authentication finish = %v", err)
 	}
-	if _, _, err := provider.FinishRegistration(context.Background(), emptyUser(), []byte("bad"), []byte("bad")); err == nil {
+	if _, _, err := provider.FinishRegistration(context.Background(), emptyUser(), []byte("00000000-0000-4000-8000-000000000000"), []byte("00000000-0000-4000-8000-000000000000")); err == nil {
 		t.Fatal("malformed registration session accepted")
 	}
-	if _, err := unmarshalSession([]byte("bad")); err == nil {
+	if _, err := unmarshalSession([]byte("00000000-0000-4000-8000-000000000000")); err == nil {
 		t.Fatal("malformed session accepted")
 	}
 }
@@ -222,7 +222,7 @@ func TestConversionAndSessionFailuresAcrossCeremonies(t *testing.T) {
 	if _, _, err := provider.BeginAuthentication(ctx, emptyUser()); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled authentication begin = %v", err)
 	}
-	if _, _, err := provider.FinishAuthentication(context.Background(), emptyUser(), []byte("bad"), nil); err == nil {
+	if _, _, err := provider.FinishAuthentication(context.Background(), emptyUser(), []byte("00000000-0000-4000-8000-000000000000"), nil); err == nil {
 		t.Fatal("malformed authentication session accepted")
 	}
 	if _, _, err := marshalCeremony(make(chan int), &webauthn.SessionData{}); err == nil {
@@ -333,14 +333,14 @@ func TestDiscoverableCeremonies(t *testing.T) {
 	if _, _, err := provider.FinishDiscoverableAuthentication(canceled, nil, nil, lookup); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled finish = %v", err)
 	}
-	if _, _, err := provider.FinishDiscoverableAuthentication(ctx, []byte("bad"), []byte(`{}`), lookup); err == nil {
+	if _, _, err := provider.FinishDiscoverableAuthentication(ctx, []byte("00000000-0000-4000-8000-000000000000"), []byte(`{}`), lookup); err == nil {
 		t.Fatal("malformed session accepted")
 	}
 }
 
 func emptyUser() credbound.PasskeyUser {
 	return credbound.PasskeyUser{
-		User:        credbound.User{ID: "0198b463-0000-7000-8000-000000000001", Email: "user@example.com", DisplayName: "User"},
+		User:        credbound.User{ID: credbound.MustParseUUID("0198b463-0000-7000-8000-000000000001"), Email: "user@example.com", DisplayName: "User"},
 		Credentials: func(func(credbound.Passkey, error) bool) {},
 	}
 }

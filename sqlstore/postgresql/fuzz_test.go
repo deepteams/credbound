@@ -16,7 +16,7 @@ import (
 func FuzzDecodeCursor(f *testing.F) {
 	f.Add("")
 	f.Add("not base64 $$$")
-	f.Add(encodeCursor(time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC), "0198b463-0000-7000-8000-000000000001"))
+	f.Add(encodeCursor(time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC), credbound.MustParseUUID("0198b463-0000-7000-8000-000000000001")))
 	f.Add("e30")
 	f.Add("eyJ0IjoiMDAwMS0wMS0wMVQwMDowMDowMFoiLCJpZCI6IiJ9")
 
@@ -26,13 +26,13 @@ func FuzzDecodeCursor(f *testing.F) {
 			if !errors.Is(err, credbound.ErrInvalidInput) {
 				t.Fatalf("rejected cursor %q with %v, want ErrInvalidInput", raw, err)
 			}
-			if !decoded.Time.IsZero() || decoded.ID != "" {
+			if !decoded.Time.IsZero() || decoded.ID != (credbound.UUID{}) {
 				t.Fatalf("rejected cursor %q returned %#v", raw, decoded)
 			}
 			return
 		}
 		if raw == "" {
-			if !decoded.Time.IsZero() || decoded.ID != "" {
+			if !decoded.Time.IsZero() || decoded.ID != (credbound.UUID{}) {
 				t.Fatalf("the empty cursor decoded to %#v", decoded)
 			}
 			return

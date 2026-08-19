@@ -21,10 +21,10 @@ type ssoContinuation struct {
 	// ID is the single-use ceremony identity consumed by the success
 	// commit; continuations sealed before ceremony ids existed carry none
 	// and stay bounded by the TTL alone.
-	ID                      string    `json:"id,omitempty"`
-	ProviderConfigurationID string    `json:"provider_configuration_id"`
+	ID                      UUID      `json:"id,omitempty"`
+	ProviderConfigurationID UUID      `json:"provider_configuration_id"`
 	Operation               string    `json:"operation"`
-	UserID                  string    `json:"user_id,omitempty"`
+	UserID                  UUID      `json:"user_id,omitempty"`
 	ExpiresAt               time.Time `json:"expires_at"`
 	Session                 []byte    `json:"session"`
 }
@@ -33,7 +33,7 @@ type ssoContinuation struct {
 // or nil for a continuation sealed before ceremony ids existed, which stays
 // bounded by its TTL alone.
 func (c ssoContinuation) consumption() *CeremonyConsumption {
-	if c.ID == "" {
+	if c.ID == (UUID{}) {
 		return nil
 	}
 	return &CeremonyConsumption{ID: c.ID, ExpiresAt: c.ExpiresAt}
@@ -44,14 +44,14 @@ func (c ssoContinuation) consumption() *CeremonyConsumption {
 // required; an unregistered configuration fails with ErrNotFound. Sign-in
 // only succeeds for an identity previously linked with BeginSSOLink —
 // Credbound never matches accounts by IdP email.
-func (m *Manager) BeginSSO(ctx context.Context, providerConfigurationID string) (SSOChallenge, error) {
+func (m *Manager) BeginSSO(ctx context.Context, providerConfigurationID UUID) (SSOChallenge, error) {
 	return m.beginSSO(ctx, Authentication{}, providerConfigurationID, ssoLogin)
 }
 
 // BeginSSOLink starts a ceremony that links the provider identity to the
 // actor's existing account when finished. It requires a recent interactive
 // authentication, per the explicit-linking policy.
-func (m *Manager) BeginSSOLink(ctx context.Context, actor Authentication, providerConfigurationID string) (SSOChallenge, error) {
+func (m *Manager) BeginSSOLink(ctx context.Context, actor Authentication, providerConfigurationID UUID) (SSOChallenge, error) {
 	if err := m.requireRecentInteractive(ctx, actor); err != nil {
 		return SSOChallenge{}, err
 	}
@@ -62,14 +62,14 @@ func (m *Manager) BeginSSOLink(ctx context.Context, actor Authentication, provid
 // asked to force reauthentication and its own MFA, and the finished ceremony
 // must resolve to an identity already linked to this actor. It requires a
 // recent interactive authentication.
-func (m *Manager) BeginSSOStepUp(ctx context.Context, actor Authentication, providerConfigurationID string) (SSOChallenge, error) {
+func (m *Manager) BeginSSOStepUp(ctx context.Context, actor Authentication, providerConfigurationID UUID) (SSOChallenge, error) {
 	if err := m.requireRecentInteractive(ctx, actor); err != nil {
 		return SSOChallenge{}, err
 	}
 	return m.beginSSO(ctx, actor, providerConfigurationID, ssoStepUp)
 }
 
-func (m *Manager) beginSSO(ctx context.Context, actor Authentication, providerConfigurationID, operation string) (_ SSOChallenge, err error) {
+func (m *Manager) beginSSO(ctx context.Context, actor Authentication, providerConfigurationID UUID, operation string) (_ SSOChallenge, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.sso.begin", started, err) }()
 	provider, ok := m.ssoProviders[providerConfigurationID]
@@ -96,7 +96,7 @@ func (m *Manager) beginSSO(ctx context.Context, actor Authentication, providerCo
 		return SSOChallenge{}, err
 	}
 	challenge := SSOChallenge{RedirectURL: providerChallenge.RedirectURL, Continuation: continuation}
-	if meta, metaErr := m.newEventMeta(EventSSOChallengeIssued, "auth.sso.begin", actor.UserID, "", AuditEvent{}); metaErr == nil {
+	if meta, metaErr := m.newEventMeta(EventSSOChallengeIssued, "auth.sso.begin", actor.UserID, UUID{}, AuditEvent{}); metaErr == nil {
 		issued := SSOChallengeIssuedEvent{
 			EventMeta: meta, ProviderConfigurationID: providerConfigurationID,
 			ProviderKind: provider.Kind(), Purpose: operation,
@@ -137,7 +137,7 @@ func (m *Manager) FinishSSO(ctx context.Context, continuation string, response [
 	}
 	claims, err := provider.Finish(ctx, state.Session, response)
 	if err != nil {
-		if state.UserID != "" {
+		if state.UserID != (UUID{}) {
 			audit, auditErr := m.recordAuthenticationAudit(ctx, state.UserID, "auth.sso", AuditFailed, "invalid_credentials")
 			if auditErr != nil {
 				return Authentication{}, auditErr
@@ -159,7 +159,7 @@ func (m *Manager) FinishSSO(ctx context.Context, continuation string, response [
 	level := AAL1
 	if policy, constrained := m.ssoAssurance[state.ProviderConfigurationID]; constrained {
 		if !policy.satisfiedBy(claims) {
-			if state.UserID != "" {
+			if state.UserID != (UUID{}) {
 				audit, auditErr := m.recordAuthenticationAudit(ctx, state.UserID, "auth.sso", AuditFailed, "assurance_policy")
 				if auditErr != nil {
 					return Authentication{}, auditErr
@@ -201,7 +201,7 @@ func (m *Manager) FinishSSO(ctx context.Context, continuation string, response [
 		return Authentication{}, ErrInvalidCredentials
 	}
 	now := m.now()
-	event, err := m.newAudit(ctx, user.ID, "auth.sso", "sso_identity", identity.ID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, user.ID, "auth.sso", "sso_identity", identity.ID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, err
 	}
@@ -214,7 +214,7 @@ func (m *Manager) FinishSSO(ctx context.Context, continuation string, response [
 		return Authentication{}, m.mapStoreError(ctx, "auth.sso.finish", err)
 	}
 	authentication := Authentication{UserID: user.ID, Method: MethodSSO, Level: level, AuthenticatedAt: now}
-	if meta, metaErr := m.newEventMeta(EventSSOAuthenticated, "auth.sso.finish", user.ID, "", event); metaErr == nil {
+	if meta, metaErr := m.newEventMeta(EventSSOAuthenticated, "auth.sso.finish", user.ID, UUID{}, event); metaErr == nil {
 		authenticated := SSOAuthenticatedEvent{EventMeta: meta, IdentityID: identity.ID, Authentication: authentication}
 		m.events.emit(ctx, EventSSOAuthenticated, func(listener EventListener) error { return listener.OnSSOAuthenticated(ctx, authenticated) })
 	}
@@ -293,14 +293,14 @@ func (m *Manager) finishSSOJIT(ctx context.Context, provider SSOProvider, state 
 	primaryEmail := EmailAddress{ID: emailID, UserID: userID, Address: claims.Email, Primary: true, VerifiedAt: cloneTime(&now), CreatedAt: now, UpdatedAt: now}
 	membership := Membership{
 		WorkspaceID: domain.WorkspaceID, UserID: userID, Role: role, Status: MembershipActive,
-		ProvisioningSource: "jit:" + domain.ID, CreatedAt: now, UpdatedAt: now,
+		ProvisioningSource: "jit:" + domain.ID.String(), CreatedAt: now, UpdatedAt: now,
 	}
 	identity := SSOIdentity{
 		ID: identityID, UserID: userID, ProviderConfigurationID: state.ProviderConfigurationID,
 		ProviderKind: provider.Kind(), Issuer: claims.Issuer, Subject: claims.Subject,
 		Email: claims.Email, CreatedAt: now, LastUsedAt: cloneTime(&now),
 	}
-	event, err := m.newAudit(ctx, userID, "auth.sso", "sso_identity", identityID, domain.WorkspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, userID, "auth.sso", "sso_identity", identityID.String(), domain.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, err
 	}
@@ -359,11 +359,11 @@ func (m *Manager) finishSSOLink(ctx context.Context, provider SSOProvider, state
 		ProviderKind: provider.Kind(), Issuer: claims.Issuer, Subject: claims.Subject,
 		Email: claims.Email, CreatedAt: now, LastUsedAt: cloneTime(&now),
 	}
-	event, err := m.newAudit(ctx, state.UserID, "sso.link", "sso_identity", id, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, state.UserID, "sso.link", "sso_identity", id.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, err
 	}
-	meta, err := m.newEventMeta(EventSSOLinked, "auth.sso.finish", state.UserID, "", event)
+	meta, err := m.newEventMeta(EventSSOLinked, "auth.sso.finish", state.UserID, UUID{}, event)
 	if err != nil {
 		return Authentication{}, err
 	}
@@ -385,7 +385,7 @@ func (m *Manager) finishSSOLink(ctx context.Context, provider SSOProvider, state
 // fails with ErrConflict when the identity is the actor's last remaining
 // authentication method (no password, no passkey, no other SSO identity), so
 // a JIT-provisioned passwordless member cannot lock themselves out.
-func (m *Manager) UnlinkSSO(ctx context.Context, actor Authentication, identityID string) (err error) {
+func (m *Manager) UnlinkSSO(ctx context.Context, actor Authentication, identityID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.sso.unlink", started, err) }()
 	if err := m.requireStepUp(ctx, actor, "auth.sso.unlink"); err != nil {
@@ -394,11 +394,11 @@ func (m *Manager) UnlinkSSO(ctx context.Context, actor Authentication, identityI
 	if !validUUIDv7(identityID) {
 		return fmt.Errorf("%w: invalid SSO identity id", ErrInvalidInput)
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "sso.unlink", "sso_identity", identityID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "sso.unlink", "sso_identity", identityID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
-	meta, err := m.newEventMeta(EventSSOUnlinked, "auth.sso.unlink", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventSSOUnlinked, "auth.sso.unlink", actor.UserID, UUID{}, event)
 	if err != nil {
 		return err
 	}
@@ -418,11 +418,11 @@ func (m *Manager) UnlinkSSO(ctx context.Context, actor Authentication, identityI
 // latest uses. An empty userID means the actor, which requires a recent
 // interactive authentication; reading another user requires admin users
 // read — the same scoping as Sessions, Emails and Passkeys.
-func (m *Manager) SSOIdentities(ctx context.Context, actor Authentication, userID string, page PageRequest) iter.Seq2[PageEvent[SSOIdentity], error] {
-	if actor.UserID == "" {
+func (m *Manager) SSOIdentities(ctx context.Context, actor Authentication, userID UUID, page PageRequest) iter.Seq2[PageEvent[SSOIdentity], error] {
+	if actor.UserID == (UUID{}) {
 		return errorSeq[PageEvent[SSOIdentity]](ErrUnauthorized)
 	}
-	if userID == "" {
+	if userID == (UUID{}) {
 		userID = actor.UserID
 	}
 	if userID == actor.UserID {
@@ -467,7 +467,7 @@ func (m *Manager) decodeSSOContinuation(raw string) (ssoContinuation, error) {
 	if state.Operation != ssoLogin && state.Operation != ssoLink && state.Operation != ssoStepUp {
 		return ssoContinuation{}, ErrInvalidCredentials
 	}
-	if (state.Operation == ssoLink || state.Operation == ssoStepUp) && state.UserID == "" {
+	if (state.Operation == ssoLink || state.Operation == ssoStepUp) && state.UserID == (UUID{}) {
 		return ssoContinuation{}, ErrInvalidCredentials
 	}
 	if !m.now().Before(state.ExpiresAt) {

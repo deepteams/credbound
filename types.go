@@ -93,7 +93,7 @@ const (
 // InstanceAdministrator records the instance role held by a user. The first
 // account created by Bootstrap atomically receives root.
 type InstanceAdministrator struct {
-	UserID    string
+	UserID    UUID
 	Role      InstanceRole
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -138,7 +138,7 @@ const (
 // LastSeenAt reflects the latest successful authentication across all
 // factors and is updated atomically with the authentication audit.
 type User struct {
-	ID          string
+	ID          UUID
 	Email       string
 	DisplayName string
 	Disabled    bool
@@ -151,8 +151,8 @@ type User struct {
 // Exactly one address per user is primary; an address becomes usable for
 // sign-in only once VerifiedAt is set.
 type EmailAddress struct {
-	ID         string
-	UserID     string
+	ID         UUID
+	UserID     UUID
 	Address    string
 	Primary    bool
 	VerifiedAt *time.Time
@@ -163,7 +163,7 @@ type EmailAddress struct {
 // EmailVerificationCredential is the persisted proof for a pending email
 // addition. Only the HMAC digest of the token is stored.
 type EmailVerificationCredential struct {
-	EmailID   string
+	EmailID   UUID
 	Digest    []byte
 	ExpiresAt time.Time
 }
@@ -184,8 +184,8 @@ type IssuedEmailVerification struct {
 // PasswordResetCredential is the persisted single-use reset proof. Only the
 // HMAC digest of the token is stored.
 type PasswordResetCredential struct {
-	ID        string
-	UserID    string
+	ID        UUID
+	UserID    UUID
 	Digest    []byte
 	CreatedAt time.Time
 	ExpiresAt time.Time
@@ -196,7 +196,7 @@ type PasswordResetCredential struct {
 // host service delivers it to the address that requested the reset and never
 // stores it.
 type IssuedPasswordReset struct {
-	UserID    string
+	UserID    UUID
 	Token     string
 	ExpiresAt time.Time
 	// Deliverable reports whether this is a real issuance to email. A zero
@@ -210,9 +210,9 @@ type IssuedPasswordReset struct {
 // magic link or email OTP. Only the HMAC digest of the token or code is
 // stored.
 type EmailAuthenticationCredential struct {
-	ID        string
-	UserID    string
-	EmailID   string
+	ID        UUID
+	UserID    UUID
+	EmailID   UUID
 	Digest    []byte
 	CreatedAt time.Time
 	ExpiresAt time.Time
@@ -223,8 +223,8 @@ type EmailAuthenticationCredential struct {
 // once. The host service delivers it to the verified address and never
 // stores it.
 type IssuedEmailAuthentication struct {
-	UserID    string
-	EmailID   string
+	UserID    UUID
+	EmailID   UUID
 	Token     string
 	ExpiresAt time.Time
 	// Deliverable reports whether this is a real issuance to email. A zero
@@ -239,8 +239,8 @@ type IssuedEmailAuthentication struct {
 // empty when the address was not eligible; the host then sends no email but
 // answers the end user identically.
 type IssuedEmailOTP struct {
-	UserID       string
-	EmailID      string
+	UserID       UUID
+	EmailID      UUID
 	Code         string
 	Continuation string
 	ExpiresAt    time.Time
@@ -254,7 +254,7 @@ type IssuedEmailOTP struct {
 // Workspace is a tenant. A workspace with DisabledAt set denies every
 // tenant-scoped capability until it is re-enabled.
 type Workspace struct {
-	ID   string
+	ID   UUID
 	Name string
 	// RequireMFA rejects interactive access below AAL2 for every member of
 	// the workspace. Non-interactive credentials such as PATs, whose
@@ -267,8 +267,8 @@ type Workspace struct {
 
 // Membership binds a user to a workspace with a role and lifecycle status.
 type Membership struct {
-	WorkspaceID string
-	UserID      string
+	WorkspaceID UUID
+	UserID      UUID
 	Role        Role
 	Status      MembershipStatus
 	// ProvisioningSource identifies who owns the membership: the literal
@@ -282,7 +282,7 @@ type Membership struct {
 // PasswordCredential is the persisted password hash of a user. Hash is an
 // encoded derivation (Argon2id by default) and never the password itself.
 type PasswordCredential struct {
-	UserID    string
+	UserID    UUID
 	Hash      string
 	UpdatedAt time.Time
 }
@@ -291,7 +291,7 @@ type PasswordCredential struct {
 // with the Manager's AEAD key, and LastUsedStep prevents replay of an
 // already accepted time step.
 type TOTPFactor struct {
-	UserID          string
+	UserID          UUID
 	EncryptedSecret []byte
 	// Active becomes true only after ConfirmTOTPEnrollment proved a valid
 	// code; an inactive enrollment never gates authentication.
@@ -304,7 +304,7 @@ type TOTPFactor struct {
 // RecoveryCode is one single-use TOTP fallback code, persisted as a peppered
 // HMAC digest only.
 type RecoveryCode struct {
-	UserID string
+	UserID UUID
 	Digest []byte
 	UsedAt *time.Time
 }
@@ -313,8 +313,8 @@ type RecoveryCode struct {
 // provider's sealed credential state and is scrubbed from every value the
 // Manager returns to callers.
 type Passkey struct {
-	ID             string
-	UserID         string
+	ID             UUID
+	UserID         UUID
 	Name           string
 	CredentialID   []byte
 	CredentialJSON []byte
@@ -326,16 +326,16 @@ type Passkey struct {
 // pre-assigned role. The digest is stored server-side only; the single-use
 // token is returned once at creation for the host to deliver.
 type WorkspaceInvitation struct {
-	ID             string
-	WorkspaceID    string
+	ID             UUID
+	WorkspaceID    UUID
 	Email          string
 	Role           Role
-	InvitedBy      string
+	InvitedBy      UUID
 	Digest         []byte
 	CreatedAt      time.Time
 	ExpiresAt      time.Time
 	AcceptedAt     *time.Time
-	AcceptedUserID string
+	AcceptedUserID UUID
 	RevokedAt      *time.Time
 }
 
@@ -362,8 +362,8 @@ type InviteToWorkspaceInput struct {
 // configuration) and SSO enforcement. A domain name is globally unique
 // across workspaces.
 type WorkspaceDomain struct {
-	ID          string
-	WorkspaceID string
+	ID          UUID
+	WorkspaceID UUID
 	// Domain is the normalized, lowercase registrable DNS name
 	// ("corp.example.com").
 	Domain string
@@ -383,7 +383,7 @@ type WorkspaceDomain struct {
 	AutoJoinRole Role
 	// SSOProviderConfigurationID names the registered SSO provider
 	// configuration this domain trusts for JIT provisioning.
-	SSOProviderConfigurationID string
+	SSOProviderConfigurationID UUID
 	// EnforceSSO rejects password, magic-link and email-OTP authentication
 	// for addresses under the domain with ErrSSORequired.
 	EnforceSSO bool
@@ -407,7 +407,7 @@ type IssuedWorkspaceDomain struct {
 type WorkspaceDomainPolicyInput struct {
 	AutoJoin                   bool
 	AutoJoinRole               Role
-	SSOProviderConfigurationID string
+	SSOProviderConfigurationID UUID
 	EnforceSSO                 bool
 }
 
@@ -423,7 +423,7 @@ type RegisterFromInvitationInput struct {
 // backs the built-in account lockout and is reset by any successful
 // authentication.
 type LoginThrottle struct {
-	UserID         string
+	UserID         UUID
 	FailedAttempts int64
 	LockedUntil    *time.Time
 	UpdatedAt      time.Time
@@ -444,12 +444,12 @@ type TOTPStatus struct {
 // only the HMAC Digest of the full token is stored. A PAT bound to a
 // WorkspaceID authenticates only within that workspace.
 type PAT struct {
-	ID          string
-	UserID      string
+	ID          UUID
+	UserID      UUID
 	Name        string
 	Prefix      string
 	Digest      []byte
-	WorkspaceID string
+	WorkspaceID UUID
 	Scopes      []string
 	CreatedAt   time.Time
 	ExpiresAt   *time.Time
@@ -471,7 +471,7 @@ type IssuedPAT struct {
 // supplies. Credbound issues no cookies or JWTs — the session strategy
 // belongs to the host.
 type Authentication struct {
-	UserID string
+	UserID UUID
 	// Method records the factor that produced this context (password, totp,
 	// passkey, sso, email, or pat). Non-interactive methods (PAT) are
 	// rejected by step-up checks regardless of age.
@@ -493,7 +493,7 @@ type Authentication struct {
 	SecondFactorRequired bool
 	// WorkspaceID restricts the context to one workspace. It is set for
 	// workspace-bound PATs; authorization in any other workspace fails.
-	WorkspaceID string
+	WorkspaceID UUID
 	// Scopes limits what the credential may do (PATs). Empty means the
 	// context carries no scope restriction of its own.
 	Scopes []string
@@ -550,8 +550,8 @@ func (a Authentication) HasScope(required string) bool {
 // mints a new session and revokes the previous one, which doubles as
 // fixation protection.
 type Session struct {
-	ID     string
-	UserID string
+	ID     UUID
+	UserID UUID
 	// Method and Level snapshot the creating Authentication verbatim; they
 	// never change for the lifetime of the session.
 	Method AuthMethod
@@ -620,14 +620,14 @@ type RequestMetadata struct {
 // ActorID and OccurredAt are always derived by Credbound so a consuming
 // service cannot impersonate an actor or backdate an entry.
 type AuditEvent struct {
-	ID           string
+	ID           UUID
 	OccurredAt   time.Time
 	ActorKind    ActorKind
-	ActorID      string
+	ActorID      UUID
 	Action       string
 	ResourceType string
 	ResourceID   string
-	WorkspaceID  string
+	WorkspaceID  UUID
 	Outcome      AuditOutcome
 	Reason       string
 	IPAddress    string
@@ -671,8 +671,8 @@ type SCIMGroupRoleMapping struct {
 // role for provisioned users, the group-to-role mappings, and whether
 // directory-asserted primary emails are trusted as verified.
 type SCIMConfiguration struct {
-	ID          string
-	WorkspaceID string
+	ID          UUID
+	WorkspaceID UUID
 	Enabled     bool
 	DefaultRole Role
 	// TrustDirectoryEmails marks the primary address of provisioned users as
@@ -688,8 +688,8 @@ type SCIMConfiguration struct {
 // raw token has the form cbs_<prefix>_<secret> and only its HMAC Digest is
 // stored. A credential is a service identity and never represents a user.
 type SCIMCredential struct {
-	ID              string
-	ConfigurationID string
+	ID              UUID
+	ConfigurationID UUID
 	Prefix          string
 	Digest          []byte
 	CreatedAt       time.Time
@@ -712,9 +712,9 @@ type IssuedSCIMCredential struct {
 // configuration and its workspace and must never be constructed from fields
 // freely supplied by a client.
 type SCIMAuthentication struct {
-	ConfigurationID string
-	WorkspaceID     string
-	CredentialID    string
+	ConfigurationID UUID
+	WorkspaceID     UUID
+	CredentialID    UUID
 	AuthenticatedAt time.Time
 }
 
@@ -732,9 +732,9 @@ type SCIMEmail struct {
 // from UserID; unknown directory attributes are retained in Attributes.
 // Deprovisioning sets DeprovisionedAt without disabling the global account.
 type SCIMUser struct {
-	ID              string
-	ConfigurationID string
-	UserID          string
+	ID              UUID
+	ConfigurationID UUID
+	UserID          UUID
 	Schemas         []string
 	ExternalID      string
 	UserName        string
@@ -750,11 +750,11 @@ type SCIMUser struct {
 // SCIMGroup is a persisted directory group. MemberIDs reference SCIMUser
 // link identifiers, not global user IDs.
 type SCIMGroup struct {
-	ID              string
-	ConfigurationID string
+	ID              UUID
+	ConfigurationID UUID
 	ExternalID      string
 	DisplayName     string
-	MemberIDs       []string
+	MemberIDs       []UUID
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	DeletedAt       *time.Time
@@ -796,7 +796,7 @@ type SCIMUserInput struct {
 type SCIMGroupInput struct {
 	ExternalID  string
 	DisplayName string
-	MemberIDs   []string
+	MemberIDs   []UUID
 }
 
 // SCIMFilter is a single equality filter over a supported SCIM attribute.
@@ -812,7 +812,7 @@ type AuditInput struct {
 	Action       string
 	ResourceType string
 	ResourceID   string
-	WorkspaceID  string
+	WorkspaceID  UUID
 	Outcome      AuditOutcome
 	Reason       string
 }
@@ -922,9 +922,9 @@ type SSOChallenge struct {
 // The (ProviderConfigurationID, Issuer, Subject) triplet is the stable key;
 // Email is informational only.
 type SSOIdentity struct {
-	ID                      string
-	UserID                  string
-	ProviderConfigurationID string
+	ID                      UUID
+	UserID                  UUID
+	ProviderConfigurationID UUID
 	ProviderKind            SSOProviderKind
 	Issuer                  string
 	Subject                 string
@@ -1072,7 +1072,7 @@ type TOTPEnrollment struct {
 // ExpiresAt issues a non-expiring token.
 type CreatePATInput struct {
 	Name        string
-	WorkspaceID string
+	WorkspaceID UUID
 	Scopes      []string
 	ExpiresAt   *time.Time
 }

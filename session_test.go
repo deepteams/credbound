@@ -83,7 +83,7 @@ func TestSessionLifecycle(t *testing.T) {
 		t.Fatalf("token shape = %q", issued.Token)
 	}
 	session := issued.Session
-	if parts[1] != session.ID || session.Digest != nil {
+	if parts[1] != session.ID.String() || session.Digest != nil {
 		t.Fatalf("issued session leaked or mismatched: %#v", session)
 	}
 	if session.UserID != authn.UserID || session.Method != credbound.MethodPassword || session.Level != credbound.AAL1 ||
@@ -122,7 +122,7 @@ func TestSessionLifecycle(t *testing.T) {
 
 	listActor := authn
 	listActor.AuthenticatedAt = f.now
-	listed, end := collectSessions(t, f.manager.Sessions(context.Background(), listActor, "", credbound.PageRequest{}))
+	listed, end := collectSessions(t, f.manager.Sessions(context.Background(), listActor, credbound.UUID{}, credbound.PageRequest{}))
 	if len(listed) != 1 || end == nil || end.HasMore {
 		t.Fatalf("sessions page = %#v %#v", listed, end)
 	}
@@ -162,11 +162,11 @@ func TestSessionTokenForgery(t *testing.T) {
 		t.Fatalf("forged secret error = %v", err)
 	}
 	// A well-formed token with an unknown identifier is rejected too.
-	ghost := "cbs_" + authn.UserID + "_" + strings.Repeat("A", 43)
+	ghost := "cbs_" + authn.UserID.String() + "_" + strings.Repeat("A", 43)
 	if _, _, err := f.manager.AuthenticateSession(ctx, ghost); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("unknown session error = %v", err)
 	}
-	for _, malformed := range []string{"", "cbs_bogus", "cbp_" + authn.UserID + "_" + strings.Repeat("A", 43), issued.Token + "x"} {
+	for _, malformed := range []string{"", "cbs_bogus", "cbp_" + authn.UserID.String() + "_" + strings.Repeat("A", 43), issued.Token + "x"} {
 		if _, _, err := f.manager.AuthenticateSession(ctx, malformed); !errors.Is(err, credbound.ErrInvalidCredentials) {
 			t.Fatalf("malformed token %q error = %v", malformed, err)
 		}
@@ -364,7 +364,7 @@ func TestSessionsOnBehalfAuthorization(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := sessionsError(f.manager.Sessions(ctx, credbound.Authentication{}, "", credbound.PageRequest{})); !errors.Is(err, credbound.ErrUnauthorized) {
+	if err := sessionsError(f.manager.Sessions(ctx, credbound.Authentication{}, credbound.UUID{}, credbound.PageRequest{})); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("anonymous listing error = %v", err)
 	}
 	// Self listing needs only a recent interactive authentication.
@@ -374,7 +374,7 @@ func TestSessionsOnBehalfAuthorization(t *testing.T) {
 	// A stale interactive context cannot list, even for itself.
 	stale := memberAuthn
 	stale.AuthenticatedAt = f.now.Add(-time.Hour)
-	if err := sessionsError(f.manager.Sessions(ctx, stale, "", credbound.PageRequest{})); !errors.Is(err, credbound.ErrStepUpRequired) {
+	if err := sessionsError(f.manager.Sessions(ctx, stale, credbound.UUID{}, credbound.PageRequest{})); !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("stale self listing error = %v", err)
 	}
 	// Another user requires a fresh AAL2 step-up and admin users read.
@@ -388,7 +388,7 @@ func TestSessionsOnBehalfAuthorization(t *testing.T) {
 		t.Fatalf("non-admin on-behalf listing error = %v", err)
 	}
 	// The invalid page limit is rejected after authorization.
-	if err := sessionsError(f.manager.Sessions(ctx, memberAuthn, "", credbound.PageRequest{Limit: 500})); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := sessionsError(f.manager.Sessions(ctx, memberAuthn, credbound.UUID{}, credbound.PageRequest{Limit: 500})); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("page limit error = %v", err)
 	}
 }
@@ -411,7 +411,7 @@ func TestRevokeSessionAuthorization(t *testing.T) {
 	if err := f.manager.RevokeSession(ctx, memberAuthn, issued.Session.ID); !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("AAL1 revoke error = %v", err)
 	}
-	if err := f.manager.RevokeSession(ctx, aal2(member.ID, f.now), ""); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.RevokeSession(ctx, aal2(member.ID, f.now), credbound.UUID{}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("empty id error = %v", err)
 	}
 	if err := f.manager.RevokeSession(ctx, aal2(member.ID, f.now), member.ID); !errors.Is(err, credbound.ErrNotFound) {
@@ -447,10 +447,10 @@ func TestRevokeUserSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.manager.RevokeUserSessions(ctx, memberAuthn, credbound.TrustedRequest{}, ""); !errors.Is(err, credbound.ErrStepUpRequired) {
+	if err := f.manager.RevokeUserSessions(ctx, memberAuthn, credbound.TrustedRequest{}, credbound.UUID{}); !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("AAL1 self bulk revoke error = %v", err)
 	}
-	if err := f.manager.RevokeUserSessions(ctx, aal2(member.ID, f.now), credbound.TrustedRequest{}, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.RevokeUserSessions(ctx, aal2(member.ID, f.now), credbound.TrustedRequest{}, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid user id error = %v", err)
 	}
 	// A non-administrator cannot log out another user.
@@ -458,7 +458,7 @@ func TestRevokeUserSessions(t *testing.T) {
 		t.Fatalf("non-admin bulk revoke error = %v", err)
 	}
 	// Self "log out everywhere" with a fresh step-up.
-	if err := f.manager.RevokeUserSessions(ctx, aal2(member.ID, f.now), credbound.TrustedRequest{}, ""); err != nil {
+	if err := f.manager.RevokeUserSessions(ctx, aal2(member.ID, f.now), credbound.TrustedRequest{}, credbound.UUID{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, token := range []string{first.Token, second.Token} {
@@ -549,20 +549,20 @@ func TestSessionNotSupported(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	actor := aal2("0198b463-0000-7000-8000-0000000000aa", time.Now())
+	actor := aal2(credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000aa"), time.Now())
 	if _, err := limited.CreateSession(ctx, actor, credbound.CreateSessionInput{}); !errors.Is(err, credbound.ErrNotSupported) {
 		t.Fatalf("create error = %v", err)
 	}
 	if _, _, err := limited.AuthenticateSession(ctx, "cbs_x_y"); !errors.Is(err, credbound.ErrNotSupported) {
 		t.Fatalf("authenticate error = %v", err)
 	}
-	if err := sessionsError(limited.Sessions(ctx, actor, "", credbound.PageRequest{})); !errors.Is(err, credbound.ErrNotSupported) {
+	if err := sessionsError(limited.Sessions(ctx, actor, credbound.UUID{}, credbound.PageRequest{})); !errors.Is(err, credbound.ErrNotSupported) {
 		t.Fatalf("list error = %v", err)
 	}
-	if err := limited.RevokeSession(ctx, actor, "0198b463-0000-7000-8000-0000000000ab"); !errors.Is(err, credbound.ErrNotSupported) {
+	if err := limited.RevokeSession(ctx, actor, credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000ab")); !errors.Is(err, credbound.ErrNotSupported) {
 		t.Fatalf("revoke error = %v", err)
 	}
-	if err := limited.RevokeUserSessions(ctx, actor, credbound.TrustedRequest{}, ""); !errors.Is(err, credbound.ErrNotSupported) {
+	if err := limited.RevokeUserSessions(ctx, actor, credbound.TrustedRequest{}, credbound.UUID{}); !errors.Is(err, credbound.ErrNotSupported) {
 		t.Fatalf("bulk revoke error = %v", err)
 	}
 }
@@ -575,14 +575,14 @@ type sessionFaultStore struct {
 	userByIDErr    error
 }
 
-func (s *sessionFaultStore) SessionByID(ctx context.Context, id string) (credbound.Session, error) {
+func (s *sessionFaultStore) SessionByID(ctx context.Context, id credbound.UUID) (credbound.Session, error) {
 	if s.sessionByIDErr != nil {
 		return credbound.Session{}, s.sessionByIDErr
 	}
 	return s.Store.SessionByID(ctx, id)
 }
 
-func (s *sessionFaultStore) UserByID(ctx context.Context, id string) (credbound.User, error) {
+func (s *sessionFaultStore) UserByID(ctx context.Context, id credbound.UUID) (credbound.User, error) {
 	if s.userByIDErr != nil {
 		return credbound.User{}, s.userByIDErr
 	}
@@ -610,7 +610,7 @@ func TestSessionAuditUnavailableAndFaults(t *testing.T) {
 	if err := f.manager.RevokeSession(ctx, aal2(authn.UserID, f.now), issued.Session.ID); !errors.Is(err, credbound.ErrAuditUnavailable) {
 		t.Fatalf("audit-unavailable revoke = %v", err)
 	}
-	if err := f.manager.RevokeUserSessions(ctx, aal2(authn.UserID, f.now), credbound.TrustedRequest{}, ""); !errors.Is(err, credbound.ErrAuditUnavailable) {
+	if err := f.manager.RevokeUserSessions(ctx, aal2(authn.UserID, f.now), credbound.TrustedRequest{}, credbound.UUID{}); !errors.Is(err, credbound.ErrAuditUnavailable) {
 		t.Fatalf("audit-unavailable bulk revoke = %v", err)
 	}
 	f.store.SetAuditFailure(nil)
@@ -740,7 +740,7 @@ func TestSessionSignOut(t *testing.T) {
 	if err := f.manager.SignOut(ctx, "not-a-token"); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("malformed sign out = %v", err)
 	}
-	unknown := "cbs_" + issued.Session.UserID + "_" + strings.Repeat("A", 43)
+	unknown := "cbs_" + issued.Session.UserID.String() + "_" + strings.Repeat("A", 43)
 	if err := f.manager.SignOut(ctx, unknown); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("unknown sign out = %v", err)
 	}

@@ -125,7 +125,7 @@ func (h *harness) bootstrap() (credbound.Authentication, credbound.Workspace) {
 }
 
 // stepUp fabricates the AAL2 context sensitive mutations require.
-func (h *harness) stepUp(userID string) credbound.Authentication {
+func (h *harness) stepUp(userID credbound.UUID) credbound.Authentication {
 	return credboundtest.AAL2(userID, h.clock.Now())
 }
 
@@ -345,7 +345,7 @@ func testEmails(t *testing.T, factory Factory) {
 	}
 	// The demoted address is now removable, and the user record follows the
 	// primary address.
-	var demoted string
+	var demoted credbound.UUID
 	for _, address := range addresses {
 		if !address.Primary {
 			demoted = address.ID
@@ -565,7 +565,7 @@ func testPasskeys(t *testing.T, factory Factory) {
 		t.Fatalf("begin registration = %#v, %v", challenge, err)
 	}
 	passkey, err := h.manager.FinishPasskeyRegistration(h.ctx, actor, challenge.Continuation, []byte(credboundtest.ValidPasskeyResponse))
-	if err != nil || passkey.ID == "" {
+	if err != nil || passkey.ID == (credbound.UUID{}) {
 		t.Fatalf("finish registration = %#v, %v", passkey, err)
 	}
 	if _, err := h.manager.FinishPasskeyRegistration(h.ctx, actor, challenge.Continuation, []byte(credboundtest.ValidPasskeyResponse)); err == nil {
@@ -834,7 +834,7 @@ func testSignUp(t *testing.T, factory Factory) {
 	if err != nil || result.ExistingAccount {
 		t.Fatalf("sign up = %#v, %v", result, err)
 	}
-	if result.User.ID == "" || result.Workspace.ID == "" {
+	if result.User.ID == (credbound.UUID{}) || result.Workspace.ID == (credbound.UUID{}) {
 		t.Fatalf("sign up result = %#v", result)
 	}
 	// AutoVerifyEmail trades the mailbox proof for an immediate AAL1
@@ -858,7 +858,7 @@ func testSignUp(t *testing.T, factory Factory) {
 	if err != nil || !duplicate.ExistingAccount {
 		t.Fatalf("duplicate sign up = %#v, %v", duplicate, err)
 	}
-	if duplicate.User.ID != "" || duplicate.Workspace.ID != "" || duplicate.EmailVerification.Token != "" {
+	if duplicate.User.ID != (credbound.UUID{}) || duplicate.Workspace.ID != (credbound.UUID{}) || duplicate.EmailVerification.Token != "" {
 		t.Fatalf("duplicate sign up leaked state: %#v", duplicate)
 	}
 }
@@ -876,7 +876,7 @@ func testSignUpPendingVerification(t *testing.T, factory Factory) {
 	if err != nil || unverified.EmailVerification.Token == "" {
 		t.Fatalf("pending sign up = %#v, %v", unverified, err)
 	}
-	if unverified.Authentication.UserID != "" {
+	if unverified.Authentication.UserID != (credbound.UUID{}) {
 		t.Fatalf("an unverified signup produced an authentication: %#v", unverified.Authentication)
 	}
 	if _, err := pending.manager.AuthenticatePassword(pending.ctx, "pending@example.com", memberPassword); !errors.Is(err, credbound.ErrInvalidCredentials) {
@@ -1005,7 +1005,7 @@ func testPagination(t *testing.T, factory Factory) {
 
 	// One page at a time, the walk must visit every user exactly once.
 	seen := make(map[string]int, total+1)
-	var order []string
+	var order []credbound.UUID
 	cursor := ""
 	for pages := 0; ; pages++ {
 		if pages > total+2 {
@@ -1016,7 +1016,7 @@ func testPagination(t *testing.T, factory Factory) {
 			t.Fatalf("page returned %d items for a limit of 2", len(items))
 		}
 		for _, user := range items {
-			seen[user.ID]++
+			seen[user.ID.String()]++
 			order = append(order, user.ID)
 		}
 		if !end.HasMore {

@@ -697,8 +697,8 @@ func TestNewValidatesConfiguration(t *testing.T) {
 	anonymousMetadata := []byte(`<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata"><IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol"><SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://idp.example.com/sso"/></IDPSSODescriptor></EntityDescriptor>`)
 
 	cases := map[string]func(*Config){
-		"bad uuid":              func(c *Config) { c.ConfigurationID = "not-a-uuid" },
-		"uuid v4":               func(c *Config) { c.ConfigurationID = "0198b463-0000-4000-8000-0000000000aa" },
+		"bad uuid":              func(c *Config) { c.ConfigurationID = credbound.MustParseUUID("00000000-0000-4000-8000-000000000000") },
+		"uuid v4":               func(c *Config) { c.ConfigurationID = credbound.MustParseUUID("0198b463-0000-4000-8000-0000000000aa") },
 		"no metadata":           func(c *Config) { c.MetadataXML = nil },
 		"both metadata sources": func(c *Config) { c.MetadataURL = "https://idp.example.com/metadata" },
 		"garbage metadata":      func(c *Config) { c.MetadataXML = []byte("not xml") },

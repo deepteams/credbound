@@ -12,9 +12,9 @@ import (
 	"golang.org/x/net/idna"
 )
 
-const (
-	domainProviderA = "0198b463-0000-7000-8000-0000000000aa"
-	domainProviderB = "0198b463-0000-7000-8000-0000000000ab"
+var (
+	domainProviderA = credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000aa")
+	domainProviderB = credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000ab")
 )
 
 type domainRecorder struct {
@@ -158,7 +158,7 @@ func TestWorkspaceDomainLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	domain := issued.Domain
-	if !uuidV7.MatchString(domain.ID) || domain.WorkspaceID != workspace.ID || domain.Domain != "corp.example.com" {
+	if !uuidV7.MatchString(domain.ID.String()) || domain.WorkspaceID != workspace.ID || domain.Domain != "corp.example.com" {
 		t.Fatalf("issued domain = %#v", domain)
 	}
 	if issued.Challenge != domain.Challenge || !strings.HasPrefix(issued.Challenge, "credbound-domain-verification=") ||
@@ -195,10 +195,10 @@ func TestWorkspaceDomainLifecycle(t *testing.T) {
 		t.Fatalf("domain list = %#v, %#v", listed, end)
 	}
 
-	if err := f.manager.ConfirmWorkspaceDomain(ctx, stepUp, "0198b463-0000-7000-8000-00000000dead"); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.manager.ConfirmWorkspaceDomain(ctx, stepUp, credbound.MustParseUUID("0198b463-0000-7000-8000-00000000dead")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("unknown domain confirm error = %v", err)
 	}
-	if err := f.manager.ConfirmWorkspaceDomain(ctx, stepUp, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.ConfirmWorkspaceDomain(ctx, stepUp, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid domain id error = %v", err)
 	}
 	f.now = f.now.Add(time.Minute)
@@ -503,7 +503,7 @@ func TestDomainEnforcedSSOInFlightCeremonies(t *testing.T) {
 	}
 }
 
-func setupJITDomain(t *testing.T, f *fixture, workspaceID string, actor credbound.Authentication, policy credbound.WorkspaceDomainPolicyInput) credbound.WorkspaceDomain {
+func setupJITDomain(t *testing.T, f *fixture, workspaceID credbound.UUID, actor credbound.Authentication, policy credbound.WorkspaceDomainPolicyInput) credbound.WorkspaceDomain {
 	t.Helper()
 	ctx := context.Background()
 	issued, err := f.manager.CreateWorkspaceDomain(ctx, actor, workspaceID, "corp.example.com")
@@ -546,7 +546,7 @@ func TestSSOJITProvisioningHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if provisioned.Method != credbound.MethodSSO || provisioned.Level != credbound.AAL2 || !uuidV7.MatchString(provisioned.UserID) {
+	if provisioned.Method != credbound.MethodSSO || provisioned.Level != credbound.AAL2 || !uuidV7.MatchString(provisioned.UserID.String()) {
 		t.Fatalf("JIT authentication = %#v", provisioned)
 	}
 	user, err := f.store.UserByEmail(ctx, "alice@corp.example.com")
@@ -560,10 +560,10 @@ func TestSSOJITProvisioningHappyPath(t *testing.T) {
 	}
 	membership, err := f.store.Membership(ctx, workspace.ID, user.ID)
 	if err != nil || membership.Role != credbound.RoleMember || membership.Status != credbound.MembershipActive ||
-		membership.ProvisioningSource != "jit:"+domain.ID {
+		membership.ProvisioningSource != "jit:"+domain.ID.String() {
 		t.Fatalf("JIT membership = %#v, %v", membership, err)
 	}
-	identities := collectSSOIdentities(t, f.manager.SSOIdentities(ctx, provisioned, "", credbound.PageRequest{}))
+	identities := collectSSOIdentities(t, f.manager.SSOIdentities(ctx, provisioned, credbound.UUID{}, credbound.PageRequest{}))
 	if len(identities) != 1 || identities[0].Subject != "subject-jit" || identities[0].Email != "alice@corp.example.com" {
 		t.Fatalf("JIT identities = %#v", identities)
 	}
@@ -736,9 +736,9 @@ func TestWorkspaceDomainNotSupported(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	actor := aal2("0198b463-0000-7000-8000-0000000000aa", time.Now())
-	workspaceID := "0198b463-0000-7000-8000-0000000000ab"
-	domainID := "0198b463-0000-7000-8000-0000000000ac"
+	actor := aal2(credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000aa"), time.Now())
+	workspaceID := credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000ab")
+	domainID := credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000ac")
 	if _, err := limited.CreateWorkspaceDomain(ctx, actor, workspaceID, "corp.example.com"); !errors.Is(err, credbound.ErrNotSupported) {
 		t.Fatalf("create error = %v", err)
 	}

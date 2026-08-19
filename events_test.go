@@ -159,9 +159,9 @@ func TestBootstrapEventOrderAndListenerIsolation(t *testing.T) {
 	if !reflect.DeepEqual(recorder.names, want) {
 		t.Fatalf("bootstrap event order = %#v", recorder.names)
 	}
-	ids := make(map[string]struct{}, len(recorder.metas))
+	ids := make(map[credbound.UUID]struct{}, len(recorder.metas))
 	for _, meta := range recorder.metas {
-		if !uuidV7.MatchString(meta.ID) || meta.AuditID == "" || meta.ActorID != authn.UserID || meta.WorkspaceID != workspace.ID {
+		if !uuidV7.MatchString(meta.ID.String()) || meta.AuditID == (credbound.UUID{}) || meta.ActorID != authn.UserID || meta.WorkspaceID != workspace.ID {
 			t.Fatalf("invalid bootstrap event metadata: %#v", meta)
 		}
 		ids[meta.ID] = struct{}{}
@@ -190,7 +190,7 @@ func TestSubscriptionRemovalAndStepUpDeniedEvent(t *testing.T) {
 	if !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("AAL1 PAT creation = %v", err)
 	}
-	if len(recorder.events) != 1 || recorder.events[0].Operation != "auth.pat.create" || recorder.events[0].UserID != authn.UserID || !uuidV7.MatchString(recorder.events[0].ID) {
+	if len(recorder.events) != 1 || recorder.events[0].Operation != "auth.pat.create" || recorder.events[0].UserID != authn.UserID || !uuidV7.MatchString(recorder.events[0].ID.String()) {
 		t.Fatalf("step-up event = %#v", recorder.events)
 	}
 }

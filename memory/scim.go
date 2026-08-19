@@ -40,7 +40,7 @@ func (s *Store) CreateSCIMConfiguration(ctx context.Context, configuration credb
 }
 
 // SCIMConfiguration returns the configuration with the given ID.
-func (s *Store) SCIMConfiguration(ctx context.Context, id string) (credbound.SCIMConfiguration, error) {
+func (s *Store) SCIMConfiguration(ctx context.Context, id credbound.UUID) (credbound.SCIMConfiguration, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.SCIMConfiguration{}, err
 	}
@@ -55,7 +55,7 @@ func (s *Store) SCIMConfiguration(ctx context.Context, id string) (credbound.SCI
 
 // SCIMConfigurations streams the workspace's provisioning domains, oldest
 // first.
-func (s *Store) SCIMConfigurations(ctx context.Context, workspaceID string) iter.Seq2[credbound.SCIMConfiguration, error] {
+func (s *Store) SCIMConfigurations(ctx context.Context, workspaceID credbound.UUID) iter.Seq2[credbound.SCIMConfiguration, error] {
 	return func(yield func(credbound.SCIMConfiguration, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(credbound.SCIMConfiguration{}, err)
@@ -82,7 +82,7 @@ func (s *Store) SCIMConfigurations(ctx context.Context, workspaceID string) iter
 
 // SCIMCredentials streams the configuration's bearer credentials, oldest
 // first, with digests omitted.
-func (s *Store) SCIMCredentials(ctx context.Context, configurationID string) iter.Seq2[credbound.SCIMCredential, error] {
+func (s *Store) SCIMCredentials(ctx context.Context, configurationID credbound.UUID) iter.Seq2[credbound.SCIMCredential, error] {
 	return func(yield func(credbound.SCIMCredential, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(credbound.SCIMCredential{}, err)
@@ -127,10 +127,10 @@ func (s *Store) UpdateSCIMConfiguration(ctx context.Context, configuration credb
 	}
 	s.scimConfigurations[configuration.ID] = cloneSCIMConfiguration(configuration)
 	for _, membership := range memberships {
-		if s.memberships[membership.WorkspaceID] == nil {
-			s.memberships[membership.WorkspaceID] = make(map[string]credbound.Membership)
+		if s.memberships[membership.WorkspaceID.String()] == nil {
+			s.memberships[membership.WorkspaceID.String()] = make(map[credbound.UUID]credbound.Membership)
 		}
-		s.memberships[membership.WorkspaceID][membership.UserID] = normalizeMembership(membership)
+		s.memberships[membership.WorkspaceID.String()][membership.UserID] = normalizeMembership(membership)
 	}
 	return s.finishCommitLocked(ctx, commit, previous)
 }
@@ -182,7 +182,7 @@ func (s *Store) SaveSCIMCredential(ctx context.Context, credential credbound.SCI
 }
 
 // RevokeSCIMCredential marks the configuration's credential revoked.
-func (s *Store) RevokeSCIMCredential(ctx context.Context, configurationID, id string, revokedAt time.Time, commit credbound.Commit) error {
+func (s *Store) RevokeSCIMCredential(ctx context.Context, configurationID, id credbound.UUID, revokedAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -202,7 +202,7 @@ func (s *Store) RevokeSCIMCredential(ctx context.Context, configurationID, id st
 }
 
 // TouchSCIMCredential records a successful use of the credential.
-func (s *Store) TouchSCIMCredential(ctx context.Context, id string, usedAt time.Time, commit credbound.Commit) error {
+func (s *Store) TouchSCIMCredential(ctx context.Context, id credbound.UUID, usedAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -223,7 +223,7 @@ func (s *Store) TouchSCIMCredential(ctx context.Context, id string, usedAt time.
 
 // DisableSCIMConfiguration marks the configuration disabled so its
 // credentials stop authenticating.
-func (s *Store) DisableSCIMConfiguration(ctx context.Context, id string, disabledAt time.Time, commit credbound.Commit) error {
+func (s *Store) DisableSCIMConfiguration(ctx context.Context, id credbound.UUID, disabledAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -260,7 +260,7 @@ func (s *Store) CreateSCIMUser(ctx context.Context, user credbound.User, email c
 	if !ok || configuration.WorkspaceID != membership.WorkspaceID {
 		return credbound.ErrNotFound
 	}
-	if _, exists := s.users[user.ID]; exists || s.scimUserConflictLocked(link, "") {
+	if _, exists := s.users[user.ID]; exists || s.scimUserConflictLocked(link, credbound.UUID{}) {
 		return credbound.ErrConflict
 	}
 	if _, exists := s.emailIDs[email.Address]; exists {
@@ -276,10 +276,10 @@ func (s *Store) CreateSCIMUser(ctx context.Context, user credbound.User, email c
 	if email.VerifiedAt != nil {
 		s.emails[email.Address] = user.ID
 	}
-	if s.memberships[membership.WorkspaceID] == nil {
-		s.memberships[membership.WorkspaceID] = make(map[string]credbound.Membership)
+	if s.memberships[membership.WorkspaceID.String()] == nil {
+		s.memberships[membership.WorkspaceID.String()] = make(map[credbound.UUID]credbound.Membership)
 	}
-	s.memberships[membership.WorkspaceID][user.ID] = normalizeMembership(membership)
+	s.memberships[membership.WorkspaceID.String()][user.ID] = normalizeMembership(membership)
 	s.putSCIMUserLocked(link)
 	return s.finishCommitLocked(ctx, commit, previous)
 }
@@ -299,23 +299,23 @@ func (s *Store) AdoptSCIMUser(ctx context.Context, membership credbound.Membersh
 	if _, ok := s.users[link.UserID]; !ok {
 		return credbound.ErrNotFound
 	}
-	if _, ok := s.memberships[membership.WorkspaceID][membership.UserID]; !ok {
+	if _, ok := s.memberships[membership.WorkspaceID.String()][membership.UserID]; !ok {
 		return credbound.ErrNotFound
 	}
-	if s.scimUserConflictLocked(link, "") {
+	if s.scimUserConflictLocked(link, credbound.UUID{}) {
 		return credbound.ErrConflict
 	}
 	previous, err := s.prepareCommitLocked(commit)
 	if err != nil {
 		return err
 	}
-	s.memberships[membership.WorkspaceID][membership.UserID] = normalizeMembership(membership)
+	s.memberships[membership.WorkspaceID.String()][membership.UserID] = normalizeMembership(membership)
 	s.putSCIMUserLocked(link)
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
 // SCIMUser returns the configuration's SCIM user with the given ID.
-func (s *Store) SCIMUser(ctx context.Context, configurationID, id string) (credbound.SCIMUser, error) {
+func (s *Store) SCIMUser(ctx context.Context, configurationID, id credbound.UUID) (credbound.SCIMUser, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.SCIMUser{}, err
 	}
@@ -330,17 +330,17 @@ func (s *Store) SCIMUser(ctx context.Context, configurationID, id string) (credb
 
 // SCIMUserByExternalID resolves the configuration's SCIM user by its
 // directory external ID.
-func (s *Store) SCIMUserByExternalID(ctx context.Context, configurationID, externalID string) (credbound.SCIMUser, error) {
+func (s *Store) SCIMUserByExternalID(ctx context.Context, configurationID credbound.UUID, externalID string) (credbound.SCIMUser, error) {
 	return s.scimUserByKey(ctx, s.scimExternalIDs, scimKey(configurationID, strings.TrimSpace(externalID)))
 }
 
 // SCIMUserByUserName resolves the configuration's SCIM user by normalized
 // userName.
-func (s *Store) SCIMUserByUserName(ctx context.Context, configurationID, userName string) (credbound.SCIMUser, error) {
+func (s *Store) SCIMUserByUserName(ctx context.Context, configurationID credbound.UUID, userName string) (credbound.SCIMUser, error) {
 	return s.scimUserByKey(ctx, s.scimUserNames, scimKey(configurationID, strings.ToLower(strings.TrimSpace(userName))))
 }
 
-func (s *Store) scimUserByKey(ctx context.Context, index map[string]string, key string) (credbound.SCIMUser, error) {
+func (s *Store) scimUserByKey(ctx context.Context, index map[string]credbound.UUID, key string) (credbound.SCIMUser, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.SCIMUser{}, err
 	}
@@ -374,7 +374,7 @@ func (s *Store) UpdateSCIMUser(ctx context.Context, link credbound.SCIMUser, mem
 	}
 	s.deleteSCIMUserIndexesLocked(current)
 	s.putSCIMUserLocked(link)
-	s.memberships[membership.WorkspaceID][membership.UserID] = normalizeMembership(membership)
+	s.memberships[membership.WorkspaceID.String()][membership.UserID] = normalizeMembership(membership)
 	if revokeWorkspacePATs {
 		for id, pat := range s.pats {
 			if pat.UserID == link.UserID && pat.WorkspaceID == membership.WorkspaceID && pat.RevokedAt == nil {
@@ -388,7 +388,7 @@ func (s *Store) UpdateSCIMUser(ctx context.Context, link credbound.SCIMUser, mem
 
 // SCIMUsers streams the configuration's users matching the filter, newest
 // first, as one cursor page.
-func (s *Store) SCIMUsers(ctx context.Context, configurationID string, filter credbound.SCIMFilter, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.SCIMUser], error] {
+func (s *Store) SCIMUsers(ctx context.Context, configurationID credbound.UUID, filter credbound.SCIMFilter, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.SCIMUser], error] {
 	return func(yield func(credbound.PageEvent[credbound.SCIMUser], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
 		if err != nil {
@@ -407,7 +407,7 @@ func (s *Store) SCIMUsers(ctx context.Context, configurationID string, filter cr
 			}
 		}
 		s.mu.RUnlock()
-		yieldSCIMPage(ctx, values, page, func(value credbound.SCIMUser) time.Time { return value.CreatedAt }, func(value credbound.SCIMUser) string { return value.ID }, yield)
+		yieldSCIMPage(ctx, values, page, func(value credbound.SCIMUser) time.Time { return value.CreatedAt }, func(value credbound.SCIMUser) credbound.UUID { return value.ID }, yield)
 	}
 }
 
@@ -443,13 +443,13 @@ func (s *Store) UpsertSCIMGroup(ctx context.Context, group credbound.SCIMGroup, 
 		s.scimGroupExternal[scimKey(group.ConfigurationID, group.ExternalID)] = group.ID
 	}
 	for _, membership := range memberships {
-		s.memberships[membership.WorkspaceID][membership.UserID] = normalizeMembership(membership)
+		s.memberships[membership.WorkspaceID.String()][membership.UserID] = normalizeMembership(membership)
 	}
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
 // SCIMGroup returns the configuration's group with the given ID.
-func (s *Store) SCIMGroup(ctx context.Context, configurationID, id string) (credbound.SCIMGroup, error) {
+func (s *Store) SCIMGroup(ctx context.Context, configurationID, id credbound.UUID) (credbound.SCIMGroup, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.SCIMGroup{}, err
 	}
@@ -464,7 +464,7 @@ func (s *Store) SCIMGroup(ctx context.Context, configurationID, id string) (cred
 
 // SCIMGroupByExternalID resolves the configuration's group by its directory
 // external ID.
-func (s *Store) SCIMGroupByExternalID(ctx context.Context, configurationID, externalID string) (credbound.SCIMGroup, error) {
+func (s *Store) SCIMGroupByExternalID(ctx context.Context, configurationID credbound.UUID, externalID string) (credbound.SCIMGroup, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.SCIMGroup{}, err
 	}
@@ -502,14 +502,14 @@ func (s *Store) DeleteSCIMGroup(ctx context.Context, group credbound.SCIMGroup, 
 		delete(s.scimGroupExternal, scimKey(current.ConfigurationID, current.ExternalID))
 	}
 	for _, membership := range memberships {
-		s.memberships[membership.WorkspaceID][membership.UserID] = normalizeMembership(membership)
+		s.memberships[membership.WorkspaceID.String()][membership.UserID] = normalizeMembership(membership)
 	}
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
 // SCIMGroups streams the configuration's groups matching the filter, newest
 // first, as one cursor page.
-func (s *Store) SCIMGroups(ctx context.Context, configurationID string, filter credbound.SCIMFilter, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.SCIMGroup], error] {
+func (s *Store) SCIMGroups(ctx context.Context, configurationID credbound.UUID, filter credbound.SCIMFilter, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.SCIMGroup], error] {
 	return func(yield func(credbound.PageEvent[credbound.SCIMGroup], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
 		if err != nil {
@@ -528,7 +528,7 @@ func (s *Store) SCIMGroups(ctx context.Context, configurationID string, filter c
 			}
 		}
 		s.mu.RUnlock()
-		yieldSCIMPage(ctx, values, page, func(value credbound.SCIMGroup) time.Time { return value.CreatedAt }, func(value credbound.SCIMGroup) string { return value.ID }, yield)
+		yieldSCIMPage(ctx, values, page, func(value credbound.SCIMGroup) time.Time { return value.CreatedAt }, func(value credbound.SCIMGroup) credbound.UUID { return value.ID }, yield)
 	}
 }
 
@@ -537,7 +537,7 @@ func matchSCIMGroup(group credbound.SCIMGroup, filter credbound.SCIMFilter) bool
 	case "":
 		return true
 	case "id":
-		return group.ID == filter.Value
+		return group.ID.String() == filter.Value
 	case "externalId":
 		return group.ExternalID == filter.Value
 	case "displayName":
@@ -547,7 +547,7 @@ func matchSCIMGroup(group credbound.SCIMGroup, filter credbound.SCIMFilter) bool
 	}
 }
 
-func (s *Store) scimUserConflictLocked(link credbound.SCIMUser, exceptID string) bool {
+func (s *Store) scimUserConflictLocked(link credbound.SCIMUser, exceptID credbound.UUID) bool {
 	if id, ok := s.scimUserNames[scimKey(link.ConfigurationID, link.UserName)]; ok && id != exceptID {
 		return true
 	}
@@ -574,7 +574,9 @@ func (s *Store) deleteSCIMUserIndexesLocked(link credbound.SCIMUser) {
 	}
 }
 
-func scimKey(configurationID, value string) string { return configurationID + "\x00" + value }
+func scimKey(configurationID credbound.UUID, value string) string {
+	return configurationID.String() + "\x00" + value
+}
 
 func matchSCIMUser(link credbound.SCIMUser, filter credbound.SCIMFilter) bool {
 	if filter.Attribute == "" {
@@ -582,7 +584,7 @@ func matchSCIMUser(link credbound.SCIMUser, filter credbound.SCIMFilter) bool {
 	}
 	switch filter.Attribute {
 	case "id":
-		return link.ID == filter.Value
+		return link.ID.String() == filter.Value
 	case "externalId":
 		return link.ExternalID == filter.Value
 	case "userName":
@@ -597,7 +599,7 @@ func matchSCIMUser(link credbound.SCIMUser, filter credbound.SCIMFilter) bool {
 	}
 }
 
-func yieldSCIMPage[T any](ctx context.Context, values []T, page credbound.PageRequest, created func(T) time.Time, id func(T) string, yield func(credbound.PageEvent[T], error) bool) {
+func yieldSCIMPage[T any](ctx context.Context, values []T, page credbound.PageRequest, created func(T) time.Time, id func(T) credbound.UUID, yield func(credbound.PageEvent[T], error) bool) {
 	sort.Slice(values, func(i, j int) bool {
 		return newer(created(values[i]), id(values[i]), created(values[j]), id(values[j]))
 	})

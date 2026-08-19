@@ -18,7 +18,7 @@ import (
 // only its HMAC is persisted, atomically with the audit event. The actor
 // needs a fresh AAL2 step-up and workspace RBAC write. Returns
 // ErrNotSupported when the store lacks the SCIM capability.
-func (m *Manager) CreateSCIMConfiguration(ctx context.Context, actor Authentication, workspaceID string, input CreateSCIMConfigurationInput) (_ IssuedSCIMCredential, err error) {
+func (m *Manager) CreateSCIMConfiguration(ctx context.Context, actor Authentication, workspaceID UUID, input CreateSCIMConfigurationInput) (_ IssuedSCIMCredential, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.configuration.create", started, err) }()
 	if m.scimStore == nil {
@@ -51,7 +51,7 @@ func (m *Manager) CreateSCIMConfiguration(ctx context.Context, actor Authenticat
 		TrustDirectoryEmails: input.TrustDirectoryEmails, GroupRoleMappings: mappings,
 		CreatedAt: now, UpdatedAt: now,
 	}
-	audit, err := m.newAudit(ctx, actor.UserID, "scim.configuration.create", "scim_configuration", configuration.ID, workspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "scim.configuration.create", "scim_configuration", configuration.ID.String(), workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return IssuedSCIMCredential{}, err
 	}
@@ -81,7 +81,7 @@ func (m *Manager) CreateSCIMConfiguration(ctx context.Context, actor Authenticat
 // commit atomically. The actor needs a fresh AAL2 step-up and workspace RBAC
 // write in the configuration's workspace. An ambiguous group mapping fails
 // with ErrConflict; ErrNotSupported without the SCIM capability.
-func (m *Manager) UpdateSCIMConfiguration(ctx context.Context, actor Authentication, configurationID string, input UpdateSCIMConfigurationInput) (_ SCIMConfiguration, err error) {
+func (m *Manager) UpdateSCIMConfiguration(ctx context.Context, actor Authentication, configurationID UUID, input UpdateSCIMConfigurationInput) (_ SCIMConfiguration, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.configuration.update", started, err) }()
 	configuration, err := m.requireSCIMAdmin(ctx, actor, configurationID, "scim.configuration.update")
@@ -110,7 +110,7 @@ func (m *Manager) UpdateSCIMConfiguration(ctx context.Context, actor Authenticat
 		if lookupErr != nil {
 			return SCIMConfiguration{}, lookupErr
 		}
-		if membership.ProvisioningSource != configuration.ID {
+		if membership.ProvisioningSource != configuration.ID.String() {
 			return SCIMConfiguration{}, ErrConflict
 		}
 		role, roleErr := m.scimRoleForUser(configuration, groups, user.ID)
@@ -120,7 +120,7 @@ func (m *Manager) UpdateSCIMConfiguration(ctx context.Context, actor Authenticat
 		membership.Role, membership.UpdatedAt = role, configuration.UpdatedAt
 		memberships = append(memberships, membership)
 	}
-	audit, err := m.newAudit(ctx, actor.UserID, "scim.configuration.update", "scim_configuration", configurationID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "scim.configuration.update", "scim_configuration", configurationID.String(), configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return SCIMConfiguration{}, err
 	}
@@ -135,7 +135,7 @@ func (m *Manager) UpdateSCIMConfiguration(ctx context.Context, actor Authenticat
 // workspace RBAC write in that workspace — the permission governing every
 // SCIM administration operation — but no step-up, since nothing mutates.
 // ErrNotSupported without the SCIM capability.
-func (m *Manager) SCIMConfigurations(ctx context.Context, actor Authentication, workspaceID string) iter.Seq2[SCIMConfiguration, error] {
+func (m *Manager) SCIMConfigurations(ctx context.Context, actor Authentication, workspaceID UUID) iter.Seq2[SCIMConfiguration, error] {
 	if m.scimStore == nil {
 		return errorSeq[SCIMConfiguration](ErrNotSupported)
 	}
@@ -153,7 +153,7 @@ func (m *Manager) SCIMConfigurations(ctx context.Context, actor Authentication, 
 // and rotate them. The actor needs workspace RBAC write in the
 // configuration's workspace but no step-up, since nothing mutates.
 // ErrNotSupported without the SCIM capability.
-func (m *Manager) SCIMCredentials(ctx context.Context, actor Authentication, configurationID string) iter.Seq2[SCIMCredential, error] {
+func (m *Manager) SCIMCredentials(ctx context.Context, actor Authentication, configurationID UUID) iter.Seq2[SCIMCredential, error] {
 	if m.scimStore == nil {
 		return errorSeq[SCIMCredential](ErrNotSupported)
 	}
@@ -172,7 +172,7 @@ func (m *Manager) SCIMCredentials(ctx context.Context, actor Authentication, con
 // stay valid until individually revoked. The actor needs a fresh AAL2
 // step-up and workspace RBAC write; ErrNotSupported without the SCIM
 // capability.
-func (m *Manager) RotateSCIMCredential(ctx context.Context, actor Authentication, configurationID string, expiresAt *time.Time) (_ IssuedSCIMCredential, err error) {
+func (m *Manager) RotateSCIMCredential(ctx context.Context, actor Authentication, configurationID UUID, expiresAt *time.Time) (_ IssuedSCIMCredential, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.credential.rotate", started, err) }()
 	configuration, err := m.requireSCIMAdmin(ctx, actor, configurationID, "scim.credential.rotate")
@@ -186,7 +186,7 @@ func (m *Manager) RotateSCIMCredential(ctx context.Context, actor Authentication
 	if err != nil {
 		return IssuedSCIMCredential{}, err
 	}
-	audit, err := m.newAudit(ctx, actor.UserID, "scim.credential.rotate", "scim_configuration", configurationID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "scim.credential.rotate", "scim_configuration", configurationID.String(), configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return IssuedSCIMCredential{}, err
 	}
@@ -201,14 +201,14 @@ func (m *Manager) RotateSCIMCredential(ctx context.Context, actor Authentication
 // RevokeSCIMCredential revokes one bearer credential of the configuration,
 // atomically with the audit event. The actor needs a fresh AAL2 step-up and
 // workspace RBAC write; ErrNotSupported without the SCIM capability.
-func (m *Manager) RevokeSCIMCredential(ctx context.Context, actor Authentication, configurationID, credentialID string) (err error) {
+func (m *Manager) RevokeSCIMCredential(ctx context.Context, actor Authentication, configurationID UUID, credentialID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.credential.revoke", started, err) }()
 	configuration, err := m.requireSCIMAdmin(ctx, actor, configurationID, "scim.credential.revoke")
 	if err != nil {
 		return err
 	}
-	audit, err := m.newAudit(ctx, actor.UserID, "scim.credential.revoke", "scim_credential", credentialID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "scim.credential.revoke", "scim_credential", credentialID.String(), configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -222,14 +222,14 @@ func (m *Manager) RevokeSCIMCredential(ctx context.Context, actor Authentication
 // revokes all the configuration's active credentials, atomically with the
 // audit event. The actor needs a fresh AAL2 step-up and workspace RBAC
 // write; ErrNotSupported without the SCIM capability.
-func (m *Manager) DisableSCIMConfiguration(ctx context.Context, actor Authentication, configurationID string) (err error) {
+func (m *Manager) DisableSCIMConfiguration(ctx context.Context, actor Authentication, configurationID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.configuration.disable", started, err) }()
 	configuration, err := m.requireSCIMAdmin(ctx, actor, configurationID, "scim.configuration.disable")
 	if err != nil {
 		return err
 	}
-	audit, err := m.newAudit(ctx, actor.UserID, "scim.configuration.disable", "scim_configuration", configurationID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "scim.configuration.disable", "scim_configuration", configurationID.String(), configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -268,7 +268,7 @@ func (m *Manager) AuthenticateSCIM(ctx context.Context, raw string) (_ SCIMAuthe
 	if workspaceErr != nil || workspace.DisabledAt != nil {
 		return SCIMAuthentication{}, ErrInvalidCredentials
 	}
-	audit, err := m.newServiceAudit(ctx, credential.ID, "auth.scim", "scim_configuration", configuration.ID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newServiceAudit(ctx, credential.ID, "auth.scim", "scim_configuration", configuration.ID.String(), configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return SCIMAuthentication{}, err
 	}
@@ -323,14 +323,14 @@ func (m *Manager) ProvisionSCIMUser(ctx context.Context, principal SCIMAuthentic
 	}
 	membership := Membership{
 		WorkspaceID: configuration.WorkspaceID, UserID: userID, Role: configuration.DefaultRole,
-		Status: status, ProvisioningSource: configuration.ID, CreatedAt: now, UpdatedAt: now,
+		Status: status, ProvisioningSource: configuration.ID.String(), CreatedAt: now, UpdatedAt: now,
 	}
 	link := SCIMUser{
 		ID: linkID, ConfigurationID: configuration.ID, UserID: userID, ExternalID: input.ExternalID,
 		Schemas: slices.Clone(input.Schemas), UserName: input.UserName, DisplayName: input.DisplayName, Emails: cloneSCIMEmails(input.Emails), Attributes: cloneRawAttributes(input.Attributes),
 		Active: input.Active, CreatedAt: now, UpdatedAt: now,
 	}
-	audit, err := m.newServiceAudit(ctx, principal.CredentialID, "scim.user.provision", "scim_user", link.ID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newServiceAudit(ctx, principal.CredentialID, "scim.user.provision", "scim_user", link.ID.String(), configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return SCIMUser{}, err
 	}
@@ -354,7 +354,7 @@ func (m *Manager) ProvisionSCIMUser(ctx context.Context, principal SCIMAuthentic
 // event. Unlike the provisioning operations it is run by a workspace
 // administrator: the actor needs a fresh AAL2 step-up and workspace RBAC
 // write. A membership already managed by SCIM fails with ErrConflict.
-func (m *Manager) AdoptSCIMUser(ctx context.Context, actor Authentication, configurationID, userID string, input SCIMUserInput) (_ SCIMUser, err error) {
+func (m *Manager) AdoptSCIMUser(ctx context.Context, actor Authentication, configurationID, userID UUID, input SCIMUserInput) (_ SCIMUser, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.user.adopt", started, err) }()
 	configuration, err := m.requireSCIMAdmin(ctx, actor, configurationID, "scim.user.adopt")
@@ -385,13 +385,13 @@ func (m *Manager) AdoptSCIMUser(ctx context.Context, actor Authentication, confi
 		Schemas: slices.Clone(input.Schemas), UserName: input.UserName, DisplayName: input.DisplayName, Emails: cloneSCIMEmails(input.Emails), Attributes: cloneRawAttributes(input.Attributes),
 		Active: input.Active, CreatedAt: now, UpdatedAt: now,
 	}
-	membership.ProvisioningSource = configuration.ID
+	membership.ProvisioningSource = configuration.ID.String()
 	membership.Status = MembershipSuspended
 	if input.Active {
 		membership.Status = MembershipActive
 	}
 	membership.UpdatedAt = now
-	audit, err := m.newAudit(ctx, actor.UserID, "scim.user.adopt", "scim_user", link.ID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "scim.user.adopt", "scim_user", link.ID.String(), configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return SCIMUser{}, err
 	}
@@ -415,7 +415,7 @@ func (m *Manager) AdoptSCIMUser(ctx context.Context, actor Authentication, confi
 // reactivates — atomically with the transactional hook and audit. The
 // membership must be managed by the principal's configuration
 // (ErrConflict otherwise); the global account is never disabled.
-func (m *Manager) ReplaceSCIMUser(ctx context.Context, principal SCIMAuthentication, id string, input SCIMUserInput) (_ SCIMUser, err error) {
+func (m *Manager) ReplaceSCIMUser(ctx context.Context, principal SCIMAuthentication, id UUID, input SCIMUserInput) (_ SCIMUser, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.user.replace", started, err) }()
 	configuration, err := m.scimConfigurationForPrincipal(ctx, principal)
@@ -434,7 +434,7 @@ func (m *Manager) ReplaceSCIMUser(ctx context.Context, principal SCIMAuthenticat
 	if err != nil {
 		return SCIMUser{}, err
 	}
-	if membership.ProvisioningSource != configuration.ID {
+	if membership.ProvisioningSource != configuration.ID.String() {
 		return SCIMUser{}, ErrConflict
 	}
 	now := m.now()
@@ -468,7 +468,7 @@ func (m *Manager) ReplaceSCIMUser(ctx context.Context, principal SCIMAuthenticat
 // tenant-scoped authorization on the next check. A host that wants IdP
 // offboarding to also end sessions everywhere calls DisableUser or
 // RevokeUserSessions from its own directory-event handling.
-func (m *Manager) DeprovisionSCIMUser(ctx context.Context, principal SCIMAuthentication, id string) (err error) {
+func (m *Manager) DeprovisionSCIMUser(ctx context.Context, principal SCIMAuthentication, id UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.user.deprovision", started, err) }()
 	configuration, err := m.scimConfigurationForPrincipal(ctx, principal)
@@ -489,7 +489,7 @@ func (m *Manager) DeprovisionSCIMUser(ctx context.Context, principal SCIMAuthent
 	if err != nil {
 		return err
 	}
-	if membership.ProvisioningSource != configuration.ID {
+	if membership.ProvisioningSource != configuration.ID.String() {
 		return ErrConflict
 	}
 	now := m.now()
@@ -500,7 +500,7 @@ func (m *Manager) DeprovisionSCIMUser(ctx context.Context, principal SCIMAuthent
 }
 
 // SCIMUser reads one managed user of the principal's configuration.
-func (m *Manager) SCIMUser(ctx context.Context, principal SCIMAuthentication, id string) (SCIMUser, error) {
+func (m *Manager) SCIMUser(ctx context.Context, principal SCIMAuthentication, id UUID) (SCIMUser, error) {
 	configuration, err := m.scimConfigurationForPrincipal(ctx, principal)
 	if err != nil {
 		return SCIMUser{}, err
@@ -533,7 +533,7 @@ func (m *Manager) SCIMUsers(ctx context.Context, principal SCIMAuthentication, f
 // configured group-role mappings, atomically with the transactional hook and
 // audit. An unknown or deprovisioned member fails with ErrInvalidInput and
 // an ambiguous mapping fails closed with ErrConflict.
-func (m *Manager) UpsertSCIMGroup(ctx context.Context, principal SCIMAuthentication, id string, input SCIMGroupInput) (_ SCIMGroup, err error) {
+func (m *Manager) UpsertSCIMGroup(ctx context.Context, principal SCIMAuthentication, id UUID, input SCIMGroupInput) (_ SCIMGroup, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.group.upsert", started, err) }()
 	configuration, err := m.scimConfigurationForPrincipal(ctx, principal)
@@ -546,7 +546,7 @@ func (m *Manager) UpsertSCIMGroup(ctx context.Context, principal SCIMAuthenticat
 	}
 	created := false
 	current, lookupErr := m.scimStore.SCIMGroup(ctx, configuration.ID, id)
-	if id == "" {
+	if id == (UUID{}) {
 		created = true
 		id, err = m.newID()
 		if err != nil {
@@ -574,7 +574,7 @@ func (m *Manager) UpsertSCIMGroup(ctx context.Context, principal SCIMAuthenticat
 	if created {
 		name = EventSCIMGroupCreated
 	}
-	audit, err := m.newServiceAudit(ctx, principal.CredentialID, "scim.group.upsert", "scim_group", group.ID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newServiceAudit(ctx, principal.CredentialID, "scim.group.upsert", "scim_group", group.ID.String(), configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return SCIMGroup{}, err
 	}
@@ -601,7 +601,7 @@ func (m *Manager) UpsertSCIMGroup(ctx context.Context, principal SCIMAuthenticat
 // DeleteSCIMGroup logically deletes a directory group and recomputes the
 // roles of its former members, atomically with the transactional hook and
 // audit. Deleting an unknown group is a no-op.
-func (m *Manager) DeleteSCIMGroup(ctx context.Context, principal SCIMAuthentication, id string) (err error) {
+func (m *Manager) DeleteSCIMGroup(ctx context.Context, principal SCIMAuthentication, id UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "scim.group.delete", started, err) }()
 	configuration, err := m.scimConfigurationForPrincipal(ctx, principal)
@@ -621,7 +621,7 @@ func (m *Manager) DeleteSCIMGroup(ctx context.Context, principal SCIMAuthenticat
 	}
 	now := m.now()
 	group.DeletedAt, group.UpdatedAt = cloneTime(&now), now
-	audit, err := m.newServiceAudit(ctx, principal.CredentialID, "scim.group.delete", "scim_group", group.ID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newServiceAudit(ctx, principal.CredentialID, "scim.group.delete", "scim_group", group.ID.String(), configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -641,7 +641,7 @@ func (m *Manager) DeleteSCIMGroup(ctx context.Context, principal SCIMAuthenticat
 }
 
 // SCIMGroup reads one directory group of the principal's configuration.
-func (m *Manager) SCIMGroup(ctx context.Context, principal SCIMAuthentication, id string) (SCIMGroup, error) {
+func (m *Manager) SCIMGroup(ctx context.Context, principal SCIMAuthentication, id UUID) (SCIMGroup, error) {
 	configuration, err := m.scimConfigurationForPrincipal(ctx, principal)
 	if err != nil {
 		return SCIMGroup{}, err
@@ -673,7 +673,7 @@ func (m *Manager) commitSCIMUserUpdate(ctx context.Context, principal SCIMAuthen
 	if name == EventSCIMUserDeprovisioned {
 		action = "scim.user.deprovision"
 	}
-	audit, err := m.newServiceAudit(ctx, principal.CredentialID, action, "scim_user", user.ID, configuration.WorkspaceID, AuditSucceeded, "")
+	audit, err := m.newServiceAudit(ctx, principal.CredentialID, action, "scim_user", user.ID.String(), configuration.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return SCIMUser{}, err
 	}
@@ -695,7 +695,7 @@ func (m *Manager) commitSCIMUserUpdate(ctx context.Context, principal SCIMAuthen
 	return cloneSCIMUser(user), nil
 }
 
-func (m *Manager) scimMembershipsForGroupChange(ctx context.Context, configuration SCIMConfiguration, replacement *SCIMGroup, deleted bool, priorMembers []string) ([]Membership, error) {
+func (m *Manager) scimMembershipsForGroupChange(ctx context.Context, configuration SCIMConfiguration, replacement *SCIMGroup, deleted bool, priorMembers []UUID) ([]Membership, error) {
 	groups, err := m.allSCIMGroups(ctx, configuration.ID)
 	if err != nil {
 		return nil, err
@@ -716,7 +716,7 @@ func (m *Manager) scimMembershipsForGroupChange(ctx context.Context, configurati
 		groups = append(groups, cloneSCIMGroup(*replacement))
 	}
 	affected := append(slices.Clone(priorMembers), replacement.MemberIDs...)
-	slices.Sort(affected)
+	slices.SortFunc(affected, UUID.Compare)
 	affected = slices.Compact(affected)
 	result := make([]Membership, 0, len(affected))
 	for _, linkID := range affected {
@@ -728,7 +728,7 @@ func (m *Manager) scimMembershipsForGroupChange(ctx context.Context, configurati
 		if err != nil {
 			return nil, err
 		}
-		if membership.ProvisioningSource != configuration.ID {
+		if membership.ProvisioningSource != configuration.ID.String() {
 			return nil, ErrConflict
 		}
 		role, err := m.scimRoleForUser(configuration, groups, linkID)
@@ -741,7 +741,7 @@ func (m *Manager) scimMembershipsForGroupChange(ctx context.Context, configurati
 	return result, nil
 }
 
-func (m *Manager) scimRoleForUser(configuration SCIMConfiguration, groups []SCIMGroup, linkID string) (Role, error) {
+func (m *Manager) scimRoleForUser(configuration SCIMConfiguration, groups []SCIMGroup, linkID UUID) (Role, error) {
 	selectedRole, selectedPriority, selected := configuration.DefaultRole, 0, false
 	for _, group := range groups {
 		if group.DeletedAt != nil || !slices.Contains(group.MemberIDs, linkID) {
@@ -761,7 +761,7 @@ func (m *Manager) scimRoleForUser(configuration SCIMConfiguration, groups []SCIM
 	return selectedRole, nil
 }
 
-func (m *Manager) allSCIMGroups(ctx context.Context, configurationID string) ([]SCIMGroup, error) {
+func (m *Manager) allSCIMGroups(ctx context.Context, configurationID UUID) ([]SCIMGroup, error) {
 	var result []SCIMGroup
 	cursor := ""
 	for {
@@ -784,7 +784,7 @@ func (m *Manager) allSCIMGroups(ctx context.Context, configurationID string) ([]
 	}
 }
 
-func (m *Manager) allSCIMUsers(ctx context.Context, configurationID string) ([]SCIMUser, error) {
+func (m *Manager) allSCIMUsers(ctx context.Context, configurationID UUID) ([]SCIMUser, error) {
 	var result []SCIMUser
 	cursor := ""
 	for {
@@ -807,7 +807,7 @@ func (m *Manager) allSCIMUsers(ctx context.Context, configurationID string) ([]S
 	}
 }
 
-func (m *Manager) requireSCIMAdmin(ctx context.Context, actor Authentication, configurationID, operation string) (SCIMConfiguration, error) {
+func (m *Manager) requireSCIMAdmin(ctx context.Context, actor Authentication, configurationID UUID, operation string) (SCIMConfiguration, error) {
 	if m.scimStore == nil {
 		return SCIMConfiguration{}, ErrNotSupported
 	}
@@ -828,7 +828,7 @@ func (m *Manager) scimConfigurationForPrincipal(ctx context.Context, principal S
 	if m.scimStore == nil {
 		return SCIMConfiguration{}, ErrNotSupported
 	}
-	if principal.ConfigurationID == "" || principal.CredentialID == "" || principal.WorkspaceID == "" {
+	if principal.ConfigurationID == (UUID{}) || principal.CredentialID == (UUID{}) || principal.WorkspaceID == (UUID{}) {
 		return SCIMConfiguration{}, ErrUnauthorized
 	}
 	configuration, err := m.scimStore.SCIMConfiguration(ctx, principal.ConfigurationID)
@@ -869,7 +869,7 @@ func (m *Manager) validateSCIMRoleConfiguration(defaultRole Role, mappings []SCI
 	return defaultRole, result, nil
 }
 
-func (m *Manager) newSCIMCredential(configurationID string, expiresAt *time.Time) (SCIMCredential, string, error) {
+func (m *Manager) newSCIMCredential(configurationID UUID, expiresAt *time.Time) (SCIMCredential, string, error) {
 	prefixBytes, err := randomBytes(m.random, 6)
 	if err != nil {
 		return SCIMCredential{}, "", err
@@ -961,7 +961,7 @@ func normalizeSCIMGroupInput(input SCIMGroupInput) (SCIMGroupInput, error) {
 			return SCIMGroupInput{}, fmt.Errorf("%w: invalid SCIM group member", ErrInvalidInput)
 		}
 	}
-	slices.Sort(input.MemberIDs)
+	slices.SortFunc(input.MemberIDs, UUID.Compare)
 	input.MemberIDs = slices.Compact(input.MemberIDs)
 	return input, nil
 }
@@ -981,7 +981,7 @@ func validSCIMFilter(filter SCIMFilter, user bool) bool {
 	}
 }
 
-func (m *Manager) newServiceAudit(ctx context.Context, actor, action, resourceType, resourceID, workspaceID string, outcome AuditOutcome, reason string) (AuditEvent, error) {
+func (m *Manager) newServiceAudit(ctx context.Context, actor UUID, action, resourceType, resourceID string, workspaceID UUID, outcome AuditOutcome, reason string) (AuditEvent, error) {
 	event, err := m.newAudit(ctx, actor, action, resourceType, resourceID, workspaceID, outcome, reason)
 	if err == nil {
 		event.ActorKind = ActorService

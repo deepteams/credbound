@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/xml"
+	"github.com/deepteams/credbound"
 	"io"
 	"math/big"
 	"net/http"
@@ -22,8 +23,8 @@ import (
 	"github.com/crewjam/saml"
 )
 
-const (
-	testConfigurationID = "0198b463-51a2-7cde-8000-0123456789ab"
+var (
+	testConfigurationID = credbound.MustParseUUID("0198b463-51a2-7cde-8000-0123456789ab")
 	testSPEntityID      = "https://app.example.com/saml/metadata"
 	testACSURL          = "https://app.example.com/saml/acs"
 )

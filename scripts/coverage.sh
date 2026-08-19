@@ -31,6 +31,13 @@ cover_packages=(
   "$module/otelobserver"
   "$module/scimhttp"
 )
+# sqlstore/postgresql is tested but deliberately not counted. Its coverage
+# depends on a live PostgreSQL: with CREDBOUND_POSTGRES_DSN set the consolidated
+# figure is ~84%, without it ~78%, so counting it would make the floor mean
+# something different on every machine. The store is covered instead by the
+# conformance suite in internal/storetest, which runs against a real server in
+# CI, and by the migration tests. Raising this to a counted package needs
+# PostgreSQL to become a hard requirement of `make verify`.
 
 raw_profile="$(mktemp "${TMPDIR:-/tmp}/credbound-coverage-raw.XXXXXX")"
 profile="$(mktemp "${TMPDIR:-/tmp}/credbound-coverage.XXXXXX")"

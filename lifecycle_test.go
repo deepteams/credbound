@@ -22,7 +22,7 @@ func TestIdentityWorkspaceAndMembershipLifecycle(t *testing.T) {
 	root := aal2(authn.UserID, f.now)
 
 	workspace, err := f.manager.CreateWorkspace(ctx, root, credbound.CreateWorkspaceInput{Name: " Product "})
-	if err != nil || workspace.Name != "Product" || !uuidV7.MatchString(workspace.ID) {
+	if err != nil || workspace.Name != "Product" || !uuidV7.MatchString(workspace.ID.String()) {
 		t.Fatalf("workspace = %#v, %v", workspace, err)
 	}
 	if err := f.manager.RemoveMembership(ctx, root, workspace.ID, root.UserID); !errors.Is(err, credbound.ErrConflict) {
@@ -140,13 +140,13 @@ func TestIdentityLifecycleRejectsInvalidAndUnauthorizedMutations(t *testing.T) {
 	if _, err := f.manager.CreateWorkspace(ctx, root, credbound.CreateWorkspaceInput{Name: " "}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("blank workspace = %v", err)
 	}
-	if _, err := f.manager.UpdateWorkspace(ctx, root, "invalid", credbound.UpdateWorkspaceInput{Name: "Name"}); !errors.Is(err, credbound.ErrInvalidInput) {
+	if _, err := f.manager.UpdateWorkspace(ctx, root, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000"), credbound.UpdateWorkspaceInput{Name: "Name"}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid workspace id = %v", err)
 	}
 	if _, err := f.manager.UpdateWorkspace(ctx, authn, workspace.ID, credbound.UpdateWorkspaceInput{Name: "Name"}); !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("workspace update without step-up = %v", err)
 	}
-	if _, err := f.manager.UpdateWorkspace(ctx, root, "0198b463-0000-7000-8000-00000000ffff", credbound.UpdateWorkspaceInput{Name: "Name"}); !errors.Is(err, credbound.ErrForbidden) {
+	if _, err := f.manager.UpdateWorkspace(ctx, root, credbound.MustParseUUID("0198b463-0000-7000-8000-00000000ffff"), credbound.UpdateWorkspaceInput{Name: "Name"}); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("missing workspace update = %v", err)
 	}
 	if _, err := f.manager.AdminUpdateWorkspace(ctx, credbound.Authentication{}, credbound.TrustedRequest{}, workspace.ID, credbound.UpdateWorkspaceInput{Name: "Name"}); !errors.Is(err, credbound.ErrUnauthorized) {
@@ -155,24 +155,24 @@ func TestIdentityLifecycleRejectsInvalidAndUnauthorizedMutations(t *testing.T) {
 	if _, err := f.manager.AdminUpdateWorkspace(ctx, authn, credbound.TrustedRequest{}, workspace.ID, credbound.UpdateWorkspaceInput{Name: "Name"}); !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("administrative workspace update without step-up = %v", err)
 	}
-	if _, err := f.manager.AdminUpdateWorkspace(ctx, root, credbound.TrustedRequest{Local: true}, "invalid", credbound.UpdateWorkspaceInput{Name: "Name"}); !errors.Is(err, credbound.ErrInvalidInput) {
+	if _, err := f.manager.AdminUpdateWorkspace(ctx, root, credbound.TrustedRequest{Local: true}, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000"), credbound.UpdateWorkspaceInput{Name: "Name"}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("administrative invalid workspace id = %v", err)
 	}
 	if err := f.manager.AdminDisableWorkspace(ctx, credbound.Authentication{}, credbound.TrustedRequest{}, workspace.ID); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("unauthorized administrative workspace disable = %v", err)
 	}
-	if err := f.manager.AdminDisableWorkspace(ctx, root, credbound.TrustedRequest{Local: true}, "invalid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.AdminDisableWorkspace(ctx, root, credbound.TrustedRequest{Local: true}, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("administrative invalid workspace disable = %v", err)
 	}
 	bound := root
-	bound.WorkspaceID = "0198b463-0000-7000-8000-0000000000ff"
+	bound.WorkspaceID = credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000ff")
 	if _, err := f.manager.UpdateWorkspace(ctx, bound, workspace.ID, credbound.UpdateWorkspaceInput{Name: "Name"}); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("cross-workspace mutation = %v", err)
 	}
 	if _, err := f.manager.UpdateWorkspace(ctx, root, workspace.ID, credbound.UpdateWorkspaceInput{Name: ""}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("blank update = %v", err)
 	}
-	if _, err := f.manager.AddMembership(ctx, root, workspace.ID, "invalid", credbound.RoleMember); !errors.Is(err, credbound.ErrNotFound) && !errors.Is(err, credbound.ErrInvalidInput) {
+	if _, err := f.manager.AddMembership(ctx, root, workspace.ID, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000"), credbound.RoleMember); !errors.Is(err, credbound.ErrNotFound) && !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid member = %v", err)
 	}
 	if _, err := f.manager.AddMembership(ctx, root, workspace.ID, root.UserID, credbound.RoleMember); !errors.Is(err, credbound.ErrConflict) {
@@ -187,13 +187,13 @@ func TestIdentityLifecycleRejectsInvalidAndUnauthorizedMutations(t *testing.T) {
 	if _, err := f.manager.SetMembershipStatus(ctx, credbound.Authentication{}, workspace.ID, root.UserID, credbound.MembershipActive); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("unauthorized membership status = %v", err)
 	}
-	if _, err := f.manager.SetMembershipStatus(ctx, root, workspace.ID, "0198b463-0000-7000-8000-00000000fffe", credbound.MembershipActive); !errors.Is(err, credbound.ErrNotFound) {
+	if _, err := f.manager.SetMembershipStatus(ctx, root, workspace.ID, credbound.MustParseUUID("0198b463-0000-7000-8000-00000000fffe"), credbound.MembershipActive); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("missing membership status = %v", err)
 	}
 	if err := f.manager.RemoveMembership(ctx, credbound.Authentication{}, workspace.ID, root.UserID); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("unauthorized membership removal = %v", err)
 	}
-	if err := f.manager.RemoveMembership(ctx, root, workspace.ID, "0198b463-0000-7000-8000-00000000fffe"); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.manager.RemoveMembership(ctx, root, workspace.ID, credbound.MustParseUUID("0198b463-0000-7000-8000-00000000fffe")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("missing membership removal = %v", err)
 	}
 	if err := f.manager.DisableUser(ctx, credbound.Authentication{}, credbound.TrustedRequest{}, root.UserID); !errors.Is(err, credbound.ErrUnauthorized) {
@@ -202,10 +202,10 @@ func TestIdentityLifecycleRejectsInvalidAndUnauthorizedMutations(t *testing.T) {
 	if err := f.manager.DisableUser(ctx, authn, credbound.TrustedRequest{}, root.UserID); !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("user disable without step-up = %v", err)
 	}
-	if err := f.manager.DisableUser(ctx, root, credbound.TrustedRequest{Local: true}, "0198b463-0000-7000-8000-00000000fffd"); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.manager.DisableUser(ctx, root, credbound.TrustedRequest{Local: true}, credbound.MustParseUUID("0198b463-0000-7000-8000-00000000fffd")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("missing user disable = %v", err)
 	}
-	if err := f.manager.DisableUser(ctx, root, credbound.TrustedRequest{Local: true}, "invalid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.DisableUser(ctx, root, credbound.TrustedRequest{Local: true}, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid user id = %v", err)
 	}
 	if err := f.manager.EnableUser(ctx, root, credbound.TrustedRequest{Local: true}, root.UserID); err != nil {
@@ -265,7 +265,7 @@ func TestWorkspaceMembersAndInstanceAdministratorReads(t *testing.T) {
 	if len(members) != 3 {
 		t.Fatalf("workspace members = %#v", members)
 	}
-	emails := map[string]string{}
+	emails := map[credbound.UUID]string{}
 	for _, row := range members {
 		if row.User.ID != row.Membership.UserID || row.Membership.WorkspaceID != workspace.ID {
 			t.Fatalf("member row mismatch: %#v", row)
@@ -337,7 +337,7 @@ type userProfileRecorder struct {
 
 func (r *userProfileRecorder) OnUserProfileUpdated(_ context.Context, event credbound.UserProfileUpdatedEvent) error {
 	r.t.Helper()
-	if event.UserID == "" || event.DisplayName == "" {
+	if event.UserID == (credbound.UUID{}) || event.DisplayName == "" {
 		r.t.Fatalf("profile event carries no identity: %#v", event)
 	}
 	r.calls = append(r.calls, event)
@@ -367,7 +367,7 @@ func TestUpdateUserProfile(t *testing.T) {
 	if _, err := f.manager.UpdateUser(ctx, credbound.Authentication{}, credbound.UpdateUserInput{DisplayName: "Nobody"}); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("anonymous profile update = %v", err)
 	}
-	pat := credbound.Authentication{UserID: member.ID, Method: credbound.MethodPAT, WorkspaceID: "", AuthenticatedAt: f.now}
+	pat := credbound.Authentication{UserID: member.ID, Method: credbound.MethodPAT, WorkspaceID: credbound.UUID{}, AuthenticatedAt: f.now}
 	if _, err := f.manager.UpdateUser(ctx, pat, credbound.UpdateUserInput{DisplayName: "Nobody"}); !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("PAT profile update = %v", err)
 	}
@@ -415,10 +415,13 @@ func TestUpdateUserProfile(t *testing.T) {
 	if _, err := f.manager.AdminUpdateUser(ctx, aal1(authn.UserID, f.now), credbound.TrustedRequest{}, authn.UserID, credbound.UpdateUserInput{DisplayName: "Step-up"}); !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("untrusted AAL1 administrative profile update = %v", err)
 	}
-	if _, err := f.manager.AdminUpdateUser(ctx, root, credbound.TrustedRequest{Local: true}, "bad-id", credbound.UpdateUserInput{DisplayName: "X"}); !errors.Is(err, credbound.ErrInvalidInput) {
+	// A malformed target identifier is no longer representable — the type is
+	// sixteen bytes — so what remains to reject is one that is well-formed but
+	// not a UUIDv7 Credbound could have minted.
+	if _, err := f.manager.AdminUpdateUser(ctx, root, credbound.TrustedRequest{Local: true}, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000"), credbound.UpdateUserInput{DisplayName: "X"}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid target identifier = %v", err)
 	}
-	if _, err := f.manager.AdminUpdateUser(ctx, root, credbound.TrustedRequest{Local: true}, "0198b463-0000-7000-8000-00000000babe", credbound.UpdateUserInput{DisplayName: "Missing"}); !errors.Is(err, credbound.ErrNotFound) {
+	if _, err := f.manager.AdminUpdateUser(ctx, root, credbound.TrustedRequest{Local: true}, credbound.MustParseUUID("0198b463-0000-7000-8000-00000000babe"), credbound.UpdateUserInput{DisplayName: "Missing"}); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("missing target = %v", err)
 	}
 
@@ -427,10 +430,10 @@ func TestUpdateUserProfile(t *testing.T) {
 	audit := collectAuditPage(t, f.manager.InstanceAuditEvents(ctx, root, credbound.PageRequest{}))
 	var foundSelf, foundAdmin bool
 	for _, item := range audit.items {
-		if item.Action == "user.profile.update" && item.ActorID == member.ID && item.ResourceID == member.ID && item.Outcome == credbound.AuditSucceeded {
+		if item.Action == "user.profile.update" && item.ActorID == member.ID && item.ResourceID == member.ID.String() && item.Outcome == credbound.AuditSucceeded {
 			foundSelf = true
 		}
-		if item.Action == "admin.user.profile.update" && item.ActorID == authn.UserID && item.ResourceID == authn.UserID && item.Outcome == credbound.AuditSucceeded {
+		if item.Action == "admin.user.profile.update" && item.ActorID == authn.UserID && item.ResourceID == authn.UserID.String() && item.Outcome == credbound.AuditSucceeded {
 			foundAdmin = true
 		}
 	}
@@ -439,7 +442,7 @@ func TestUpdateUserProfile(t *testing.T) {
 	}
 }
 
-func aal1(userID string, at time.Time) credbound.Authentication {
+func aal1(userID credbound.UUID, at time.Time) credbound.Authentication {
 	return credbound.Authentication{UserID: userID, Method: credbound.MethodPassword, Level: credbound.AAL1, AuthenticatedAt: at}
 }
 
@@ -457,7 +460,7 @@ func TestByIDGetters(t *testing.T) {
 	memberAuthn := aal1(member.ID, f.now)
 
 	// User: empty id is the actor; another account needs admin users read.
-	if self, err := f.manager.User(ctx, memberAuthn, ""); err != nil || self.ID != member.ID {
+	if self, err := f.manager.User(ctx, memberAuthn, credbound.UUID{}); err != nil || self.ID != member.ID {
 		t.Fatalf("self user = %#v, %v", self, err)
 	}
 	if fetched, err := f.manager.User(ctx, stepUp, member.ID); err != nil || fetched.ID != member.ID {
@@ -466,10 +469,10 @@ func TestByIDGetters(t *testing.T) {
 	if _, err := f.manager.User(ctx, memberAuthn, root.UserID); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("non-admin cross-user read = %v", err)
 	}
-	if _, err := f.manager.User(ctx, stepUp, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if _, err := f.manager.User(ctx, stepUp, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid user id = %v", err)
 	}
-	if _, err := f.manager.User(ctx, credbound.Authentication{}, ""); !errors.Is(err, credbound.ErrUnauthorized) {
+	if _, err := f.manager.User(ctx, credbound.Authentication{}, credbound.UUID{}); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("anonymous user read = %v", err)
 	}
 
@@ -487,12 +490,12 @@ func TestByIDGetters(t *testing.T) {
 	if fetched, err := f.manager.Workspace(ctx, stepUp, other.ID); err != nil || fetched.ID != other.ID {
 		t.Fatalf("admin workspace read = %#v, %v", fetched, err)
 	}
-	if _, err := f.manager.Workspace(ctx, memberAuthn, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if _, err := f.manager.Workspace(ctx, memberAuthn, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid workspace id = %v", err)
 	}
 
 	// Membership: own with workspace access, another member with users read.
-	if fetched, err := f.manager.Membership(ctx, memberAuthn, workspace.ID, ""); err != nil || fetched.UserID != member.ID || fetched.Role != credbound.RoleMember {
+	if fetched, err := f.manager.Membership(ctx, memberAuthn, workspace.ID, credbound.UUID{}); err != nil || fetched.UserID != member.ID || fetched.Role != credbound.RoleMember {
 		t.Fatalf("own membership = %#v, %v", fetched, err)
 	}
 	if fetched, err := f.manager.Membership(ctx, stepUp, workspace.ID, member.ID); err != nil || fetched.UserID != member.ID {
@@ -501,10 +504,10 @@ func TestByIDGetters(t *testing.T) {
 	if _, err := f.manager.Membership(ctx, memberAuthn, workspace.ID, root.UserID); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("member cross-membership read = %v", err)
 	}
-	if _, err := f.manager.Membership(ctx, memberAuthn, workspace.ID, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if _, err := f.manager.Membership(ctx, memberAuthn, workspace.ID, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid membership user id = %v", err)
 	}
-	if _, err := f.manager.Membership(ctx, memberAuthn, "not-a-uuid", ""); !errors.Is(err, credbound.ErrInvalidInput) {
+	if _, err := f.manager.Membership(ctx, memberAuthn, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000"), credbound.UUID{}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid membership workspace id = %v", err)
 	}
 

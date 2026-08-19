@@ -57,22 +57,24 @@ func TestOAuthAPIsRequireConfiguration(t *testing.T) {
 			return err
 		},
 		func() error {
-			_, err := f.manager.UpdateOAuthIssuer(ctx, actor, trusted, "id", credbound.UpdateOAuthIssuerInput{})
+			_, err := f.manager.UpdateOAuthIssuer(ctx, actor, trusted, credbound.MustParseUUID("0198b463-0000-7000-8000-a56145270ce6"), credbound.UpdateOAuthIssuerInput{})
 			return err
 		},
 		func() error {
-			_, err := f.manager.CreateOAuthProtectedResource(ctx, actor, "workspace", credbound.CreateOAuthProtectedResourceInput{})
+			_, err := f.manager.CreateOAuthProtectedResource(ctx, actor, credbound.MustParseUUID("0198b463-0000-7000-8000-21a3230e0377"), credbound.CreateOAuthProtectedResourceInput{})
 			return err
 		},
 		func() error {
-			_, err := f.manager.PreRegisterOAuthClient(ctx, actor, trusted, "issuer", credbound.OAuthClientRegistrationInput{})
+			_, err := f.manager.PreRegisterOAuthClient(ctx, actor, trusted, credbound.MustParseUUID("0198b463-0000-7000-8000-535c6f8eb511"), credbound.OAuthClientRegistrationInput{})
 			return err
 		},
 		func() error {
-			_, err := f.manager.CreateOAuthInitialAccessToken(ctx, actor, trusted, "issuer", credbound.CreateOAuthInitialAccessTokenInput{})
+			_, err := f.manager.CreateOAuthInitialAccessToken(ctx, actor, trusted, credbound.MustParseUUID("0198b463-0000-7000-8000-535c6f8eb511"), credbound.CreateOAuthInitialAccessTokenInput{})
 			return err
 		},
-		func() error { return f.manager.RevokeOAuthInitialAccessToken(ctx, actor, trusted, "token") },
+		func() error {
+			return f.manager.RevokeOAuthInitialAccessToken(ctx, actor, trusted, credbound.MustParseUUID("0198b463-0000-7000-8000-3c469e9d6c58"))
+		},
 		func() error {
 			_, err := f.manager.RegisterOAuthClient(ctx, "https://auth.example.com", "", credbound.OAuthClientRegistrationInput{})
 			return err
@@ -85,13 +87,27 @@ func TestOAuthAPIsRequireConfiguration(t *testing.T) {
 			_, err := f.manager.CompleteOAuthAuthorization(ctx, actor, "continuation", true)
 			return err
 		},
-		func() error { return f.manager.DisableOAuthIssuer(ctx, actor, trusted, "issuer") },
-		func() error { return f.manager.EnableOAuthIssuer(ctx, actor, trusted, "issuer") },
-		func() error { return f.manager.DisableOAuthProtectedResource(ctx, actor, "workspace", "resource") },
-		func() error { return f.manager.EnableOAuthProtectedResource(ctx, actor, "workspace", "resource") },
-		func() error { return f.manager.DisableOAuthClient(ctx, actor, trusted, "client") },
-		func() error { return f.manager.EnableOAuthClient(ctx, actor, trusted, "client") },
-		func() error { return f.manager.RevokeOAuthGrant(ctx, actor, "grant") },
+		func() error {
+			return f.manager.DisableOAuthIssuer(ctx, actor, trusted, credbound.MustParseUUID("0198b463-0000-7000-8000-535c6f8eb511"))
+		},
+		func() error {
+			return f.manager.EnableOAuthIssuer(ctx, actor, trusted, credbound.MustParseUUID("0198b463-0000-7000-8000-535c6f8eb511"))
+		},
+		func() error {
+			return f.manager.DisableOAuthProtectedResource(ctx, actor, credbound.MustParseUUID("0198b463-0000-7000-8000-21a3230e0377"), credbound.MustParseUUID("0198b463-0000-7000-8000-5de95319f174"))
+		},
+		func() error {
+			return f.manager.EnableOAuthProtectedResource(ctx, actor, credbound.MustParseUUID("0198b463-0000-7000-8000-21a3230e0377"), credbound.MustParseUUID("0198b463-0000-7000-8000-5de95319f174"))
+		},
+		func() error {
+			return f.manager.DisableOAuthClient(ctx, actor, trusted, credbound.MustParseUUID("0198b463-0000-7000-8000-948fe603f61d"))
+		},
+		func() error {
+			return f.manager.EnableOAuthClient(ctx, actor, trusted, credbound.MustParseUUID("0198b463-0000-7000-8000-948fe603f61d"))
+		},
+		func() error {
+			return f.manager.RevokeOAuthGrant(ctx, actor, credbound.MustParseUUID("0198b463-0000-7000-8000-3492ad65d05a"))
+		},
 		func() error {
 			_, err := f.manager.ExchangeOAuthAuthorizationCode(ctx, credbound.ExchangeOAuthAuthorizationCodeInput{})
 			return err
@@ -113,9 +129,9 @@ func TestOAuthAPIsRequireConfiguration(t *testing.T) {
 		}
 	}
 	assertLifecycleError(t, f.manager.OAuthIssuers(ctx, actor, credbound.PageRequest{}), credbound.ErrNotSupported)
-	assertLifecycleError(t, f.manager.OAuthProtectedResources(ctx, actor, "workspace", credbound.PageRequest{}), credbound.ErrNotSupported)
-	assertLifecycleError(t, f.manager.OAuthClients(ctx, actor, "issuer", credbound.PageRequest{}), credbound.ErrNotSupported)
-	assertLifecycleError(t, f.manager.OAuthGrants(ctx, actor, "workspace", credbound.PageRequest{}), credbound.ErrNotSupported)
+	assertLifecycleError(t, f.manager.OAuthProtectedResources(ctx, actor, credbound.MustParseUUID("0198b463-0000-7000-8000-21a3230e0377"), credbound.PageRequest{}), credbound.ErrNotSupported)
+	assertLifecycleError(t, f.manager.OAuthClients(ctx, actor, credbound.MustParseUUID("0198b463-0000-7000-8000-535c6f8eb511"), credbound.PageRequest{}), credbound.ErrNotSupported)
+	assertLifecycleError(t, f.manager.OAuthGrants(ctx, actor, credbound.MustParseUUID("0198b463-0000-7000-8000-21a3230e0377"), credbound.PageRequest{}), credbound.ErrNotSupported)
 }
 
 // TestOAuthConfigRequiresCapableStore checks that enabling Config.OAuth with a
@@ -148,7 +164,7 @@ func TestOAuthAuthorizationRefreshAndDCR(t *testing.T) {
 		Issuer: "https://auth.example.com", OIDCEnabled: true, CIMDMode: credbound.OAuthCIMDDisabled,
 		DCRMode: credbound.OAuthDCRProtected,
 	})
-	if err != nil || !uuidV7.MatchString(issuer.ID) {
+	if err != nil || !uuidV7.MatchString(issuer.ID.String()) {
 		t.Fatalf("issuer = %#v, %v", issuer, err)
 	}
 	resource, err := f.manager.CreateOAuthProtectedResource(ctx, actor, workspace.ID, credbound.CreateOAuthProtectedResourceInput{
@@ -211,7 +227,7 @@ func TestOAuthAuthorizationRefreshAndDCR(t *testing.T) {
 	// OAUTH-008: the OIDC subject is pairwise — never the raw user ID — and
 	// the email claim is present only because the email scope was granted.
 	info, err := f.manager.OAuthUserInfo(ctx, issuer.Issuer, tokens.AccessToken)
-	if err != nil || info.Subject == "" || info.Subject == actor.UserID || info.Email != "root@example.com" || info.EmailVerified == nil || !*info.EmailVerified {
+	if err != nil || info.Subject == "" || info.Subject == actor.UserID.String() || info.Email != "root@example.com" || info.EmailVerified == nil || !*info.EmailVerified {
 		t.Fatalf("userinfo = %#v, %v", info, err)
 	}
 	if _, err := f.manager.RefreshOAuthToken(ctx, credbound.RefreshOAuthTokenInput{
@@ -247,10 +263,10 @@ func TestOAuthAuthorizationRefreshAndDCR(t *testing.T) {
 	if err := f.manager.RevokeOAuthToken(ctx, credbound.RevokeOAuthTokenInput{Issuer: issuer.Issuer, ClientID: issuedClient.Client.ClientID, Token: refreshed.RefreshToken}); err != nil {
 		t.Fatalf("refresh revocation = %v", err)
 	}
-	if _, err := f.manager.OAuthUserInfo(ctx, issuer.Issuer, "bad"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+	if _, err := f.manager.OAuthUserInfo(ctx, issuer.Issuer, "00000000-0000-4000-8000-000000000000"); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("malformed UserInfo token = %v", err)
 	}
-	if _, err := f.manager.AuthenticateOAuthAccessToken(ctx, resource.Resource, "bad"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+	if _, err := f.manager.AuthenticateOAuthAccessToken(ctx, resource.Resource, "00000000-0000-4000-8000-000000000000"); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("malformed access token = %v", err)
 	}
 	if err := f.manager.RevokeOAuthToken(ctx, credbound.RevokeOAuthTokenInput{
@@ -282,7 +298,7 @@ func TestOAuthAuthorizationRefreshAndDCR(t *testing.T) {
 		Name: "Legacy MCP", ApplicationType: credbound.OAuthApplicationWeb,
 		RedirectURIs: []string{"https://legacy.example.com/callback"}, Scopes: []string{"documents.read"}, TokenEndpointAuthMethod: credbound.OAuthAuthNone,
 	}
-	if _, err := f.manager.RegisterOAuthClient(ctx, issuer.Issuer, "invalid", registration); !errors.Is(err, credbound.ErrInvalidCredentials) {
+	if _, err := f.manager.RegisterOAuthClient(ctx, issuer.Issuer, "00000000-0000-4000-8000-000000000000", registration); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("invalid initial access token = %v", err)
 	}
 	if _, err := f.manager.RegisterOAuthClient(ctx, issuer.Issuer, initial.Token, registration); err != nil {
@@ -314,7 +330,7 @@ func TestOAuthAuthorizationRefreshAndDCR(t *testing.T) {
 			t.Fatalf("anonymous initial access token inventory = %v", err)
 		}
 	}
-	for _, err := range f.manager.OAuthInitialAccessTokens(ctx, actor, "not-a-uuid") {
+	for _, err := range f.manager.OAuthInitialAccessTokens(ctx, actor, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")) {
 		if !errors.Is(err, credbound.ErrInvalidInput) {
 			t.Fatalf("invalid issuer id inventory = %v", err)
 		}
@@ -685,7 +701,7 @@ func TestOAuthAdministrationListsQuotaAndRevocation(t *testing.T) {
 	}
 	// DATA-004: OAuth grants, issuers, protected resources, and clients are
 	// exposed through streamed lists.
-	grants := collectLifecyclePage(t, f.manager.OAuthGrants(ctx, actor, "", credbound.PageRequest{}))
+	grants := collectLifecyclePage(t, f.manager.OAuthGrants(ctx, actor, credbound.UUID{}, credbound.PageRequest{}))
 	if len(grants) != 1 {
 		t.Fatalf("grants = %#v", grants)
 	}
@@ -751,12 +767,14 @@ func TestOAuthAdministrationRejectsInvalidAndUnauthorizedRequests(t *testing.T) 
 	}
 	for name, call := range map[string]func() error{
 		"issuer id": func() error {
-			return f.manager.DisableOAuthIssuer(ctx, actor, credbound.TrustedRequest{Local: true}, "invalid")
+			return f.manager.DisableOAuthIssuer(ctx, actor, credbound.TrustedRequest{Local: true}, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000"))
 		},
 		"client id": func() error {
-			return f.manager.DisableOAuthClient(ctx, actor, credbound.TrustedRequest{Local: true}, "invalid")
+			return f.manager.DisableOAuthClient(ctx, actor, credbound.TrustedRequest{Local: true}, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000"))
 		},
-		"grant id": func() error { return f.manager.RevokeOAuthGrant(ctx, actor, "invalid") },
+		"grant id": func() error {
+			return f.manager.RevokeOAuthGrant(ctx, actor, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000"))
+		},
 	} {
 		if err := call(); !errors.Is(err, credbound.ErrInvalidInput) {
 			t.Fatalf("invalid %s = %v", name, err)
@@ -768,7 +786,7 @@ func TestOAuthAdministrationRejectsInvalidAndUnauthorizedRequests(t *testing.T) 
 	if err := f.manager.DisableOAuthClient(ctx, credbound.Authentication{}, credbound.TrustedRequest{Local: true}, client.Client.ID); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("unauthorized client disable = %v", err)
 	}
-	if err := f.manager.DisableOAuthProtectedResource(ctx, actor, "0198b463-0000-7000-8000-0000000000ff", resource.ID); !errors.Is(err, credbound.ErrForbidden) {
+	if err := f.manager.DisableOAuthProtectedResource(ctx, actor, credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000ff"), resource.ID); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("cross-workspace resource disable = %v", err)
 	}
 	if err := f.manager.DisableOAuthIssuer(ctx, actor, credbound.TrustedRequest{Local: true}, issuer.ID); err != nil {
@@ -808,7 +826,7 @@ func TestOAuthAdministrationRejectsInvalidAndUnauthorizedRequests(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	grants := collectLifecyclePage(t, f.manager.OAuthGrants(ctx, actor, "", credbound.PageRequest{}))
+	grants := collectLifecyclePage(t, f.manager.OAuthGrants(ctx, actor, credbound.UUID{}, credbound.PageRequest{}))
 	if len(grants) != 1 {
 		t.Fatalf("grants = %#v", grants)
 	}
@@ -822,10 +840,10 @@ func TestOAuthAdministrationRejectsInvalidAndUnauthorizedRequests(t *testing.T) 
 	assertLifecycleError(t, f.manager.OAuthIssuers(ctx, actor, credbound.PageRequest{Limit: 101}), credbound.ErrInvalidInput)
 	assertLifecycleError(t, f.manager.OAuthProtectedResources(ctx, credbound.Authentication{}, workspace.ID, credbound.PageRequest{}), credbound.ErrUnauthorized)
 	assertLifecycleError(t, f.manager.OAuthProtectedResources(ctx, actor, workspace.ID, credbound.PageRequest{Limit: 101}), credbound.ErrInvalidInput)
-	assertLifecycleError(t, f.manager.OAuthClients(ctx, actor, "invalid", credbound.PageRequest{}), credbound.ErrInvalidInput)
+	assertLifecycleError(t, f.manager.OAuthClients(ctx, actor, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000"), credbound.PageRequest{}), credbound.ErrInvalidInput)
 	assertLifecycleError(t, f.manager.OAuthClients(ctx, actor, issuer.ID, credbound.PageRequest{Limit: 101}), credbound.ErrInvalidInput)
-	assertLifecycleError(t, f.manager.OAuthGrants(ctx, credbound.Authentication{}, "", credbound.PageRequest{}), credbound.ErrUnauthorized)
-	assertLifecycleError(t, f.manager.OAuthGrants(ctx, actor, "", credbound.PageRequest{Limit: 101}), credbound.ErrInvalidInput)
+	assertLifecycleError(t, f.manager.OAuthGrants(ctx, credbound.Authentication{}, credbound.UUID{}, credbound.PageRequest{}), credbound.ErrUnauthorized)
+	assertLifecycleError(t, f.manager.OAuthGrants(ctx, actor, credbound.UUID{}, credbound.PageRequest{Limit: 101}), credbound.ErrInvalidInput)
 }
 
 func TestOAuthRejectsInvalidRequests(t *testing.T) {
@@ -835,7 +853,7 @@ func TestOAuthRejectsInvalidRequests(t *testing.T) {
 	actor.Level, actor.Method = credbound.AAL2, credbound.MethodTOTP
 	for _, input := range []credbound.CreateOAuthIssuerInput{
 		{Issuer: "http://auth.example.com"},
-		{Issuer: "https://auth.example.com", CIMDMode: "invalid"},
+		{Issuer: "https://auth.example.com", CIMDMode: "00000000-0000-4000-8000-000000000000"},
 		{Issuer: "https://auth.example.com", CIMDMode: credbound.OAuthCIMDAllowlist},
 		{Issuer: "https://auth.example.com", DCRMode: credbound.OAuthDCROpen, DCRAllowClientSecrets: true},
 		{Issuer: "https://auth.example.com", AccessTokenTTL: 2 * time.Hour},
@@ -866,11 +884,11 @@ func TestOAuthRejectsInvalidRequests(t *testing.T) {
 			t.Fatalf("invalid IAT %#v = %v", input, err)
 		}
 	}
-	if _, err := f.manager.UpdateOAuthIssuer(ctx, actor, credbound.TrustedRequest{Local: true}, "not-a-uuid", credbound.UpdateOAuthIssuerInput{}); !errors.Is(err, credbound.ErrInvalidInput) {
+	if _, err := f.manager.UpdateOAuthIssuer(ctx, actor, credbound.TrustedRequest{Local: true}, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000"), credbound.UpdateOAuthIssuerInput{}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid issuer id = %v", err)
 	}
 	for _, input := range []credbound.CreateOAuthProtectedResourceInput{
-		{IssuerID: "bad", Resource: "https://mcp.example.com/acme", Scopes: []credbound.OAuthScopeDefinition{{Name: "read", Description: "Read", Permissions: []credbound.WorkspacePermission{credbound.PermissionWorkspaceAccess}}}},
+		{IssuerID: credbound.MustParseUUID("00000000-0000-4000-8000-000000000000"), Resource: "https://mcp.example.com/acme", Scopes: []credbound.OAuthScopeDefinition{{Name: "read", Description: "Read", Permissions: []credbound.WorkspacePermission{credbound.PermissionWorkspaceAccess}}}},
 		{IssuerID: issuer.ID, Resource: "http://mcp.example.com/acme", Scopes: []credbound.OAuthScopeDefinition{{Name: "read", Description: "Read", Permissions: []credbound.WorkspacePermission{credbound.PermissionWorkspaceAccess}}}},
 		{IssuerID: issuer.ID, Resource: "https://mcp.example.com/acme"},
 		{IssuerID: issuer.ID, Resource: "https://mcp.example.com/acme", Scopes: []credbound.OAuthScopeDefinition{{Name: "openid", Description: "Reserved", Permissions: []credbound.WorkspacePermission{credbound.PermissionWorkspaceAccess}}}},
@@ -957,13 +975,13 @@ func TestOAuthRejectsInvalidRequests(t *testing.T) {
 	if _, err := f.manager.CompleteOAuthAuthorization(ctx, actor, consent.Continuation+"tampered", true); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("tampered consent = %v", err)
 	}
-	if _, err := f.manager.ExchangeOAuthAuthorizationCode(ctx, credbound.ExchangeOAuthAuthorizationCodeInput{Issuer: issuer.Issuer, ClientID: issued.Client.ClientID, Code: "bad", CodeVerifier: "short"}); !errors.Is(err, credbound.ErrInvalidCredentials) {
+	if _, err := f.manager.ExchangeOAuthAuthorizationCode(ctx, credbound.ExchangeOAuthAuthorizationCodeInput{Issuer: issuer.Issuer, ClientID: issued.Client.ClientID, Code: "00000000-0000-4000-8000-000000000000", CodeVerifier: "short"}); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("invalid code = %v", err)
 	}
-	if _, err := f.manager.ExchangeOAuthAuthorizationCode(ctx, credbound.ExchangeOAuthAuthorizationCodeInput{Issuer: issuer.Issuer, ClientID: issued.Client.ClientID, ClientSecret: "unexpected", Code: "bad", CodeVerifier: "short"}); !errors.Is(err, credbound.ErrInvalidCredentials) {
+	if _, err := f.manager.ExchangeOAuthAuthorizationCode(ctx, credbound.ExchangeOAuthAuthorizationCodeInput{Issuer: issuer.Issuer, ClientID: issued.Client.ClientID, ClientSecret: "unexpected", Code: "00000000-0000-4000-8000-000000000000", CodeVerifier: "short"}); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("public client secret accepted = %v", err)
 	}
-	if _, err := f.manager.RefreshOAuthToken(ctx, credbound.RefreshOAuthTokenInput{Issuer: issuer.Issuer, ClientID: issued.Client.ClientID, RefreshToken: "bad"}); !errors.Is(err, credbound.ErrInvalidCredentials) {
+	if _, err := f.manager.RefreshOAuthToken(ctx, credbound.RefreshOAuthTokenInput{Issuer: issuer.Issuer, ClientID: issued.Client.ClientID, RefreshToken: "00000000-0000-4000-8000-000000000000"}); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("invalid refresh = %v", err)
 	}
 	if err := f.manager.RevokeOAuthToken(ctx, credbound.RevokeOAuthTokenInput{Issuer: issuer.Issuer, ClientID: issued.Client.ClientID, Token: "unknown"}); err != nil {
@@ -1046,8 +1064,8 @@ func TestOAuthRejectsInvalidRequests(t *testing.T) {
 	}
 	membership.Status = credbound.MembershipSuspended
 	if err := f.store.UpsertMembership(ctx, membership, credbound.Commit{Audit: credbound.AuditEvent{
-		ID: "0198b463-0000-7000-8000-00000000f001", OccurredAt: f.now, ActorID: actor.UserID,
-		Action: "membership.suspend", ResourceType: "user", ResourceID: actor.UserID, WorkspaceID: workspace.ID, Outcome: credbound.AuditSucceeded,
+		ID: credbound.MustParseUUID("0198b463-0000-7000-8000-00000000f001"), OccurredAt: f.now, ActorID: actor.UserID,
+		Action: "membership.suspend", ResourceType: "user", ResourceID: actor.UserID.String(), WorkspaceID: workspace.ID, Outcome: credbound.AuditSucceeded,
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -1056,8 +1074,8 @@ func TestOAuthRejectsInvalidRequests(t *testing.T) {
 	}
 	membership.Status = credbound.MembershipActive
 	if err := f.store.UpsertMembership(ctx, membership, credbound.Commit{Audit: credbound.AuditEvent{
-		ID: "0198b463-0000-7000-8000-00000000f002", OccurredAt: f.now, ActorID: actor.UserID,
-		Action: "membership.restore", ResourceType: "user", ResourceID: actor.UserID, WorkspaceID: workspace.ID, Outcome: credbound.AuditSucceeded,
+		ID: credbound.MustParseUUID("0198b463-0000-7000-8000-00000000f002"), OccurredAt: f.now, ActorID: actor.UserID,
+		Action: "membership.restore", ResourceType: "user", ResourceID: actor.UserID.String(), WorkspaceID: workspace.ID, Outcome: credbound.AuditSucceeded,
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -1083,7 +1101,7 @@ func TestOAuthRejectsInvalidRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	privateExchange := credbound.ExchangeOAuthAuthorizationCodeInput{
-		Issuer: issuer.Issuer, ClientID: privateClient.Client.ClientID, ClientAssertion: "invalid",
+		Issuer: issuer.Issuer, ClientID: privateClient.Client.ClientID, ClientAssertion: "00000000-0000-4000-8000-000000000000",
 		ClientAssertionType: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
 		Code:                privateResult.Code, RedirectURI: privateRequest.RedirectURI, CodeVerifier: verifier, Resource: resource.Resource,
 	}
@@ -1267,7 +1285,7 @@ func TestOAuthClientCredentials(t *testing.T) {
 	}
 	// The token authenticates with a client subject and no user.
 	principal, err := f.manager.AuthenticateOAuthAccessToken(ctx, resource.Resource, tokens.AccessToken)
-	if err != nil || principal.UserID != "" || principal.ClientID != client.Client.ClientID || !principal.HasScope("documents.read") || principal.WorkspaceID != workspace.ID {
+	if err != nil || principal.UserID != (credbound.UUID{}) || principal.ClientID != client.Client.ClientID || !principal.HasScope("documents.read") || principal.WorkspaceID != workspace.ID {
 		t.Fatalf("principal = %#v, %v", principal, err)
 	}
 	// It is rejected for a different resource.
@@ -1411,10 +1429,10 @@ func TestOAuthClientCredentialRotation(t *testing.T) {
 	if err := f.manager.ReplaceOAuthClientJWKS(ctx, actor, local, private.Client.ID, []byte("not json")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("malformed JWKS = %v", err)
 	}
-	if _, err := f.manager.RotateOAuthClientSecret(ctx, actor, local, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if _, err := f.manager.RotateOAuthClientSecret(ctx, actor, local, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid client id = %v", err)
 	}
-	if _, err := f.manager.RotateOAuthClientSecret(ctx, actor, local, "0198b463-0000-7000-8000-0000000000aa"); !errors.Is(err, credbound.ErrNotFound) {
+	if _, err := f.manager.RotateOAuthClientSecret(ctx, actor, local, credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000aa")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("unknown client id = %v", err)
 	}
 
@@ -1446,10 +1464,10 @@ func TestOAuthClientCredentialRotation(t *testing.T) {
 	if err := f.manager.ReplaceOAuthClientJWKS(ctx, stale, credbound.TrustedRequest{}, private.Client.ID, replacement); !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("stale JWKS replacement = %v", err)
 	}
-	if err := f.manager.ReplaceOAuthClientJWKS(ctx, actor, local, "not-a-uuid", replacement); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.ReplaceOAuthClientJWKS(ctx, actor, local, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000"), replacement); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid client id for JWKS = %v", err)
 	}
-	if err := f.manager.ReplaceOAuthClientJWKS(ctx, actor, local, "0198b463-0000-7000-8000-0000000000aa", replacement); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.manager.ReplaceOAuthClientJWKS(ctx, actor, local, credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000aa"), replacement); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("unknown client id for JWKS = %v", err)
 	}
 }

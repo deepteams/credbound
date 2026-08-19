@@ -17,14 +17,14 @@ import (
 // role check only with the "*" wildcard scope — a narrowed token has no
 // role-shaped privilege, so route it through AuthorizePermission, the
 // canonical, finer check.
-func (m *Manager) Authorize(ctx context.Context, authn Authentication, workspaceID string, minimumRole Role) error {
-	if authn.UserID == "" {
+func (m *Manager) Authorize(ctx context.Context, authn Authentication, workspaceID UUID, minimumRole Role) error {
+	if authn.UserID == (UUID{}) {
 		return ErrUnauthorized
 	}
 	if authn.SecondFactorRequired {
 		return ErrStepUpRequired
 	}
-	if workspaceID == "" {
+	if workspaceID == (UUID{}) {
 		return fmt.Errorf("%w: workspace id is required", ErrInvalidInput)
 	}
 	user, err := m.store.UserByID(ctx, authn.UserID)
@@ -39,7 +39,7 @@ func (m *Manager) Authorize(ctx context.Context, authn Authentication, workspace
 		m.emitAuthorizationDenied(ctx, authn, workspaceID, required)
 		return ErrForbidden
 	}
-	if authn.WorkspaceID != "" && authn.WorkspaceID != workspaceID {
+	if authn.WorkspaceID != (UUID{}) && authn.WorkspaceID != workspaceID {
 		m.emitAuthorizationDenied(ctx, authn, workspaceID, required)
 		return ErrForbidden
 	}
@@ -83,14 +83,14 @@ func (m *Manager) Authorize(ctx context.Context, authn Authentication, workspace
 // non-interactive credentials such as PATs are unaffected, and a
 // TOTP-pending context (SecondFactorRequired) is rejected with
 // ErrStepUpRequired in every workspace.
-func (m *Manager) AuthorizePermission(ctx context.Context, authn Authentication, workspaceID string, permission WorkspacePermission) error {
-	if authn.UserID == "" {
+func (m *Manager) AuthorizePermission(ctx context.Context, authn Authentication, workspaceID UUID, permission WorkspacePermission) error {
+	if authn.UserID == (UUID{}) {
 		return ErrUnauthorized
 	}
 	if authn.SecondFactorRequired {
 		return ErrStepUpRequired
 	}
-	if workspaceID == "" || !workspacePermissionPattern.MatchString(string(permission)) {
+	if workspaceID == (UUID{}) || !workspacePermissionPattern.MatchString(string(permission)) {
 		return fmt.Errorf("%w: workspace id and permission are required", ErrInvalidInput)
 	}
 	if len(authn.Scopes) > 0 && !authn.HasScope(string(permission)) {
@@ -101,7 +101,7 @@ func (m *Manager) AuthorizePermission(ctx context.Context, authn Authentication,
 	if err != nil || user.Disabled {
 		return ErrForbidden
 	}
-	if authn.WorkspaceID != "" && authn.WorkspaceID != workspaceID {
+	if authn.WorkspaceID != (UUID{}) && authn.WorkspaceID != workspaceID {
 		m.emitAuthorizationDenied(ctx, authn, workspaceID, Role(""))
 		return ErrForbidden
 	}
@@ -136,7 +136,7 @@ func (m *Manager) AuthorizePermission(ctx context.Context, authn Authentication,
 // step-up and workspace RBAC write; SCIM-managed memberships fail with
 // ErrConflict and unknown roles are rejected. The store protects the last
 // active workspace administrator from demotion.
-func (m *Manager) GrantRole(ctx context.Context, actor Authentication, workspaceID, userID string, role Role) (err error) {
+func (m *Manager) GrantRole(ctx context.Context, actor Authentication, workspaceID, userID UUID, role Role) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "rbac.role.grant", started, err) }()
 	if err := m.requireStepUp(ctx, actor, "rbac.role.grant"); err != nil {
@@ -167,7 +167,7 @@ func (m *Manager) GrantRole(ctx context.Context, actor Authentication, workspace
 	}
 	now := m.now()
 	membership := Membership{WorkspaceID: workspaceID, UserID: userID, Role: role, Status: status, ProvisioningSource: ProvisioningSourceLocal, UpdatedAt: now, CreatedAt: createdAt}
-	event, err := m.newAudit(ctx, actor.UserID, "membership.role.set", "user", userID, workspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "membership.role.set", "user", userID.String(), workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -187,7 +187,7 @@ func (m *Manager) GrantRole(ctx context.Context, actor Authentication, workspace
 	return nil
 }
 
-func (m *Manager) emitAuthorizationDenied(ctx context.Context, authn Authentication, workspaceID string, required Role) {
+func (m *Manager) emitAuthorizationDenied(ctx context.Context, authn Authentication, workspaceID UUID, required Role) {
 	meta, err := m.newEventMeta(EventAuthorizationDenied, "rbac.authorize", authn.UserID, workspaceID, AuditEvent{})
 	if err != nil {
 		return

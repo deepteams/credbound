@@ -15,7 +15,7 @@ import (
 	"github.com/deepteams/credbound"
 )
 
-const testConfigurationID = "0198b463-51a2-7cde-8000-0123456789ab"
+var testConfigurationID = credbound.MustParseUUID("0198b463-51a2-7cde-8000-0123456789ab")
 
 func testConfig(github *testGitHub) Config {
 	return Config{
@@ -237,8 +237,8 @@ func TestFinishFallsBackToProfileEmailWhenScopeDeclined(t *testing.T) {
 	// GitHub answers 404 for a missing user:email scope on /user/emails;
 	// fine-grained tokens answer 403. Both fall back to the unproven
 	// profile email.
-	for name, status := range map[string]int{"forbidden": http.StatusForbidden, "not found": http.StatusNotFound} {
-		t.Run(name, func(t *testing.T) {
+	for name, status := range map[credbound.UUID]int{credbound.MustParseUUID("0198b463-0000-7000-8000-43ed5c457b79"): http.StatusForbidden, credbound.MustParseUUID("0198b463-0000-7000-8000-907ba78b4545"): http.StatusNotFound} {
+		t.Run(name.String(), func(t *testing.T) {
 			github := newTestGitHub(t)
 			provider := newTestProvider(t, github, nil)
 			github.setStatus(&github.emailsStatus, status)
@@ -443,8 +443,8 @@ func TestFinishRejectsMalformedInputs(t *testing.T) {
 func TestNewValidatesConfiguration(t *testing.T) {
 	github := newTestGitHub(t)
 	cases := map[string]func(*Config){
-		"bad uuid":            func(c *Config) { c.ConfigurationID = "not-a-uuid" },
-		"uuid v4":             func(c *Config) { c.ConfigurationID = "0198b463-0000-4000-8000-0000000000aa" },
+		"bad uuid":            func(c *Config) { c.ConfigurationID = credbound.MustParseUUID("00000000-0000-4000-8000-000000000000") },
+		"uuid v4":             func(c *Config) { c.ConfigurationID = credbound.MustParseUUID("0198b463-0000-4000-8000-0000000000aa") },
 		"missing client id":   func(c *Config) { c.ClientID = "  " },
 		"missing secret":      func(c *Config) { c.ClientSecret = "" },
 		"missing redirect":    func(c *Config) { c.RedirectURL = "" },

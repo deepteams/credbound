@@ -45,6 +45,36 @@ breaking changes may land in any release and are called out explicitly.
   every first-party store); `AnonymizeUser` scrubs SCIM profiles and
   accepted-invitation addresses in the same transaction.
 
+### Changed
+
+- **Breaking: identifiers are `credbound.UUID`, not `string`.** Every identifier
+  in the API — `User.ID`, `Authentication.UserID`, the `Store` port's
+  parameters, the SSO provider's `ConfigurationID()` — is now the sixteen raw
+  bytes PostgreSQL stores, comparable with `==` and usable as a map key. Text
+  crosses the boundary through `ParseUUID` and `String()`, which is where a
+  malformed identifier is now rejected: it can no longer travel through the
+  library as a plain string. `credbound.UUID` is an alias for the package
+  accepted into the Go standard library (golang/go#62026), vendored under
+  `internal/uuid` until it ships.
+
+  Two representations are deliberately unchanged, because they live outside the
+  process and would otherwise invalidate what is already stored: the audit
+  chain still hashes identifiers as canonical text, so existing chains stay
+  verifiable, and the WebAuthn user handle is still derived from that same
+  text, so registered passkeys keep resolving.
+
+  Migrating a host means parsing at its own edges — `credbound.ParseUUID` on
+  the way in, `String()` on the way out — and letting the compiler find the
+  rest.
+
+- **Breaking: `OAuthChange.ClientID` is now `ClientRecordID UUID`.** The field
+  always carried Credbound's client record, like the `IssuerID`, `GrantID` and
+  `ResourceID` beside it, but its name announced the protocol `client_id` — a
+  different value, which is text and is a Client Identifier URL for CIMD
+  clients. Hooks and listeners reading it get the record identifier under a
+  name that says so; the protocol `client_id` is not carried by this payload
+  and is read from the client record when needed.
+
 ### Removed
 
 - **Breaking: SQLite is no longer supported.** The `sqlstore/sqlite` package,

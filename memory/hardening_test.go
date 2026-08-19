@@ -89,7 +89,7 @@ func TestHardeningEarlyBreaks(t *testing.T) {
 		if err := f.store.SavePasskey(ctx, passkey, f.event("passkey")); err != nil {
 			t.Fatal(err)
 		}
-		identity := credbound.SSOIdentity{ID: f.id(), UserID: f.user.ID, ProviderConfigurationID: f.id(), ProviderKind: credbound.SSOProviderOIDC, Issuer: "https://idp", Subject: f.id(), Email: f.user.Email, CreatedAt: f.now}
+		identity := credbound.SSOIdentity{ID: f.id(), UserID: f.user.ID, ProviderConfigurationID: f.id(), ProviderKind: credbound.SSOProviderOIDC, Issuer: "https://idp", Subject: f.id().String(), Email: f.user.Email, CreatedAt: f.now}
 		if err := f.store.LinkSSO(ctx, identity, f.event("sso")); err != nil {
 			t.Fatal(err)
 		}

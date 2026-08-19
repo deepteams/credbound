@@ -38,7 +38,7 @@ func TestPasskeyListing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	passkeys, err := collectPasskeys(t, f.manager.Passkeys(context.Background(), authn, ""))
+	passkeys, err := collectPasskeys(t, f.manager.Passkeys(context.Background(), authn, credbound.UUID{}))
 	if err != nil || len(passkeys) != 1 {
 		t.Fatalf("passkeys = %#v, %v", passkeys, err)
 	}
@@ -46,12 +46,12 @@ func TestPasskeyListing(t *testing.T) {
 		t.Fatalf("unsafe passkey listing: %#v", passkeys[0])
 	}
 
-	if _, err := collectPasskeys(t, f.manager.Passkeys(context.Background(), credbound.Authentication{}, "")); !errors.Is(err, credbound.ErrUnauthorized) {
+	if _, err := collectPasskeys(t, f.manager.Passkeys(context.Background(), credbound.Authentication{}, credbound.UUID{})); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("anonymous listing error = %v", err)
 	}
 	stale := authn
 	stale.AuthenticatedAt = f.now.Add(-time.Hour)
-	if _, err := collectPasskeys(t, f.manager.Passkeys(context.Background(), stale, "")); !errors.Is(err, credbound.ErrStepUpRequired) {
+	if _, err := collectPasskeys(t, f.manager.Passkeys(context.Background(), stale, credbound.UUID{})); !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("stale listing error = %v", err)
 	}
 
@@ -78,14 +78,14 @@ func TestTOTPStatusLifecycle(t *testing.T) {
 	f := newFixture(t)
 	authn, _ := f.bootstrap(t)
 
-	status, err := f.manager.TOTPStatus(context.Background(), authn, "")
+	status, err := f.manager.TOTPStatus(context.Background(), authn, credbound.UUID{})
 	if err != nil || status.Enrolled || status.Active {
 		t.Fatalf("initial status = %#v, %v", status, err)
 	}
 	if _, err := f.manager.BeginTOTPEnrollment(context.Background(), authn); err != nil {
 		t.Fatal(err)
 	}
-	status, err = f.manager.TOTPStatus(context.Background(), authn, "")
+	status, err = f.manager.TOTPStatus(context.Background(), authn, credbound.UUID{})
 	if err != nil || !status.Enrolled || status.Active || status.UnusedRecoveryCodes != 0 {
 		t.Fatalf("enrolled status = %#v, %v", status, err)
 	}
@@ -93,18 +93,18 @@ func TestTOTPStatusLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err = f.manager.TOTPStatus(context.Background(), authn, "")
+	status, err = f.manager.TOTPStatus(context.Background(), authn, credbound.UUID{})
 	if err != nil || !status.Active || status.UnusedRecoveryCodes != 10 {
 		t.Fatalf("active status = %#v, %v", status, err)
 	}
 	if _, err := f.manager.VerifyTOTP(context.Background(), authn, codes[0]); err != nil {
 		t.Fatal(err)
 	}
-	status, err = f.manager.TOTPStatus(context.Background(), authn, "")
+	status, err = f.manager.TOTPStatus(context.Background(), authn, credbound.UUID{})
 	if err != nil || status.UnusedRecoveryCodes != 9 {
 		t.Fatalf("status after recovery use = %#v, %v", status, err)
 	}
-	if _, err := f.manager.TOTPStatus(context.Background(), credbound.Authentication{}, ""); !errors.Is(err, credbound.ErrUnauthorized) {
+	if _, err := f.manager.TOTPStatus(context.Background(), credbound.Authentication{}, credbound.UUID{}); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("anonymous status error = %v", err)
 	}
 }
@@ -605,7 +605,7 @@ func TestMagicLinkAuthentication(t *testing.T) {
 		t.Fatalf("unknown email link = %#v, %v", issued, err)
 	}
 	link, err := f.manager.BeginEmailAuthentication(ctx, "Root@example.com")
-	if err != nil || link.UserID != authn.UserID || !strings.HasPrefix(link.Token, "cbl_") || link.EmailID == "" || !link.Deliverable {
+	if err != nil || link.UserID != authn.UserID || !strings.HasPrefix(link.Token, "cbl_") || link.EmailID == (credbound.UUID{}) || !link.Deliverable {
 		t.Fatalf("magic link = %#v, %v", link, err)
 	}
 	login, err := f.manager.CompleteEmailAuthentication(ctx, link.Token)
@@ -700,7 +700,7 @@ func TestRevokeUserCredentials(t *testing.T) {
 	if _, err := f.manager.AuthenticatePAT(context.Background(), issued.Token); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.manager.RevokeUserCredentials(context.Background(), stepUp, credbound.TrustedRequest{}, ""); err != nil {
+	if err := f.manager.RevokeUserCredentials(context.Background(), stepUp, credbound.TrustedRequest{}, credbound.UUID{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.manager.AuthenticatePAT(context.Background(), issued.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
@@ -720,10 +720,10 @@ func TestRevokeUserCredentials(t *testing.T) {
 	if err := f.manager.RevokeUserCredentials(context.Background(), stepUp, credbound.TrustedRequest{}, member.ID); err != nil {
 		t.Fatalf("admin revocation = %v", err)
 	}
-	if err := f.manager.RevokeUserCredentials(context.Background(), stepUp, credbound.TrustedRequest{}, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.RevokeUserCredentials(context.Background(), stepUp, credbound.TrustedRequest{}, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid user id error = %v", err)
 	}
-	if err := f.manager.RevokeUserCredentials(context.Background(), credbound.Authentication{}, credbound.TrustedRequest{}, ""); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.RevokeUserCredentials(context.Background(), credbound.Authentication{}, credbound.TrustedRequest{}, credbound.UUID{}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("anonymous revocation error = %v", err)
 	}
 }
@@ -910,11 +910,11 @@ func TestTokenForgeryAndDisabledUserPaths(t *testing.T) {
 		t.Fatalf("forged link error = %v", err)
 	}
 	// A well-formed token with an unknown identifier is rejected too.
-	ghostReset := "cbr_" + reset.UserID + "_" + strings.Repeat("A", 43)
+	ghostReset := "cbr_" + reset.UserID.String() + "_" + strings.Repeat("A", 43)
 	if _, err := f.manager.CompletePasswordReset(ctx, ghostReset, "some new password"); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("unknown reset error = %v", err)
 	}
-	if _, err := f.manager.CompleteEmailAuthentication(ctx, "cbl_"+link.UserID+"_"+strings.Repeat("A", 43)); !errors.Is(err, credbound.ErrInvalidCredentials) {
+	if _, err := f.manager.CompleteEmailAuthentication(ctx, "cbl_"+link.UserID.String()+"_"+strings.Repeat("A", 43)); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("unknown link error = %v", err)
 	}
 
@@ -962,7 +962,7 @@ func TestInvitationForgedAndDisabledWorkspace(t *testing.T) {
 	}); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("forged invitation error = %v", err)
 	}
-	if _, _, err := f.manager.RegisterFromInvitation(ctx, "cbi_"+second.ID+"_"+strings.Repeat("A", 43), credbound.RegisterFromInvitationInput{
+	if _, _, err := f.manager.RegisterFromInvitation(ctx, "cbi_"+second.ID.String()+"_"+strings.Repeat("A", 43), credbound.RegisterFromInvitationInput{
 		DisplayName: "Invitee", Password: "chosen by invitee",
 	}); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("unknown invitation error = %v", err)
@@ -982,10 +982,10 @@ func TestInvitationForgedAndDisabledWorkspace(t *testing.T) {
 		t.Fatalf("invitation in disabled workspace error = %v", err)
 	}
 	// Listing and revocation validation paths.
-	if _, err := collectPasskeys(t, f.manager.Passkeys(context.Background(), stepUp, "")); err != nil {
+	if _, err := collectPasskeys(t, f.manager.Passkeys(context.Background(), stepUp, credbound.UUID{})); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.manager.RevokeInvitation(ctx, stepUp, second.ID, "not-a-uuid"); !errors.Is(err, credbound.ErrForbidden) {
+	if err := f.manager.RevokeInvitation(ctx, stepUp, second.ID, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrForbidden) {
 		// The disabled workspace is rejected before the id validation.
 		t.Fatalf("revoke in disabled workspace error = %v", err)
 	}
@@ -1094,7 +1094,7 @@ func TestHardeningAuditUnavailable(t *testing.T) {
 		t.Fatalf("OTP expired audit failure = %v", err)
 	}
 	f.now = f.now.Add(-(15*time.Minute + 30*time.Second))
-	if err := f.manager.RevokeUserCredentials(ctx, stepUp, credbound.TrustedRequest{}, ""); !errors.Is(err, credbound.ErrAuditUnavailable) {
+	if err := f.manager.RevokeUserCredentials(ctx, stepUp, credbound.TrustedRequest{}, credbound.UUID{}); !errors.Is(err, credbound.ErrAuditUnavailable) {
 		t.Fatalf("revocation audit failure = %v", err)
 	}
 	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "wrong password"); !errors.Is(err, credbound.ErrAuditUnavailable) {
@@ -1133,63 +1133,63 @@ type hardeningFaultStore struct {
 	completeResetErr error
 }
 
-func (s *hardeningFaultStore) TOTPByUserID(ctx context.Context, userID string) (credbound.TOTPFactor, error) {
+func (s *hardeningFaultStore) TOTPByUserID(ctx context.Context, userID credbound.UUID) (credbound.TOTPFactor, error) {
 	if s.totpErr != nil {
 		return credbound.TOTPFactor{}, s.totpErr
 	}
 	return s.Store.TOTPByUserID(ctx, userID)
 }
 
-func (s *hardeningFaultStore) WorkspaceByID(ctx context.Context, workspaceID string) (credbound.Workspace, error) {
+func (s *hardeningFaultStore) WorkspaceByID(ctx context.Context, workspaceID credbound.UUID) (credbound.Workspace, error) {
 	if s.workspaceErr != nil {
 		return credbound.Workspace{}, s.workspaceErr
 	}
 	return s.Store.WorkspaceByID(ctx, workspaceID)
 }
 
-func (s *hardeningFaultStore) ConsumeEmailAuthentication(ctx context.Context, tokenID, userID string, at time.Time, completesLogin bool, commit credbound.Commit) error {
+func (s *hardeningFaultStore) ConsumeEmailAuthentication(ctx context.Context, tokenID, userID credbound.UUID, at time.Time, completesLogin bool, commit credbound.Commit) error {
 	if s.consumeLinkErr != nil {
 		return s.consumeLinkErr
 	}
 	return s.Store.ConsumeEmailAuthentication(ctx, tokenID, userID, at, completesLogin, commit)
 }
 
-func (s *hardeningFaultStore) CompletePasswordReset(ctx context.Context, resetID string, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {
+func (s *hardeningFaultStore) CompletePasswordReset(ctx context.Context, resetID credbound.UUID, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {
 	if s.completeResetErr != nil {
 		return s.completeResetErr
 	}
 	return s.Store.CompletePasswordReset(ctx, resetID, password, at, commit)
 }
 
-func (s *hardeningFaultStore) LoginThrottleByUserID(ctx context.Context, userID string) (credbound.LoginThrottle, error) {
+func (s *hardeningFaultStore) LoginThrottleByUserID(ctx context.Context, userID credbound.UUID) (credbound.LoginThrottle, error) {
 	if s.throttleErr != nil {
 		return credbound.LoginThrottle{}, s.throttleErr
 	}
 	return s.Store.LoginThrottleByUserID(ctx, userID)
 }
 
-func (s *hardeningFaultStore) RecordLoginFailure(ctx context.Context, userID string, at time.Time, threshold int64, lockedUntil time.Time, commit credbound.Commit) (credbound.LoginThrottle, error) {
+func (s *hardeningFaultStore) RecordLoginFailure(ctx context.Context, userID credbound.UUID, at time.Time, threshold int64, lockedUntil time.Time, commit credbound.Commit) (credbound.LoginThrottle, error) {
 	if s.recordFailErr != nil {
 		return credbound.LoginThrottle{}, s.recordFailErr
 	}
 	return s.Store.RecordLoginFailure(ctx, userID, at, threshold, lockedUntil, commit)
 }
 
-func (s *hardeningFaultStore) PasswordResetByID(ctx context.Context, resetID string) (credbound.PasswordResetCredential, error) {
+func (s *hardeningFaultStore) PasswordResetByID(ctx context.Context, resetID credbound.UUID) (credbound.PasswordResetCredential, error) {
 	if s.resetErr != nil {
 		return credbound.PasswordResetCredential{}, s.resetErr
 	}
 	return s.Store.PasswordResetByID(ctx, resetID)
 }
 
-func (s *hardeningFaultStore) EmailAuthenticationByID(ctx context.Context, tokenID string) (credbound.EmailAuthenticationCredential, error) {
+func (s *hardeningFaultStore) EmailAuthenticationByID(ctx context.Context, tokenID credbound.UUID) (credbound.EmailAuthenticationCredential, error) {
 	if s.linkErr != nil {
 		return credbound.EmailAuthenticationCredential{}, s.linkErr
 	}
 	return s.Store.EmailAuthenticationByID(ctx, tokenID)
 }
 
-func (s *hardeningFaultStore) WorkspaceInvitationByID(ctx context.Context, invitationID string) (credbound.WorkspaceInvitation, error) {
+func (s *hardeningFaultStore) WorkspaceInvitationByID(ctx context.Context, invitationID credbound.UUID) (credbound.WorkspaceInvitation, error) {
 	if s.invitationErr != nil {
 		return credbound.WorkspaceInvitation{}, s.invitationErr
 	}
@@ -1203,7 +1203,7 @@ func (s *hardeningFaultStore) UserByEmail(ctx context.Context, email string) (cr
 	return s.Store.UserByEmail(ctx, email)
 }
 
-func (s *hardeningFaultStore) Emails(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.EmailAddress], error] {
+func (s *hardeningFaultStore) Emails(ctx context.Context, userID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.EmailAddress], error] {
 	if s.emailsErr != nil {
 		return func(yield func(credbound.PageEvent[credbound.EmailAddress], error) bool) {
 			yield(credbound.PageEvent[credbound.EmailAddress]{}, s.emailsErr)
@@ -1212,7 +1212,7 @@ func (s *hardeningFaultStore) Emails(ctx context.Context, userID string, page cr
 	return s.Store.Emails(ctx, userID, page)
 }
 
-func (s *hardeningFaultStore) CountUnusedRecoveryCodes(ctx context.Context, userID string) (int64, error) {
+func (s *hardeningFaultStore) CountUnusedRecoveryCodes(ctx context.Context, userID credbound.UUID) (int64, error) {
 	if s.recoveryCountErr != nil {
 		return 0, s.recoveryCountErr
 	}
@@ -1299,7 +1299,7 @@ func TestHardeningInfrastructureFailures(t *testing.T) {
 	}
 	fault.emailsErr = nil
 	fault.recoveryCountErr = boom
-	if _, err := manager.TOTPStatus(ctx, authn, ""); !errors.Is(err, boom) {
+	if _, err := manager.TOTPStatus(ctx, authn, credbound.UUID{}); !errors.Is(err, boom) {
 		t.Fatalf("recovery count failure = %v", err)
 	}
 	fault.recoveryCountErr = nil
@@ -1454,7 +1454,7 @@ func TestInvitationEdgeCases(t *testing.T) {
 		t.Fatalf("AAL1 admin revocation error = %v", err)
 	}
 	// Revocation validation.
-	if err := f.manager.RevokeInvitation(ctx, stepUp, second.ID, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.RevokeInvitation(ctx, stepUp, second.ID, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid invitation id error = %v", err)
 	}
 	if err := f.manager.RevokeInvitation(ctx, stepUp, workspace.ID, issued.Invitation.ID); !errors.Is(err, credbound.ErrNotFound) {
@@ -1579,10 +1579,10 @@ func TestAdminResetSecondFactor(t *testing.T) {
 	if err := f.manager.AdminResetSecondFactor(ctx, memberAuthn, credbound.TrustedRequest{}, authn.UserID); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("member reset error = %v", err)
 	}
-	if err := f.manager.AdminResetSecondFactor(ctx, root, credbound.TrustedRequest{Local: true}, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.AdminResetSecondFactor(ctx, root, credbound.TrustedRequest{Local: true}, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid target error = %v", err)
 	}
-	if err := f.manager.AdminResetSecondFactor(ctx, root, credbound.TrustedRequest{Local: true}, "01890000-0000-7000-8000-000000000000"); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.manager.AdminResetSecondFactor(ctx, root, credbound.TrustedRequest{Local: true}, credbound.MustParseUUID("01890000-0000-7000-8000-000000000000")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("unknown target error = %v", err)
 	}
 
@@ -1647,7 +1647,7 @@ func TestRegenerateRecoveryCodes(t *testing.T) {
 	if _, err := f.manager.VerifyTOTP(ctx, authn, replacement[0]); err != nil {
 		t.Fatalf("new recovery code = %v", err)
 	}
-	status, err := f.manager.TOTPStatus(ctx, stepUp, "")
+	status, err := f.manager.TOTPStatus(ctx, stepUp, credbound.UUID{})
 	if err != nil || status.UnusedRecoveryCodes != 9 {
 		t.Fatalf("status after regeneration = %#v, %v", status, err)
 	}
@@ -1666,7 +1666,7 @@ func TestPATScopeEnforcement(t *testing.T) {
 
 	// Scopes outside the permission grammar are rejected at creation.
 	if _, err := f.manager.CreatePAT(ctx, stepUp, credbound.CreatePATInput{
-		Name: "bad", WorkspaceID: workspace.ID, Scopes: []string{"Read Only"},
+		Name: "00000000-0000-4000-8000-000000000000", WorkspaceID: workspace.ID, Scopes: []string{"Read Only"},
 	}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid scope error = %v", err)
 	}
@@ -1868,7 +1868,7 @@ func TestAnonymizeUser(t *testing.T) {
 	}
 
 	// Guards: invalid id, unknown target, and a non-admin actor are refused.
-	if err := f.manager.AnonymizeUser(ctx, root, credbound.TrustedRequest{Local: true}, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.AnonymizeUser(ctx, root, credbound.TrustedRequest{Local: true}, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid target = %v", err)
 	}
 	if err := f.manager.AnonymizeUser(ctx, memberAuthn, credbound.TrustedRequest{}, authn.UserID); !errors.Is(err, credbound.ErrForbidden) {
@@ -1933,7 +1933,7 @@ func TestAnonymizeUser(t *testing.T) {
 // context regains access.
 func TestPendingSecondFactorCannotBypassMFA(t *testing.T) {
 	provider := &fakeSSOProvider{
-		configurationID: "0198b463-0000-7000-8000-0000000000cc", kind: credbound.SSOProviderOIDC,
+		configurationID: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000cc"), kind: credbound.SSOProviderOIDC,
 		claims: credbound.SSOClaims{Issuer: "https://idp.example.com", Subject: "subject-pending"},
 	}
 	f := newFixture(t, provider)
@@ -1987,7 +1987,7 @@ func TestPendingSecondFactorCannotBypassMFA(t *testing.T) {
 			return err
 		},
 		"user.data.export": func() error {
-			_, err := f.manager.ExportUserData(ctx, pending, "")
+			_, err := f.manager.ExportUserData(ctx, pending, credbound.UUID{})
 			return err
 		},
 		"workspace.invitation.accept": func() error {
@@ -1995,27 +1995,27 @@ func TestPendingSecondFactorCannotBypassMFA(t *testing.T) {
 			return err
 		},
 		"totp.status": func() error {
-			_, err := f.manager.TOTPStatus(ctx, pending, "")
+			_, err := f.manager.TOTPStatus(ctx, pending, credbound.UUID{})
 			return err
 		},
 		"user.read": func() error {
-			_, err := f.manager.User(ctx, pending, "")
+			_, err := f.manager.User(ctx, pending, credbound.UUID{})
 			return err
 		},
 		"passkey.list": func() error {
-			_, err := collectPasskeys(t, f.manager.Passkeys(ctx, pending, ""))
+			_, err := collectPasskeys(t, f.manager.Passkeys(ctx, pending, credbound.UUID{}))
 			return err
 		},
 		"pat.list": func() error {
-			_, _, err := credbound.CollectPage(f.manager.PATs(ctx, pending, "", credbound.PageRequest{}))
+			_, _, err := credbound.CollectPage(f.manager.PATs(ctx, pending, credbound.UUID{}, credbound.PageRequest{}))
 			return err
 		},
 		"email.list": func() error {
-			_, _, err := credbound.CollectPage(f.manager.Emails(ctx, pending, "", credbound.PageRequest{}))
+			_, _, err := credbound.CollectPage(f.manager.Emails(ctx, pending, credbound.UUID{}, credbound.PageRequest{}))
 			return err
 		},
 		"sso.identity.list": func() error {
-			_, _, err := credbound.CollectPage(f.manager.SSOIdentities(ctx, pending, "", credbound.PageRequest{}))
+			_, _, err := credbound.CollectPage(f.manager.SSOIdentities(ctx, pending, credbound.UUID{}, credbound.PageRequest{}))
 			return err
 		},
 	}
@@ -2055,7 +2055,7 @@ func TestPendingSecondFactorCannotBypassMFA(t *testing.T) {
 // domain refuses the usernameless flow against the resolved account's address.
 func TestPasskeyMidCeremonyRefusals(t *testing.T) {
 	provider := &fakeSSOProvider{
-		configurationID: "0198b463-0000-7000-8000-0000000000dd", kind: credbound.SSOProviderOIDC,
+		configurationID: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000dd"), kind: credbound.SSOProviderOIDC,
 		claims: credbound.SSOClaims{Issuer: "https://idp.example.com", Subject: "subject-passkey"},
 	}
 	f := newFixture(t, provider)

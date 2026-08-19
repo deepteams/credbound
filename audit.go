@@ -30,19 +30,33 @@ func ComputeAuditHash(previous []byte, event AuditEvent) []byte {
 		h.Write([]byte{';'})
 	}
 	write(strconv.FormatInt(event.Sequence, 10))
-	write(event.ID)
+	// Identifiers are hashed in their canonical text form, not as raw bytes:
+	// the chain is append-only and its persisted hashes were computed that
+	// way, so changing the representation would make every existing chain
+	// unverifiable. An absent identifier hashes as the empty string, exactly
+	// as it did when identifiers were strings.
+	write(hashedID(event.ID))
 	write(strconv.FormatInt(event.OccurredAt.UTC().UnixMicro(), 10))
 	write(string(event.ActorKind))
-	write(event.ActorID)
+	write(hashedID(event.ActorID))
 	write(event.Action)
 	write(event.ResourceType)
 	write(event.ResourceID)
-	write(event.WorkspaceID)
+	write(hashedID(event.WorkspaceID))
 	write(string(event.Outcome))
 	write(event.Reason)
 	write(event.IPAddress)
 	write(event.UserAgent)
 	return h.Sum(nil)
+}
+
+// hashedID renders an identifier the way the audit chain has always hashed it:
+// canonical text, and the empty string when absent.
+func hashedID(id UUID) string {
+	if id == (UUID{}) {
+		return ""
+	}
+	return id.String()
 }
 
 // VerifyAuditChain recomputes the whole audit hash chain from the genesis
@@ -102,7 +116,7 @@ func (m *Manager) VerifyAuditChainFrom(ctx context.Context, actor Authentication
 
 // AuditEvents streams the audit log of one workspace. The actor needs a
 // fresh AAL2 step-up and workspace audit read in that workspace.
-func (m *Manager) AuditEvents(ctx context.Context, actor Authentication, workspaceID string, page PageRequest) iter.Seq2[PageEvent[AuditEvent], error] {
+func (m *Manager) AuditEvents(ctx context.Context, actor Authentication, workspaceID UUID, page PageRequest) iter.Seq2[PageEvent[AuditEvent], error] {
 	if err := m.requireStepUp(ctx, actor, "audit.workspace.list"); err != nil {
 		return errorSeq[PageEvent[AuditEvent]](err)
 	}

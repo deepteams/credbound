@@ -38,7 +38,7 @@ func (m *Manager) CreateSession(ctx context.Context, actor Authentication, _ Cre
 	if m.sessionStore == nil {
 		return IssuedSession{}, ErrNotSupported
 	}
-	if actor.UserID == "" {
+	if actor.UserID == (UUID{}) {
 		return IssuedSession{}, ErrUnauthorized
 	}
 	if !actor.Interactive() {
@@ -55,7 +55,7 @@ func (m *Manager) CreateSession(ctx context.Context, actor Authentication, _ Cre
 	if err != nil {
 		return IssuedSession{}, err
 	}
-	raw := sessionTokenPrefix + "_" + id + "_" + base64.RawURLEncoding.EncodeToString(secret)
+	raw := sessionTokenPrefix + "_" + id.String() + "_" + base64.RawURLEncoding.EncodeToString(secret)
 	metadata := requestMetadataFromContext(ctx)
 	now := m.now()
 	session := Session{
@@ -65,11 +65,11 @@ func (m *Manager) CreateSession(ctx context.Context, actor Authentication, _ Cre
 		Digest:    m.tokenDigest("session:" + raw),
 		CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(m.sessionTTL),
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "session.create", "session", id, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "session.create", "session", id.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return IssuedSession{}, err
 	}
-	meta, err := m.newEventMeta(EventSessionCreated, "auth.session.create", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventSessionCreated, "auth.session.create", actor.UserID, UUID{}, event)
 	if err != nil {
 		return IssuedSession{}, err
 	}
@@ -188,7 +188,7 @@ func (m *Manager) AuthenticateSession(ctx context.Context, raw string) (_ Authen
 		session.Digest = nil
 		return authentication, session, nil
 	}
-	event, err := m.newAudit(ctx, session.UserID, "session.authenticate", "session", session.ID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, session.UserID, "session.authenticate", "session", session.ID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, Session{}, err
 	}
@@ -240,11 +240,11 @@ func (m *Manager) SignOut(ctx context.Context, raw string) (err error) {
 	if session.RevokedAt != nil {
 		return nil
 	}
-	event, err := m.newAudit(ctx, session.UserID, "session.sign_out", "session", session.ID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, session.UserID, "session.sign_out", "session", session.ID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
-	meta, err := m.newEventMeta(EventSessionRevoked, "auth.session.sign_out", session.UserID, "", event)
+	meta, err := m.newEventMeta(EventSessionRevoked, "auth.session.sign_out", session.UserID, UUID{}, event)
 	if err != nil {
 		return err
 	}
@@ -265,14 +265,14 @@ func (m *Manager) SignOut(ctx context.Context, raw string) (err error) {
 // (userID empty or equal to the actor) with a recent interactive
 // authentication; listing another user's sessions additionally requires a
 // fresh AAL2 step-up and admin users read.
-func (m *Manager) Sessions(ctx context.Context, actor Authentication, userID string, page PageRequest) iter.Seq2[PageEvent[Session], error] {
+func (m *Manager) Sessions(ctx context.Context, actor Authentication, userID UUID, page PageRequest) iter.Seq2[PageEvent[Session], error] {
 	if m.sessionStore == nil {
 		return errorSeq[PageEvent[Session]](ErrNotSupported)
 	}
-	if actor.UserID == "" {
+	if actor.UserID == (UUID{}) {
 		return errorSeq[PageEvent[Session]](ErrUnauthorized)
 	}
-	if userID == "" {
+	if userID == (UUID{}) {
 		userID = actor.UserID
 	}
 	if userID == actor.UserID {
@@ -298,7 +298,7 @@ func (m *Manager) Sessions(ctx context.Context, actor Authentication, userID str
 // audit event. Like PAT revocation it requires a fresh AAL2 step-up, and a
 // session belonging to another user is reported as ErrNotFound. Bulk and
 // administrative revocation go through RevokeUserSessions instead.
-func (m *Manager) RevokeSession(ctx context.Context, actor Authentication, sessionID string) (err error) {
+func (m *Manager) RevokeSession(ctx context.Context, actor Authentication, sessionID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.session.revoke", started, err) }()
 	if m.sessionStore == nil {
@@ -307,7 +307,7 @@ func (m *Manager) RevokeSession(ctx context.Context, actor Authentication, sessi
 	if err := m.requireStepUp(ctx, actor, "auth.session.revoke"); err != nil {
 		return err
 	}
-	if sessionID == "" {
+	if sessionID == (UUID{}) {
 		return fmt.Errorf("%w: session id is required", ErrInvalidInput)
 	}
 	session, err := m.sessionStore.SessionByID(ctx, sessionID)
@@ -317,11 +317,11 @@ func (m *Manager) RevokeSession(ctx context.Context, actor Authentication, sessi
 	if session.UserID != actor.UserID {
 		return ErrNotFound
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "session.revoke", "session", sessionID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "session.revoke", "session", sessionID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
-	meta, err := m.newEventMeta(EventSessionRevoked, "auth.session.revoke", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventSessionRevoked, "auth.session.revoke", actor.UserID, UUID{}, event)
 	if err != nil {
 		return err
 	}
@@ -343,13 +343,13 @@ func (m *Manager) RevokeSession(ctx context.Context, actor Authentication, sessi
 // AAL2 step-up; revoking another user's sessions requires an instance
 // administrator with admin users write and an admin mutation (fresh AAL2, or
 // a trusted local request).
-func (m *Manager) RevokeUserSessions(ctx context.Context, actor Authentication, request TrustedRequest, userID string) (err error) {
+func (m *Manager) RevokeUserSessions(ctx context.Context, actor Authentication, request TrustedRequest, userID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.session.revoke_all", started, err) }()
 	if m.sessionStore == nil {
 		return ErrNotSupported
 	}
-	if userID == "" {
+	if userID == (UUID{}) {
 		userID = actor.UserID
 	}
 	if !validUUIDv7(userID) {
@@ -367,11 +367,11 @@ func (m *Manager) RevokeUserSessions(ctx context.Context, actor Authentication, 
 			return err
 		}
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "session.revoke_all", "user", userID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "session.revoke_all", "user", userID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
-	meta, err := m.newEventMeta(EventUserSessionsRevoked, "auth.session.revoke_all", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventUserSessionsRevoked, "auth.session.revoke_all", actor.UserID, UUID{}, event)
 	if err != nil {
 		return err
 	}

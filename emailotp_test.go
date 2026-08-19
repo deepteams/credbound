@@ -25,7 +25,7 @@ func TestEmailOTPAuthentication(t *testing.T) {
 	ctx := context.Background()
 
 	decoy, err := f.manager.BeginEmailOTP(ctx, "ghost@example.com")
-	if err != nil || decoy.Code != "" || decoy.Continuation == "" || decoy.UserID != "" {
+	if err != nil || decoy.Code != "" || decoy.Continuation == "" || decoy.UserID != (credbound.UUID{}) {
 		t.Fatalf("unknown email OTP = %#v, %v", decoy, err)
 	}
 	if _, err := f.manager.CompleteEmailOTP(ctx, decoy.Continuation, "12345678"); !errors.Is(err, credbound.ErrInvalidCredentials) {
@@ -33,7 +33,7 @@ func TestEmailOTPAuthentication(t *testing.T) {
 	}
 
 	issued, err := f.manager.BeginEmailOTP(ctx, " ROOT@Example.com ")
-	if err != nil || issued.UserID != authn.UserID || !otpCode.MatchString(issued.Code) || issued.Continuation == "" || issued.EmailID == "" {
+	if err != nil || issued.UserID != authn.UserID || !otpCode.MatchString(issued.Code) || issued.Continuation == "" || issued.EmailID == (credbound.UUID{}) {
 		t.Fatalf("issued OTP = %#v, %v", issued, err)
 	}
 	if !issued.ExpiresAt.Equal(f.now.Add(15 * time.Minute)) {

@@ -244,10 +244,10 @@ func TestSCIMHTTPValidationAndMethods(t *testing.T) {
 	}
 	for name, call := range map[string]func(http.ResponseWriter){
 		"empty_user": func(w http.ResponseWriter) {
-			f.handler.user(w, httptest.NewRequest(http.MethodGet, "/Users/", nil), principal, "")
+			f.handler.user(w, httptest.NewRequest(http.MethodGet, "/Users/", nil), principal, credbound.UUID{})
 		},
 		"empty_group": func(w http.ResponseWriter) {
-			f.handler.group(w, httptest.NewRequest(http.MethodGet, "/Groups/", nil), principal, "")
+			f.handler.group(w, httptest.NewRequest(http.MethodGet, "/Groups/", nil), principal, credbound.UUID{})
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -260,10 +260,10 @@ func TestSCIMHTTPValidationAndMethods(t *testing.T) {
 	}
 	for name, call := range map[string]func(http.ResponseWriter){
 		"delete_user_with_invalid_principal": func(w http.ResponseWriter) {
-			f.handler.user(w, httptest.NewRequest(http.MethodDelete, "/Users/missing", nil), credbound.SCIMAuthentication{}, "missing")
+			f.handler.user(w, httptest.NewRequest(http.MethodDelete, "/Users/0198b463-0000-7000-8000-00000000dead", nil), credbound.SCIMAuthentication{}, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6"))
 		},
 		"delete_group_with_invalid_principal": func(w http.ResponseWriter) {
-			f.handler.group(w, httptest.NewRequest(http.MethodDelete, "/Groups/missing", nil), credbound.SCIMAuthentication{}, "missing")
+			f.handler.group(w, httptest.NewRequest(http.MethodDelete, "/Groups/0198b463-0000-7000-8000-00000000dead", nil), credbound.SCIMAuthentication{}, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6"))
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -281,32 +281,32 @@ func TestSCIMHTTPValidationAndMethods(t *testing.T) {
 		t.Fatalf("invalid user = %d %s", response.Code, response.Body.String())
 	}
 	validUser := `{"schemas":["` + coreUserSchema + `"],"userName":"missing@example.com","emails":[{"value":"missing@example.com"}],"active":true}`
-	if response := f.request(t, http.MethodPut, "/Users/missing", `{"userName":"missing@example.com","emails":[{"value":"missing@example.com"}]}`); response.Code != http.StatusBadRequest {
+	if response := f.request(t, http.MethodPut, "/Users/0198b463-0000-7000-8000-00000000dead", `{"userName":"missing@example.com","emails":[{"value":"missing@example.com"}]}`); response.Code != http.StatusBadRequest {
 		t.Fatalf("replace user without schema = %d %s", response.Code, response.Body.String())
 	}
-	if response := f.request(t, http.MethodPut, "/Users/missing", validUser); response.Code != http.StatusNotFound {
+	if response := f.request(t, http.MethodPut, "/Users/0198b463-0000-7000-8000-00000000dead", validUser); response.Code != http.StatusNotFound {
 		t.Fatalf("replace missing user = %d %s", response.Code, response.Body.String())
 	}
-	if response := f.request(t, http.MethodPatch, "/Users/missing", `{"schemas":["`+patchSchema+`"],"Operations":[{"op":"replace","path":"active","value":true}]}`); response.Code != http.StatusNotFound {
+	if response := f.request(t, http.MethodPatch, "/Users/0198b463-0000-7000-8000-00000000dead", `{"schemas":["`+patchSchema+`"],"Operations":[{"op":"replace","path":"active","value":true}]}`); response.Code != http.StatusNotFound {
 		t.Fatalf("patch missing user = %d %s", response.Code, response.Body.String())
 	}
-	if response := f.request(t, http.MethodPost, "/Users/missing", `{}`); response.Code != http.StatusMethodNotAllowed {
+	if response := f.request(t, http.MethodPost, "/Users/0198b463-0000-7000-8000-00000000dead", `{}`); response.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("user item method = %d %s", response.Code, response.Body.String())
 	}
 	if response := f.request(t, http.MethodPost, "/Groups", `{}`); response.Code != http.StatusBadRequest {
 		t.Fatalf("invalid group = %d %s", response.Code, response.Body.String())
 	}
 	validGroup := `{"schemas":["` + coreGroupSchema + `"],"externalId":"missing","displayName":"Missing"}`
-	if response := f.request(t, http.MethodPut, "/Groups/missing", `{"displayName":"Missing"}`); response.Code != http.StatusBadRequest {
+	if response := f.request(t, http.MethodPut, "/Groups/0198b463-0000-7000-8000-00000000dead", `{"displayName":"Missing"}`); response.Code != http.StatusBadRequest {
 		t.Fatalf("replace group without schema = %d %s", response.Code, response.Body.String())
 	}
-	if response := f.request(t, http.MethodPut, "/Groups/missing", validGroup); response.Code != http.StatusNotFound {
+	if response := f.request(t, http.MethodPut, "/Groups/0198b463-0000-7000-8000-00000000dead", validGroup); response.Code != http.StatusNotFound {
 		t.Fatalf("replace missing group = %d %s", response.Code, response.Body.String())
 	}
-	if response := f.request(t, http.MethodPatch, "/Groups/missing", `{"schemas":["`+patchSchema+`"],"Operations":[{"op":"replace","path":"displayName","value":"Missing"}]}`); response.Code != http.StatusNotFound {
+	if response := f.request(t, http.MethodPatch, "/Groups/0198b463-0000-7000-8000-00000000dead", `{"schemas":["`+patchSchema+`"],"Operations":[{"op":"replace","path":"displayName","value":"Missing"}]}`); response.Code != http.StatusNotFound {
 		t.Fatalf("patch missing group = %d %s", response.Code, response.Body.String())
 	}
-	if response := f.request(t, http.MethodPost, "/Groups/missing", `{}`); response.Code != http.StatusMethodNotAllowed {
+	if response := f.request(t, http.MethodPost, "/Groups/0198b463-0000-7000-8000-00000000dead", `{}`); response.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("group item method = %d %s", response.Code, response.Body.String())
 	}
 	if response := f.request(t, http.MethodGet, `/Users?filter=title%20co%20%22x%22`, ""); response.Code != http.StatusBadRequest {
@@ -349,7 +349,7 @@ func TestSCIMHTTPValidationAndMethods(t *testing.T) {
 	if response := f.request(t, http.MethodPost, "/Users", `{} {}`); response.Code != http.StatusBadRequest {
 		t.Fatalf("multiple JSON values = %d %s", response.Code, response.Body.String())
 	}
-	for _, target := range []string{"/Users/missing", "/Groups/missing"} {
+	for _, target := range []string{"/Users/0198b463-0000-7000-8000-00000000dead", "/Groups/0198b463-0000-7000-8000-00000000dead"} {
 		if response := f.request(t, http.MethodPut, target, `{`); response.Code != http.StatusBadRequest {
 			t.Fatalf("malformed replacement %s = %d %s", target, response.Code, response.Body.String())
 		}
@@ -401,7 +401,7 @@ func TestSCIMHTTPValidationAndMethods(t *testing.T) {
 			}
 		})
 	}
-	for _, target := range []string{"/missing", "/ResourceTypes/missing", "/Users/missing", "/Groups/missing"} {
+	for _, target := range []string{"/missing", "/ResourceTypes/missing", "/Users/0198b463-0000-7000-8000-00000000dead", "/Groups/0198b463-0000-7000-8000-00000000dead"} {
 		if response := f.request(t, http.MethodGet, target, ""); response.Code != http.StatusNotFound {
 			t.Fatalf("missing %s = %d", target, response.Code)
 		}
@@ -499,7 +499,7 @@ func TestPatchAndFilterHelpers(t *testing.T) {
 		})
 	}
 
-	group := credbound.SCIMGroup{ExternalID: "external", DisplayName: "Group", MemberIDs: []string{"one", "two"}}
+	group := credbound.SCIMGroup{ExternalID: "external", DisplayName: "Group", MemberIDs: []credbound.UUID{credbound.MustParseUUID("0198b463-0000-7000-8000-7692c3ad3540"), credbound.MustParseUUID("0198b463-0000-7000-8000-3fc4ccfe7458")}}
 	groupRequest := patchRequest{Schemas: []string{patchSchema}, Operations: []patchOperation{
 		{Op: "replace", Path: "displayName", Value: json.RawMessage(`"Changed"`)},
 		{Op: "remove", Path: "externalId"},
@@ -541,8 +541,8 @@ func TestPatchAndFilterHelpers(t *testing.T) {
 	if err != nil || string(patched.Attributes["locale"]) != `"fr"` {
 		t.Fatalf("initialized profile attributes = %#v, %v", patched.Attributes, err)
 	}
-	filtered, err := patchGroup(group, patchRequest{Schemas: []string{patchSchema}, Operations: []patchOperation{{Op: "remove", Path: `members[value eq "one"]`}}})
-	if err != nil || len(filtered.MemberIDs) != 1 || filtered.MemberIDs[0] != "two" {
+	filtered, err := patchGroup(group, patchRequest{Schemas: []string{patchSchema}, Operations: []patchOperation{{Op: "remove", Path: `members[value eq "0198b463-0000-7000-8000-7692c3ad3540"]`}}})
+	if err != nil || len(filtered.MemberIDs) != 1 || filtered.MemberIDs[0].String() != "0198b463-0000-7000-8000-3fc4ccfe7458" {
 		t.Fatalf("filtered group members = %#v, %v", filtered.MemberIDs, err)
 	}
 	if payload, err := json.Marshal(userResource{Attributes: map[string]json.RawMessage{"broken": json.RawMessage(`{`)}}); err != nil || strings.Contains(string(payload), "broken") {

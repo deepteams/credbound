@@ -88,7 +88,7 @@ func TestOAuthProtocolValidationHelpers(t *testing.T) {
 	if err != nil || len(grants) != 1 || responses[0] != "code" {
 		t.Fatalf("default flow = %v/%v, %v", grants, responses, err)
 	}
-	for _, grants := range [][]string{{"refresh_token"}, {"nope"}} {
+	for _, grants := range [][]string{{"refresh_token"}, {"00000000-0000-4000-8000-000000000000"}} {
 		if _, _, err := normalizeOAuthFlowMetadata(grants, nil); err == nil {
 			t.Fatalf("invalid grants accepted: %v", grants)
 		}
@@ -142,7 +142,7 @@ func TestOAuthProtocolValidationHelpers(t *testing.T) {
 	if (OAuthAuthentication{}).HasScope("documents.read") {
 		t.Fatal("missing scope accepted")
 	}
-	if validPKCEChallenge("invalid") {
+	if validPKCEChallenge("00000000-0000-4000-8000-000000000000") {
 		t.Fatal("invalid PKCE challenge accepted")
 	}
 }
@@ -184,7 +184,7 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 		nil,
 		make([]OAuthScopeDefinition, 101),
 		{{Name: "openid", Description: "reserved", Permissions: []WorkspacePermission{PermissionWorkspaceAccess}}},
-		{{Name: "bad scope", Description: "bad", Permissions: []WorkspacePermission{PermissionWorkspaceAccess}}},
+		{{Name: "bad scope", Description: "00000000-0000-4000-8000-000000000000", Permissions: []WorkspacePermission{PermissionWorkspaceAccess}}},
 		{{Name: "documents.read", Permissions: []WorkspacePermission{PermissionWorkspaceAccess}}},
 		{{Name: "documents.read", Description: "Read", Permissions: nil}},
 		{{Name: "documents.read", Description: "Read", Permissions: []WorkspacePermission{"unknown.permission"}}},
@@ -202,7 +202,7 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 		t.Fatalf("scope catalog = %#v, %v", scopes, err)
 	}
 
-	issuer := OAuthIssuer{ID: "0198b463-0000-7000-8000-000000000001"}
+	issuer := OAuthIssuer{ID: MustParseUUID("0198b463-0000-7000-8000-000000000001")}
 	base := OAuthClientRegistrationInput{
 		Name: "Client", ApplicationType: OAuthApplicationWeb, RedirectURIs: []string{"https://client.example.com/callback"},
 		GrantTypes: []string{"authorization_code"}, ResponseTypes: []string{"code"}, TokenEndpointAuthMethod: OAuthAuthNone,
@@ -294,12 +294,12 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 		t.Fatalf("private key client secret=%q, %v", secret, err)
 	}
 
-	continuation := oauthAuthorizationContinuation{UserID: "u", ClientRecordID: "c", ResourceID: "r", ExpiresAt: now.Add(time.Minute)}
+	continuation := oauthAuthorizationContinuation{UserID: MustParseUUID("0198b463-0000-7000-8000-0bfe935e70c3"), ClientRecordID: MustParseUUID("0198b463-0000-7000-8000-2e7d2c03a950"), ResourceID: MustParseUUID("0198b463-0000-7000-8000-454349e422f0"), ExpiresAt: now.Add(time.Minute)}
 	raw, err := manager.encodeOAuthContinuation(continuation)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded, err := manager.decodeOAuthContinuation(raw); err != nil || decoded.UserID != "u" {
+	if decoded, err := manager.decodeOAuthContinuation(raw); err != nil || decoded.UserID != continuation.UserID {
 		t.Fatalf("continuation = %#v, %v", decoded, err)
 	}
 	if _, err := manager.decodeOAuthContinuation(raw + "tampered"); err == nil {
@@ -330,11 +330,11 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 	}
 	unsupportedContext := context.Background()
 	_, _ = manager.CreateOAuthIssuer(unsupportedContext, Authentication{}, TrustedRequest{}, CreateOAuthIssuerInput{})
-	_, _ = manager.UpdateOAuthIssuer(unsupportedContext, Authentication{}, TrustedRequest{}, "", UpdateOAuthIssuerInput{})
-	_, _ = manager.CreateOAuthProtectedResource(unsupportedContext, Authentication{}, "", CreateOAuthProtectedResourceInput{})
-	_, _ = manager.PreRegisterOAuthClient(unsupportedContext, Authentication{}, TrustedRequest{}, "", OAuthClientRegistrationInput{})
-	_, _ = manager.CreateOAuthInitialAccessToken(unsupportedContext, Authentication{}, TrustedRequest{}, "", CreateOAuthInitialAccessTokenInput{})
-	_ = manager.RevokeOAuthInitialAccessToken(unsupportedContext, Authentication{}, TrustedRequest{}, "")
+	_, _ = manager.UpdateOAuthIssuer(unsupportedContext, Authentication{}, TrustedRequest{}, UUID{}, UpdateOAuthIssuerInput{})
+	_, _ = manager.CreateOAuthProtectedResource(unsupportedContext, Authentication{}, UUID{}, CreateOAuthProtectedResourceInput{})
+	_, _ = manager.PreRegisterOAuthClient(unsupportedContext, Authentication{}, TrustedRequest{}, UUID{}, OAuthClientRegistrationInput{})
+	_, _ = manager.CreateOAuthInitialAccessToken(unsupportedContext, Authentication{}, TrustedRequest{}, UUID{}, CreateOAuthInitialAccessTokenInput{})
+	_ = manager.RevokeOAuthInitialAccessToken(unsupportedContext, Authentication{}, TrustedRequest{}, UUID{})
 	_, _ = manager.RegisterOAuthClient(unsupportedContext, "", "", OAuthClientRegistrationInput{})
 	_, _ = manager.BeginOAuthAuthorization(unsupportedContext, Authentication{}, BeginOAuthAuthorizationInput{})
 	_, _ = manager.CompleteOAuthAuthorization(unsupportedContext, Authentication{}, "", false)
@@ -358,7 +358,7 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 	if _, err := manager.resolveOAuthClient(context.Background(), issuer, ""); err != ErrInvalidCredentials {
 		t.Fatalf("empty client id = %v", err)
 	}
-	policyResource := OAuthProtectedResource{WorkspaceID: "workspace", Scopes: []OAuthScopeDefinition{{
+	policyResource := OAuthProtectedResource{WorkspaceID: MustParseUUID("0198b463-0000-7000-8000-21a3230e0377"), Scopes: []OAuthScopeDefinition{{
 		Name: "documents.read", Description: "Read", Permissions: []WorkspacePermission{PermissionWorkspaceAccess},
 	}}}
 	if _, _, err := manager.authorizedOAuthScopes(context.Background(), Authentication{}, OAuthIssuer{}, policyResource, nil); !errors.Is(err, ErrInvalidInput) {
@@ -380,20 +380,20 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 	if _, err := manager.oauthIDToken(context.Background(), OAuthIssuer{OIDCEnabled: true}, OAuthClient{}, OAuthGrant{Scopes: []string{"openid"}}, "", now.Add(time.Minute)); err != ErrNotSupported {
 		t.Fatalf("missing OIDC signer = %v", err)
 	}
-	manager.sealKey = []byte("invalid")
+	manager.sealKey = []byte("00000000-0000-4000-8000-000000000000")
 	if _, err := manager.encodeOAuthContinuation(oauthAuthorizationContinuation{}); err == nil {
 		t.Fatal("continuation encryption failure ignored")
 	}
 	manager.sealKey = bytes.Repeat([]byte{1}, 32)
 	manager.random = bytes.NewReader(nil)
-	if _, _, err := manager.newOAuthChange(EventOAuthTokenIssued, "test", AuditEvent{}, OAuthClient{}, "", "", "", "", nil); err == nil {
+	if _, _, err := manager.newOAuthChange(EventOAuthTokenIssued, "test", AuditEvent{}, OAuthClient{}, UUID{}, UUID{}, UUID{}, UUID{}, nil); err == nil {
 		t.Fatal("OAuth event entropy failure ignored")
 	}
 	manager.random = bytes.NewReader(bytes.Repeat([]byte{7}, 8192))
 
 	manager.clock = func() time.Time { return now }
 	issuer.CIMDMode = OAuthCIMDPublicWeb
-	if _, err := manager.oauthClientFromMetadata(issuer, OAuthClientMetadataDocument{ClientID: "bad"}); err == nil {
+	if _, err := manager.oauthClientFromMetadata(issuer, OAuthClientMetadataDocument{ClientID: "00000000-0000-4000-8000-000000000000"}); err == nil {
 		t.Fatal("invalid metadata client id accepted")
 	}
 	if _, err := manager.oauthClientFromMetadata(issuer, OAuthClientMetadataDocument{ClientID: "https://client.example.com/client.json", FetchedAt: now, ExpiresAt: now}); err == nil {
@@ -411,11 +411,11 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 		t.Fatal("access bearer entropy failure ignored")
 	}
 	manager.random = bytes.NewReader(nil)
-	if _, _, err := manager.newOAuthRefreshToken(OAuthGrant{}, "family", time.Minute); err == nil {
+	if _, _, err := manager.newOAuthRefreshToken(OAuthGrant{}, MustParseUUID("0198b463-0000-7000-8000-d34a569ab7aa"), time.Minute); err == nil {
 		t.Fatal("refresh token entropy failure ignored")
 	}
 	manager.random = bytes.NewReader(make([]byte, 16))
-	if _, _, err := manager.newOAuthRefreshToken(OAuthGrant{}, "family", time.Minute); err == nil {
+	if _, _, err := manager.newOAuthRefreshToken(OAuthGrant{}, MustParseUUID("0198b463-0000-7000-8000-d34a569ab7aa"), time.Minute); err == nil {
 		t.Fatal("refresh bearer entropy failure ignored")
 	}
 	manager.random = bytes.NewReader(nil)

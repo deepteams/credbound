@@ -53,7 +53,7 @@ func (m *Manager) Bootstrap(ctx context.Context, input BootstrapInput) (_ Authen
 	workspace := Workspace{ID: workspaceID, Name: strings.TrimSpace(input.WorkspaceName), CreatedAt: now, UpdatedAt: now}
 	membership := Membership{WorkspaceID: workspace.ID, UserID: user.ID, Role: RoleAdmin, Status: MembershipActive, ProvisioningSource: ProvisioningSourceLocal, CreatedAt: now, UpdatedAt: now}
 	instanceAdmin := InstanceAdministrator{UserID: user.ID, Role: InstanceRoleRoot, CreatedAt: now, UpdatedAt: now}
-	event, err := m.newAudit(ctx, user.ID, "instance.bootstrap", "workspace", workspace.ID, workspace.ID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, user.ID, "instance.bootstrap", "workspace", workspace.ID.String(), workspace.ID, AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, Workspace{}, err
 	}
@@ -97,7 +97,7 @@ func (m *Manager) Bootstrap(ctx context.Context, input BootstrapInput) (_ Authen
 // email and an active membership in the workspace, atomically with its
 // audit. The actor needs a fresh AAL2 step-up and workspace users write in
 // that workspace; a taken address fails with ErrConflict.
-func (m *Manager) CreateUser(ctx context.Context, actor Authentication, workspaceID string, input CreateUserInput) (_ User, err error) {
+func (m *Manager) CreateUser(ctx context.Context, actor Authentication, workspaceID UUID, input CreateUserInput) (_ User, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.user.create", started, err) }()
 	if err := m.requireStepUp(ctx, actor, "auth.user.create"); err != nil {
@@ -136,7 +136,7 @@ func (m *Manager) CreateUser(ctx context.Context, actor Authentication, workspac
 	user := User{ID: id, Email: email, DisplayName: strings.TrimSpace(input.DisplayName), CreatedAt: now, UpdatedAt: now}
 	primaryEmail := EmailAddress{ID: emailID, UserID: id, Address: email, Primary: true, VerifiedAt: cloneTime(&now), CreatedAt: now, UpdatedAt: now}
 	membership := Membership{WorkspaceID: workspaceID, UserID: id, Role: role, Status: MembershipActive, ProvisioningSource: ProvisioningSourceLocal, CreatedAt: now, UpdatedAt: now}
-	event, err := m.newAudit(ctx, actor.UserID, "user.create", "user", id, workspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "user.create", "user", id.String(), workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return User{}, err
 	}
@@ -243,11 +243,11 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 		if hashErr != nil {
 			return Authentication{}, fmt.Errorf("rehash password: %w", hashErr)
 		}
-		event, eventErr := m.newAudit(ctx, user.ID, "password.rehash", "user", user.ID, "", AuditSucceeded, "")
+		event, eventErr := m.newAudit(ctx, user.ID, "password.rehash", "user", user.ID.String(), UUID{}, AuditSucceeded, "")
 		if eventErr != nil {
 			return Authentication{}, eventErr
 		}
-		meta, metaErr := m.newEventMeta(EventPasswordRehashed, "auth.password.authenticate", user.ID, "", event)
+		meta, metaErr := m.newEventMeta(EventPasswordRehashed, "auth.password.authenticate", user.ID, UUID{}, event)
 		if metaErr != nil {
 			return Authentication{}, metaErr
 		}
@@ -289,7 +289,7 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 			return Authentication{}, m.failStalePassword(ctx, user.ID, staleErr)
 		}
 		currentHash = refreshed
-		event, eventErr := m.newAudit(ctx, user.ID, "auth.password", "user", user.ID, "", AuditSucceeded, "")
+		event, eventErr := m.newAudit(ctx, user.ID, "auth.password", "user", user.ID.String(), UUID{}, AuditSucceeded, "")
 		if eventErr != nil {
 			return Authentication{}, eventErr
 		}
@@ -340,7 +340,7 @@ func (m *Manager) AuthenticatePassword(ctx context.Context, email, password stri
 // the same password is adopted as the new current hash; a credential that
 // vanished or moved to a different password (a concurrent change or reset)
 // reports ErrInvalidCredentials.
-func (m *Manager) confirmPasswordCurrent(ctx context.Context, userID, password, verifiedHash string) (string, error) {
+func (m *Manager) confirmPasswordCurrent(ctx context.Context, userID UUID, password, verifiedHash string) (string, error) {
 	credential, err := m.store.PasswordByUserID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -364,8 +364,8 @@ func (m *Manager) confirmPasswordCurrent(ctx context.Context, userID, password, 
 // recordPasswordAuthentication finalizes a password sign-in atomically with
 // the credential-currency guard; ErrConflict reports that the stored
 // credential moved between the verification and the finalization.
-func (m *Manager) recordPasswordAuthentication(ctx context.Context, userID, currentHash string) (AuditEvent, error) {
-	event, err := m.newAudit(ctx, userID, "auth.password", "user", userID, "", AuditSucceeded, "")
+func (m *Manager) recordPasswordAuthentication(ctx context.Context, userID UUID, currentHash string) (AuditEvent, error) {
+	event, err := m.newAudit(ctx, userID, "auth.password", "user", userID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return AuditEvent{}, err
 	}
@@ -382,7 +382,7 @@ func (m *Manager) recordPasswordAuthentication(ctx context.Context, userID, curr
 // current before it could finalize: the audit records the real reason while
 // the public error is indistinguishable from a wrong password. Infrastructure
 // errors pass through untouched.
-func (m *Manager) failStalePassword(ctx context.Context, userID string, cause error) error {
+func (m *Manager) failStalePassword(ctx context.Context, userID UUID, cause error) error {
 	if !errors.Is(cause, ErrInvalidCredentials) {
 		return cause
 	}
@@ -452,11 +452,11 @@ func (m *Manager) ChangePassword(ctx context.Context, actor Authentication, curr
 		return fmt.Errorf("hash password: %w", err)
 	}
 	now := m.now()
-	event, err := m.newAudit(ctx, actor.UserID, "password.change", "user", actor.UserID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "password.change", "user", actor.UserID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
-	meta, err := m.newEventMeta(EventPasswordChanged, "auth.password.change", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventPasswordChanged, "auth.password.change", actor.UserID, UUID{}, event)
 	if err != nil {
 		return err
 	}
@@ -467,7 +467,7 @@ func (m *Manager) ChangePassword(ctx context.Context, actor Authentication, curr
 	var sessionMeta EventMeta
 	var sessionChange UserSessionRevocation
 	if m.sessionStore != nil {
-		sessionMeta, err = m.newEventMeta(EventUserSessionsRevoked, "auth.password.change", actor.UserID, "", event)
+		sessionMeta, err = m.newEventMeta(EventUserSessionsRevoked, "auth.password.change", actor.UserID, UUID{}, event)
 		if err != nil {
 			return err
 		}
@@ -504,7 +504,7 @@ func (m *Manager) ChangePassword(ctx context.Context, actor Authentication, curr
 // ErrStepUpRequired (ErrUnauthorized when there is no actor at all), and
 // the host should prompt for the second factor.
 func (m *Manager) RequireStepUp(authn Authentication) error {
-	if authn.UserID == "" {
+	if authn.UserID == (UUID{}) {
 		return ErrUnauthorized
 	}
 	age := m.now().Sub(authn.AuthenticatedAt)
@@ -544,7 +544,7 @@ func (m *Manager) requireStepUp(ctx context.Context, authn Authentication, opera
 // identity minted mid-MFA would let a password-only attacker sidestep the
 // second factor entirely.
 func (m *Manager) requireRecentInteractive(ctx context.Context, authn Authentication) error {
-	if authn.UserID == "" {
+	if authn.UserID == (UUID{}) {
 		return ErrUnauthorized
 	}
 	age := m.now().Sub(authn.AuthenticatedAt)
@@ -554,7 +554,7 @@ func (m *Manager) requireRecentInteractive(ctx context.Context, authn Authentica
 	return m.requireActiveUser(ctx, authn.UserID)
 }
 
-func (m *Manager) requireActiveUser(ctx context.Context, userID string) error {
+func (m *Manager) requireActiveUser(ctx context.Context, userID UUID) error {
 	user, err := m.store.UserByID(ctx, userID)
 	if err != nil {
 		// An Authentication is an authorization capability, not a lookup API.
@@ -593,7 +593,7 @@ func validEmail(value string) (string, error) {
 	return normalized, nil
 }
 
-func (m *Manager) newAudit(ctx context.Context, actor, action, resourceType, resourceID, workspaceID string, outcome AuditOutcome, reason string) (AuditEvent, error) {
+func (m *Manager) newAudit(ctx context.Context, actor UUID, action, resourceType, resourceID string, workspaceID UUID, outcome AuditOutcome, reason string) (AuditEvent, error) {
 	id, err := m.newID()
 	if err != nil {
 		return AuditEvent{}, err
@@ -609,13 +609,13 @@ func (m *Manager) newAudit(ctx context.Context, actor, action, resourceType, res
 	}, nil
 }
 
-func (m *Manager) recordAuthenticationAudit(ctx context.Context, actor, action string, outcome AuditOutcome, reason string) (AuditEvent, error) {
-	event, err := m.newAudit(ctx, actor, action, "user", actor, "", outcome, reason)
+func (m *Manager) recordAuthenticationAudit(ctx context.Context, actor UUID, action string, outcome AuditOutcome, reason string) (AuditEvent, error) {
+	event, err := m.newAudit(ctx, actor, action, "user", actor.String(), UUID{}, outcome, reason)
 	if err != nil {
 		return AuditEvent{}, err
 	}
 	var storeErr error
-	if outcome == AuditSucceeded && actor != "" {
+	if outcome == AuditSucceeded && actor != (UUID{}) {
 		storeErr = m.store.RecordAuthentication(ctx, actor, m.now(), Commit{Audit: event})
 	} else {
 		storeErr = m.store.AppendAudit(ctx, Commit{Audit: event})
@@ -626,7 +626,7 @@ func (m *Manager) recordAuthenticationAudit(ctx context.Context, actor, action s
 	return event, nil
 }
 
-func (m *Manager) appendAuthenticationAudit(ctx context.Context, actor, action string, outcome AuditOutcome, reason string) error {
+func (m *Manager) appendAuthenticationAudit(ctx context.Context, actor UUID, action string, outcome AuditOutcome, reason string) error {
 	_, err := m.recordAuthenticationAudit(ctx, actor, action, outcome, reason)
 	return err
 }
@@ -634,11 +634,11 @@ func (m *Manager) appendAuthenticationAudit(ctx context.Context, actor, action s
 // recordAuthenticationFailure audits a failed credential check and, when the
 // failure is attributable to an existing enabled account, counts it toward
 // the lockout threshold within the same transaction.
-func (m *Manager) recordAuthenticationFailure(ctx context.Context, userID, action string, countFailure bool) (AuditEvent, error) {
+func (m *Manager) recordAuthenticationFailure(ctx context.Context, userID UUID, action string, countFailure bool) (AuditEvent, error) {
 	if !countFailure || m.maxFailedLogins <= 0 {
 		return m.recordAuthenticationAudit(ctx, userID, action, AuditFailed, "invalid_credentials")
 	}
-	event, err := m.newAudit(ctx, userID, action, "user", userID, "", AuditFailed, "invalid_credentials")
+	event, err := m.newAudit(ctx, userID, action, "user", userID.String(), UUID{}, AuditFailed, "invalid_credentials")
 	if err != nil {
 		return AuditEvent{}, err
 	}
@@ -647,7 +647,7 @@ func (m *Manager) recordAuthenticationFailure(ctx context.Context, userID, actio
 		return AuditEvent{}, m.mapStoreError(ctx, action, err)
 	}
 	if throttle.LockedUntil != nil && throttle.FailedAttempts == m.maxFailedLogins {
-		if meta, metaErr := m.newEventMeta(EventUserLocked, action, userID, "", event); metaErr == nil {
+		if meta, metaErr := m.newEventMeta(EventUserLocked, action, userID, UUID{}, event); metaErr == nil {
 			locked := UserLockedEvent{EventMeta: meta, UserID: userID, LockedUntil: *throttle.LockedUntil, Request: requestMetadataFromContext(ctx)}
 			m.events.emit(ctx, EventUserLocked, func(listener EventListener) error { return listener.OnUserLocked(ctx, locked) })
 		}
@@ -657,7 +657,7 @@ func (m *Manager) recordAuthenticationFailure(ctx context.Context, userID, actio
 
 // requireUnlocked rejects a second-factor attempt while the account lockout
 // is active.
-func (m *Manager) requireUnlocked(ctx context.Context, userID, action string) error {
+func (m *Manager) requireUnlocked(ctx context.Context, userID UUID, action string) error {
 	if m.maxFailedLogins <= 0 {
 		return nil
 	}

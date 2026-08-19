@@ -39,7 +39,7 @@ func (m *Manager) BeginEmailOTP(ctx context.Context, email string) (_ IssuedEmai
 	if allowed, err := m.allowEmailIssuance(ctx, normalized, "email_otp.request"); err != nil {
 		return IssuedEmailOTP{}, err
 	} else if !allowed {
-		if auditErr := m.appendAuthenticationAudit(ctx, "", "email_otp.request", AuditFailed, "throttled"); auditErr != nil {
+		if auditErr := m.appendAuthenticationAudit(ctx, UUID{}, "email_otp.request", AuditFailed, "throttled"); auditErr != nil {
 			return IssuedEmailOTP{}, auditErr
 		}
 		return IssuedEmailOTP{}, nil
@@ -61,7 +61,7 @@ func (m *Manager) BeginEmailOTP(ctx context.Context, email string) (_ IssuedEmai
 	// attempt with an expired code is still audited as "expired" instead of
 	// failing opaquely at the continuation boundary.
 	continuation, err := m.encodeContinuation(ceremonyContinuation{
-		UserID: id, Operation: emailOTPOperation, Name: id, ExpiresAt: expiresAt.Add(time.Minute),
+		UserID: id, Operation: emailOTPOperation, Name: id.String(), ExpiresAt: expiresAt.Add(time.Minute),
 	})
 	if err != nil {
 		return IssuedEmailOTP{}, err
@@ -70,7 +70,7 @@ func (m *Manager) BeginEmailOTP(ctx context.Context, email string) (_ IssuedEmai
 		if !errors.Is(lookupErr, ErrNotFound) {
 			return IssuedEmailOTP{}, lookupErr
 		}
-		if auditErr := m.appendAuthenticationAudit(ctx, "", "email_otp.request", AuditFailed, "unknown_email"); auditErr != nil {
+		if auditErr := m.appendAuthenticationAudit(ctx, UUID{}, "email_otp.request", AuditFailed, "unknown_email"); auditErr != nil {
 			return IssuedEmailOTP{}, auditErr
 		}
 		return IssuedEmailOTP{Continuation: continuation, ExpiresAt: expiresAt}, nil
@@ -93,14 +93,14 @@ func (m *Manager) BeginEmailOTP(ctx context.Context, email string) (_ IssuedEmai
 	}
 	credential := EmailAuthenticationCredential{
 		ID: id, UserID: user.ID, EmailID: emailID,
-		Digest:    m.tokenDigest("email-otp:" + id + ":" + code),
+		Digest:    m.tokenDigest("email-otp:" + id.String() + ":" + code),
 		CreatedAt: now, ExpiresAt: expiresAt,
 	}
-	event, err := m.newAudit(ctx, user.ID, "email_otp.request", "user", user.ID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, user.ID, "email_otp.request", "user", user.ID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return IssuedEmailOTP{}, err
 	}
-	meta, err := m.newEventMeta(EventEmailAuthenticationRequested, "auth.email_otp.begin", user.ID, "", event)
+	meta, err := m.newEventMeta(EventEmailAuthenticationRequested, "auth.email_otp.begin", user.ID, UUID{}, event)
 	if err != nil {
 		return IssuedEmailOTP{}, err
 	}
@@ -123,12 +123,18 @@ func (m *Manager) CompleteEmailOTP(ctx context.Context, continuation, code strin
 	if err != nil {
 		return Authentication{}, err
 	}
-	credential, lookupErr := m.store.EmailAuthenticationByID(ctx, state.Name)
+	// The continuation carries the addressed credential as canonical text;
+	// a tampered one is rejected here rather than by the store lookup.
+	credentialID, parseErr := ParseUUID(state.Name)
+	if parseErr != nil {
+		return Authentication{}, ErrInvalidCredentials
+	}
+	credential, lookupErr := m.store.EmailAuthenticationByID(ctx, credentialID)
 	if lookupErr != nil {
 		if errors.Is(lookupErr, ErrNotFound) {
 			// Either a decoy continuation issued for an ineligible address or
 			// a forged reference; both fail exactly like a wrong code.
-			if auditErr := m.appendAuthenticationAudit(ctx, "", "auth.email_otp", AuditFailed, "invalid_credentials"); auditErr != nil {
+			if auditErr := m.appendAuthenticationAudit(ctx, UUID{}, "auth.email_otp", AuditFailed, "invalid_credentials"); auditErr != nil {
 				return Authentication{}, auditErr
 			}
 			return Authentication{}, ErrInvalidCredentials
@@ -170,7 +176,7 @@ func (m *Manager) CompleteEmailOTP(ctx context.Context, continuation, code strin
 	if err := m.requireUnlocked(ctx, user.ID, "auth.email_otp"); err != nil {
 		return Authentication{}, err
 	}
-	if !m.matchTokenDigest(credential.Digest, "email-otp:"+credential.ID+":"+code) {
+	if !m.matchTokenDigest(credential.Digest, "email-otp:"+credential.ID.String()+":"+code) {
 		audit, auditErr := m.recordAuthenticationFailure(ctx, user.ID, "auth.email_otp", true)
 		if auditErr != nil {
 			return Authentication{}, auditErr
@@ -184,7 +190,7 @@ func (m *Manager) CompleteEmailOTP(ctx context.Context, continuation, code strin
 		return Authentication{}, factorErr
 	}
 	now := m.now()
-	event, err := m.newAudit(ctx, user.ID, "auth.email_otp", "user", user.ID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, user.ID, "auth.email_otp", "user", user.ID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, err
 	}

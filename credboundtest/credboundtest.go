@@ -224,7 +224,7 @@ func Bootstrap(t testing.TB, manager *credbound.Manager) (credbound.Authenticati
 // This helper is test-only by definition: production code must never
 // construct an AAL2 authentication itself — only VerifyTOTP, a passkey, or
 // SSO reauthentication may produce one.
-func AAL2(userID string, at time.Time) credbound.Authentication {
+func AAL2(userID credbound.UUID, at time.Time) credbound.Authentication {
 	return credbound.Authentication{
 		UserID:          userID,
 		Method:          credbound.MethodTOTP,
