@@ -37,7 +37,7 @@ func (s *Store) CreateSession(ctx context.Context, session credbound.Session, cr
 			}
 		}
 		return mapError(q.InsertSession(ctx, db.InsertSessionParams{
-			ID: session.ID, UserID: session.UserID, Method: string(session.Method), Level: int64(session.Level),
+			ID: session.ID, UserID: session.UserID, Method: string(session.Method), Level: int16(session.Level),
 			AuthenticatedAt: session.AuthenticatedAt, SecondFactorRequired: session.SecondFactorRequired,
 			UserAgent: session.UserAgent, IpAddress: session.IPAddress, Digest: session.Digest,
 			CreatedAt: session.CreatedAt, LastSeenAt: session.LastSeenAt, ExpiresAt: session.ExpiresAt,
@@ -112,11 +112,11 @@ func (s *Store) Sessions(ctx context.Context, userID string, page credbound.Page
 			yield(credbound.PageEvent[credbound.Session]{}, err)
 			return
 		}
-		// The digest is deliberately not selected: listings never expose it.
-		rows, err := s.query(streamCtx, `SELECT id, user_id, method, level, authenticated_at, second_factor_required, user_agent, ip_address, created_at, last_seen_at, expires_at, revoked_at
-FROM credbound_sessions
-WHERE user_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, userID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
+		query, args := sessionsFirstPage, []any{userID, page.Limit + 1}
+		if cursor.ID != "" {
+			query, args = sessionsAfterCursor, []any{userID, cursor.Time, cursor.ID, page.Limit + 1}
+		}
+		rows, err := s.query(streamCtx, query, args...)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.Session]{}, mapError(err))
 			return

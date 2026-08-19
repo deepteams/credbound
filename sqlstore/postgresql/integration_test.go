@@ -21,7 +21,7 @@ import (
 
 // TestPostgreSQLMigrationsAndStore applies the shipped migrations to a real
 // PostgreSQL and exercises the store against the resulting schema, proving
-// the engine is supported on par with SQLite (DATA-001).
+// the engine is supported as specified (DATA-001).
 func TestPostgreSQLMigrationsAndStore(t *testing.T) {
 	dsn := os.Getenv("CREDBOUND_POSTGRES_DSN")
 	if dsn == "" {
@@ -217,7 +217,7 @@ func TestPostgreSQLMigrationsAndStore(t *testing.T) {
 	// user's SCIM profiles (marking them deprovisioned) and tombstones the
 	// address on invitations the user accepted, and the PrivacyStore reads
 	// expose both record families for the DSAR export — the same behavior the
-	// memory and SQLite suites pin.
+	// memory suite pins.
 	configuration := credbound.SCIMConfiguration{ID: pgID(24), WorkspaceID: workspace.ID, Enabled: true, DefaultRole: credbound.RoleMember, CreatedAt: now, UpdatedAt: now}
 	scimCredential := credbound.SCIMCredential{ID: pgID(25), ConfigurationID: configuration.ID, Prefix: "abcdef012345", Digest: []byte("digest"), CreatedAt: now}
 	if err := store.CreateSCIMConfiguration(ctx, configuration, scimCredential, pgCommit(now, pgID(26), user.ID, "scim.configuration.create", configuration.ID, workspace.ID)); err != nil {

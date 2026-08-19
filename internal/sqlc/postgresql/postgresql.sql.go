@@ -8,6 +8,7 @@ package postgresql
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 )
 
@@ -759,22 +760,22 @@ WHERE k.prefix = $1
 `
 
 type GetSCIMConfigurationByCredentialPrefixRow struct {
-	ID                    string       `json:"id"`
-	WorkspaceID           string       `json:"workspace_id"`
-	Enabled               bool         `json:"enabled"`
-	DefaultRole           string       `json:"default_role"`
-	TrustDirectoryEmails  bool         `json:"trust_directory_emails"`
-	GroupRoleMappingsJson []byte       `json:"group_role_mappings_json"`
-	CreatedAt             time.Time    `json:"created_at"`
-	UpdatedAt             time.Time    `json:"updated_at"`
-	CredentialID          string       `json:"credential_id"`
-	ConfigurationID       string       `json:"configuration_id"`
-	Prefix                string       `json:"prefix"`
-	Digest                []byte       `json:"digest"`
-	CredentialCreatedAt   time.Time    `json:"credential_created_at"`
-	ExpiresAt             sql.NullTime `json:"expires_at"`
-	LastUsedAt            sql.NullTime `json:"last_used_at"`
-	RevokedAt             sql.NullTime `json:"revoked_at"`
+	ID                    string          `json:"id"`
+	WorkspaceID           string          `json:"workspace_id"`
+	Enabled               bool            `json:"enabled"`
+	DefaultRole           string          `json:"default_role"`
+	TrustDirectoryEmails  bool            `json:"trust_directory_emails"`
+	GroupRoleMappingsJson json.RawMessage `json:"group_role_mappings_json"`
+	CreatedAt             time.Time       `json:"created_at"`
+	UpdatedAt             time.Time       `json:"updated_at"`
+	CredentialID          string          `json:"credential_id"`
+	ConfigurationID       string          `json:"configuration_id"`
+	Prefix                string          `json:"prefix"`
+	Digest                []byte          `json:"digest"`
+	CredentialCreatedAt   time.Time       `json:"credential_created_at"`
+	ExpiresAt             sql.NullTime    `json:"expires_at"`
+	LastUsedAt            sql.NullTime    `json:"last_used_at"`
+	RevokedAt             sql.NullTime    `json:"revoked_at"`
 }
 
 func (q *Queries) GetSCIMConfigurationByCredentialPrefix(ctx context.Context, prefix string) (GetSCIMConfigurationByCredentialPrefixRow, error) {
@@ -1257,15 +1258,15 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, NULL)
 `
 
 type InsertPATParams struct {
-	ID          string         `json:"id"`
-	UserID      string         `json:"user_id"`
-	Name        string         `json:"name"`
-	Prefix      string         `json:"prefix"`
-	Digest      []byte         `json:"digest"`
-	WorkspaceID sql.NullString `json:"workspace_id"`
-	ScopesJson  []byte         `json:"scopes_json"`
-	CreatedAt   time.Time      `json:"created_at"`
-	ExpiresAt   sql.NullTime   `json:"expires_at"`
+	ID          string          `json:"id"`
+	UserID      string          `json:"user_id"`
+	Name        string          `json:"name"`
+	Prefix      string          `json:"prefix"`
+	Digest      []byte          `json:"digest"`
+	WorkspaceID sql.NullString  `json:"workspace_id"`
+	ScopesJson  json.RawMessage `json:"scopes_json"`
+	CreatedAt   time.Time       `json:"created_at"`
+	ExpiresAt   sql.NullTime    `json:"expires_at"`
 }
 
 func (q *Queries) InsertPAT(ctx context.Context, arg InsertPATParams) error {
@@ -1366,14 +1367,14 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type InsertSCIMConfigurationParams struct {
-	ID                    string    `json:"id"`
-	WorkspaceID           string    `json:"workspace_id"`
-	Enabled               bool      `json:"enabled"`
-	DefaultRole           string    `json:"default_role"`
-	TrustDirectoryEmails  bool      `json:"trust_directory_emails"`
-	GroupRoleMappingsJson []byte    `json:"group_role_mappings_json"`
-	CreatedAt             time.Time `json:"created_at"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	ID                    string          `json:"id"`
+	WorkspaceID           string          `json:"workspace_id"`
+	Enabled               bool            `json:"enabled"`
+	DefaultRole           string          `json:"default_role"`
+	TrustDirectoryEmails  bool            `json:"trust_directory_emails"`
+	GroupRoleMappingsJson json.RawMessage `json:"group_role_mappings_json"`
+	CreatedAt             time.Time       `json:"created_at"`
+	UpdatedAt             time.Time       `json:"updated_at"`
 }
 
 func (q *Queries) InsertSCIMConfiguration(ctx context.Context, arg InsertSCIMConfigurationParams) error {
@@ -1426,18 +1427,18 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 `
 
 type InsertSCIMUserParams struct {
-	ID                 string         `json:"id"`
-	ConfigurationID    string         `json:"configuration_id"`
-	UserID             string         `json:"user_id"`
-	ExternalID         sql.NullString `json:"external_id"`
-	NormalizedUserName string         `json:"normalized_user_name"`
-	DisplayName        string         `json:"display_name"`
-	EmailsJson         []byte         `json:"emails_json"`
-	ProfileJson        []byte         `json:"profile_json"`
-	Active             bool           `json:"active"`
-	CreatedAt          time.Time      `json:"created_at"`
-	UpdatedAt          time.Time      `json:"updated_at"`
-	DeprovisionedAt    sql.NullTime   `json:"deprovisioned_at"`
+	ID                 string          `json:"id"`
+	ConfigurationID    string          `json:"configuration_id"`
+	UserID             string          `json:"user_id"`
+	ExternalID         sql.NullString  `json:"external_id"`
+	NormalizedUserName string          `json:"normalized_user_name"`
+	DisplayName        string          `json:"display_name"`
+	EmailsJson         json.RawMessage `json:"emails_json"`
+	ProfileJson        json.RawMessage `json:"profile_json"`
+	Active             bool            `json:"active"`
+	CreatedAt          time.Time       `json:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at"`
+	DeprovisionedAt    sql.NullTime    `json:"deprovisioned_at"`
 }
 
 func (q *Queries) InsertSCIMUser(ctx context.Context, arg InsertSCIMUserParams) error {
@@ -1499,7 +1500,7 @@ type InsertSessionParams struct {
 	ID                   string    `json:"id"`
 	UserID               string    `json:"user_id"`
 	Method               string    `json:"method"`
-	Level                int64     `json:"level"`
+	Level                int16     `json:"level"`
 	AuthenticatedAt      time.Time `json:"authenticated_at"`
 	SecondFactorRequired bool      `json:"second_factor_required"`
 	UserAgent            string    `json:"user_agent"`
@@ -1969,9 +1970,9 @@ const oAuthAccessTokenJSONByID = `-- name: OAuthAccessTokenJSONByID :one
 SELECT data_json FROM credbound.oauth_access_tokens WHERE id = $1
 `
 
-func (q *Queries) OAuthAccessTokenJSONByID(ctx context.Context, id string) ([]byte, error) {
+func (q *Queries) OAuthAccessTokenJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthAccessTokenJSONByID, id)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -1980,9 +1981,9 @@ const oAuthAccessTokenJSONByPrefix = `-- name: OAuthAccessTokenJSONByPrefix :one
 SELECT data_json FROM credbound.oauth_access_tokens WHERE prefix = $1
 `
 
-func (q *Queries) OAuthAccessTokenJSONByPrefix(ctx context.Context, prefix string) ([]byte, error) {
+func (q *Queries) OAuthAccessTokenJSONByPrefix(ctx context.Context, prefix string) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthAccessTokenJSONByPrefix, prefix)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -1992,8 +1993,8 @@ SELECT id, data_json FROM credbound.oauth_access_tokens WHERE grant_id = $1
 `
 
 type OAuthAccessTokenRecordsByGrantRow struct {
-	ID       string `json:"id"`
-	DataJson []byte `json:"data_json"`
+	ID       string          `json:"id"`
+	DataJson json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthAccessTokenRecordsByGrant(ctx context.Context, grantID string) ([]OAuthAccessTokenRecordsByGrantRow, error) {
@@ -2023,9 +2024,9 @@ const oAuthAuthorizationCodeJSONByID = `-- name: OAuthAuthorizationCodeJSONByID 
 SELECT data_json FROM credbound.oauth_authorization_codes WHERE id = $1
 `
 
-func (q *Queries) OAuthAuthorizationCodeJSONByID(ctx context.Context, id string) ([]byte, error) {
+func (q *Queries) OAuthAuthorizationCodeJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthAuthorizationCodeJSONByID, id)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -2034,9 +2035,9 @@ const oAuthAuthorizationCodeJSONByPrefix = `-- name: OAuthAuthorizationCodeJSONB
 SELECT data_json FROM credbound.oauth_authorization_codes WHERE prefix = $1
 `
 
-func (q *Queries) OAuthAuthorizationCodeJSONByPrefix(ctx context.Context, prefix string) ([]byte, error) {
+func (q *Queries) OAuthAuthorizationCodeJSONByPrefix(ctx context.Context, prefix string) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthAuthorizationCodeJSONByPrefix, prefix)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -2045,9 +2046,9 @@ const oAuthClientAccessTokenJSONByID = `-- name: OAuthClientAccessTokenJSONByID 
 SELECT data_json FROM credbound.oauth_client_access_tokens WHERE id = $1
 `
 
-func (q *Queries) OAuthClientAccessTokenJSONByID(ctx context.Context, id string) ([]byte, error) {
+func (q *Queries) OAuthClientAccessTokenJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthClientAccessTokenJSONByID, id)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -2056,9 +2057,9 @@ const oAuthClientAccessTokenJSONByPrefix = `-- name: OAuthClientAccessTokenJSONB
 SELECT data_json FROM credbound.oauth_client_access_tokens WHERE prefix = $1
 `
 
-func (q *Queries) OAuthClientAccessTokenJSONByPrefix(ctx context.Context, prefix string) ([]byte, error) {
+func (q *Queries) OAuthClientAccessTokenJSONByPrefix(ctx context.Context, prefix string) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthClientAccessTokenJSONByPrefix, prefix)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -2072,9 +2073,9 @@ type OAuthClientJSONByClientIDParams struct {
 	ClientID string `json:"client_id"`
 }
 
-func (q *Queries) OAuthClientJSONByClientID(ctx context.Context, arg OAuthClientJSONByClientIDParams) ([]byte, error) {
+func (q *Queries) OAuthClientJSONByClientID(ctx context.Context, arg OAuthClientJSONByClientIDParams) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthClientJSONByClientID, arg.IssuerID, arg.ClientID)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -2083,9 +2084,9 @@ const oAuthClientJSONByID = `-- name: OAuthClientJSONByID :one
 SELECT data_json FROM credbound.oauth_clients WHERE id = $1
 `
 
-func (q *Queries) OAuthClientJSONByID(ctx context.Context, id string) ([]byte, error) {
+func (q *Queries) OAuthClientJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthClientJSONByID, id)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -2094,15 +2095,15 @@ const oAuthClientJSONsByIssuer = `-- name: OAuthClientJSONsByIssuer :many
 SELECT data_json FROM credbound.oauth_clients WHERE issuer_id = $1
 `
 
-func (q *Queries) OAuthClientJSONsByIssuer(ctx context.Context, issuerID string) ([][]byte, error) {
+func (q *Queries) OAuthClientJSONsByIssuer(ctx context.Context, issuerID string) ([]json.RawMessage, error) {
 	rows, err := q.db.QueryContext(ctx, oAuthClientJSONsByIssuer, issuerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items [][]byte
+	var items []json.RawMessage
 	for rows.Next() {
-		var data_json []byte
+		var data_json json.RawMessage
 		if err := rows.Scan(&data_json); err != nil {
 			return nil, err
 		}
@@ -2123,10 +2124,10 @@ WHERE id = $1 AND used_at IS NULL AND expires_at > $4
 `
 
 type OAuthConsumeAuthorizationCodeParams struct {
-	ID        string       `json:"id"`
-	UsedAt    sql.NullTime `json:"used_at"`
-	DataJson  []byte       `json:"data_json"`
-	ExpiresAt time.Time    `json:"expires_at"`
+	ID        string          `json:"id"`
+	UsedAt    sql.NullTime    `json:"used_at"`
+	DataJson  json.RawMessage `json:"data_json"`
+	ExpiresAt time.Time       `json:"expires_at"`
 }
 
 func (q *Queries) OAuthConsumeAuthorizationCode(ctx context.Context, arg OAuthConsumeAuthorizationCodeParams) (int64, error) {
@@ -2148,10 +2149,10 @@ WHERE id = $1 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > $4
 `
 
 type OAuthConsumeRefreshTokenParams struct {
-	ID        string       `json:"id"`
-	UsedAt    sql.NullTime `json:"used_at"`
-	DataJson  []byte       `json:"data_json"`
-	ExpiresAt time.Time    `json:"expires_at"`
+	ID        string          `json:"id"`
+	UsedAt    sql.NullTime    `json:"used_at"`
+	DataJson  json.RawMessage `json:"data_json"`
+	ExpiresAt time.Time       `json:"expires_at"`
 }
 
 func (q *Queries) OAuthConsumeRefreshToken(ctx context.Context, arg OAuthConsumeRefreshTokenParams) (int64, error) {
@@ -2252,9 +2253,9 @@ const oAuthGrantJSONByID = `-- name: OAuthGrantJSONByID :one
 SELECT data_json FROM credbound.oauth_grants WHERE id = $1
 `
 
-func (q *Queries) OAuthGrantJSONByID(ctx context.Context, id string) ([]byte, error) {
+func (q *Queries) OAuthGrantJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthGrantJSONByID, id)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -2264,8 +2265,8 @@ SELECT id, data_json FROM credbound.oauth_grants
 `
 
 type OAuthGrantRecordsRow struct {
-	ID       string `json:"id"`
-	DataJson []byte `json:"data_json"`
+	ID       string          `json:"id"`
+	DataJson json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthGrantRecords(ctx context.Context) ([]OAuthGrantRecordsRow, error) {
@@ -2295,9 +2296,9 @@ const oAuthInitialAccessTokenJSONByID = `-- name: OAuthInitialAccessTokenJSONByI
 SELECT data_json FROM credbound.oauth_initial_access_tokens WHERE id = $1
 `
 
-func (q *Queries) OAuthInitialAccessTokenJSONByID(ctx context.Context, id string) ([]byte, error) {
+func (q *Queries) OAuthInitialAccessTokenJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthInitialAccessTokenJSONByID, id)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -2311,9 +2312,9 @@ type OAuthInitialAccessTokenJSONByIDAndIssuerParams struct {
 	IssuerID string `json:"issuer_id"`
 }
 
-func (q *Queries) OAuthInitialAccessTokenJSONByIDAndIssuer(ctx context.Context, arg OAuthInitialAccessTokenJSONByIDAndIssuerParams) ([]byte, error) {
+func (q *Queries) OAuthInitialAccessTokenJSONByIDAndIssuer(ctx context.Context, arg OAuthInitialAccessTokenJSONByIDAndIssuerParams) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthInitialAccessTokenJSONByIDAndIssuer, arg.ID, arg.IssuerID)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -2322,9 +2323,9 @@ const oAuthInitialAccessTokenJSONByPrefix = `-- name: OAuthInitialAccessTokenJSO
 SELECT data_json FROM credbound.oauth_initial_access_tokens WHERE prefix = $1
 `
 
-func (q *Queries) OAuthInitialAccessTokenJSONByPrefix(ctx context.Context, prefix string) ([]byte, error) {
+func (q *Queries) OAuthInitialAccessTokenJSONByPrefix(ctx context.Context, prefix string) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthInitialAccessTokenJSONByPrefix, prefix)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -2333,15 +2334,15 @@ const oAuthInitialAccessTokenJSONsByIssuer = `-- name: OAuthInitialAccessTokenJS
 SELECT data_json FROM credbound.oauth_initial_access_tokens WHERE issuer_id = $1 ORDER BY id
 `
 
-func (q *Queries) OAuthInitialAccessTokenJSONsByIssuer(ctx context.Context, issuerID string) ([][]byte, error) {
+func (q *Queries) OAuthInitialAccessTokenJSONsByIssuer(ctx context.Context, issuerID string) ([]json.RawMessage, error) {
 	rows, err := q.db.QueryContext(ctx, oAuthInitialAccessTokenJSONsByIssuer, issuerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items [][]byte
+	var items []json.RawMessage
 	for rows.Next() {
-		var data_json []byte
+		var data_json json.RawMessage
 		if err := rows.Scan(&data_json); err != nil {
 			return nil, err
 		}
@@ -2361,10 +2362,10 @@ INSERT INTO credbound.oauth_access_tokens (id, prefix, grant_id, data_json) VALU
 `
 
 type OAuthInsertAccessTokenParams struct {
-	ID       string `json:"id"`
-	Prefix   string `json:"prefix"`
-	GrantID  string `json:"grant_id"`
-	DataJson []byte `json:"data_json"`
+	ID       string          `json:"id"`
+	Prefix   string          `json:"prefix"`
+	GrantID  string          `json:"grant_id"`
+	DataJson json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthInsertAccessToken(ctx context.Context, arg OAuthInsertAccessTokenParams) error {
@@ -2382,12 +2383,12 @@ INSERT INTO credbound.oauth_authorization_codes (id, prefix, grant_id, used_at, 
 `
 
 type OAuthInsertAuthorizationCodeParams struct {
-	ID        string       `json:"id"`
-	Prefix    string       `json:"prefix"`
-	GrantID   string       `json:"grant_id"`
-	UsedAt    sql.NullTime `json:"used_at"`
-	ExpiresAt time.Time    `json:"expires_at"`
-	DataJson  []byte       `json:"data_json"`
+	ID        string          `json:"id"`
+	Prefix    string          `json:"prefix"`
+	GrantID   string          `json:"grant_id"`
+	UsedAt    sql.NullTime    `json:"used_at"`
+	ExpiresAt time.Time       `json:"expires_at"`
+	DataJson  json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthInsertAuthorizationCode(ctx context.Context, arg OAuthInsertAuthorizationCodeParams) error {
@@ -2407,11 +2408,11 @@ INSERT INTO credbound.oauth_clients (id, issuer_id, client_id, created_at, data_
 `
 
 type OAuthInsertClientParams struct {
-	ID        string    `json:"id"`
-	IssuerID  string    `json:"issuer_id"`
-	ClientID  string    `json:"client_id"`
-	CreatedAt time.Time `json:"created_at"`
-	DataJson  []byte    `json:"data_json"`
+	ID        string          `json:"id"`
+	IssuerID  string          `json:"issuer_id"`
+	ClientID  string          `json:"client_id"`
+	CreatedAt time.Time       `json:"created_at"`
+	DataJson  json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthInsertClient(ctx context.Context, arg OAuthInsertClientParams) error {
@@ -2430,10 +2431,10 @@ INSERT INTO credbound.oauth_client_access_tokens (id, prefix, client_record_id, 
 `
 
 type OAuthInsertClientAccessTokenParams struct {
-	ID             string `json:"id"`
-	Prefix         string `json:"prefix"`
-	ClientRecordID string `json:"client_record_id"`
-	DataJson       []byte `json:"data_json"`
+	ID             string          `json:"id"`
+	Prefix         string          `json:"prefix"`
+	ClientRecordID string          `json:"client_record_id"`
+	DataJson       json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthInsertClientAccessToken(ctx context.Context, arg OAuthInsertClientAccessTokenParams) error {
@@ -2452,13 +2453,13 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type OAuthInsertGrantParams struct {
-	ID             string    `json:"id"`
-	ClientRecordID string    `json:"client_record_id"`
-	ResourceID     string    `json:"resource_id"`
-	UserID         string    `json:"user_id"`
-	WorkspaceID    string    `json:"workspace_id"`
-	CreatedAt      time.Time `json:"created_at"`
-	DataJson       []byte    `json:"data_json"`
+	ID             string          `json:"id"`
+	ClientRecordID string          `json:"client_record_id"`
+	ResourceID     string          `json:"resource_id"`
+	UserID         string          `json:"user_id"`
+	WorkspaceID    string          `json:"workspace_id"`
+	CreatedAt      time.Time       `json:"created_at"`
+	DataJson       json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthInsertGrant(ctx context.Context, arg OAuthInsertGrantParams) error {
@@ -2480,14 +2481,14 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type OAuthInsertInitialAccessTokenParams struct {
-	ID                string       `json:"id"`
-	IssuerID          string       `json:"issuer_id"`
-	Prefix            string       `json:"prefix"`
-	RegistrationCount int64        `json:"registration_count"`
-	MaxRegistrations  int64        `json:"max_registrations"`
-	ExpiresAt         time.Time    `json:"expires_at"`
-	RevokedAt         sql.NullTime `json:"revoked_at"`
-	DataJson          []byte       `json:"data_json"`
+	ID                string          `json:"id"`
+	IssuerID          string          `json:"issuer_id"`
+	Prefix            string          `json:"prefix"`
+	RegistrationCount int32           `json:"registration_count"`
+	MaxRegistrations  int32           `json:"max_registrations"`
+	ExpiresAt         time.Time       `json:"expires_at"`
+	RevokedAt         sql.NullTime    `json:"revoked_at"`
+	DataJson          json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthInsertInitialAccessToken(ctx context.Context, arg OAuthInsertInitialAccessTokenParams) error {
@@ -2510,10 +2511,10 @@ INSERT INTO credbound.oauth_issuers (id, issuer, created_at, data_json) VALUES (
 `
 
 type OAuthInsertIssuerParams struct {
-	ID        string    `json:"id"`
-	Issuer    string    `json:"issuer"`
-	CreatedAt time.Time `json:"created_at"`
-	DataJson  []byte    `json:"data_json"`
+	ID        string          `json:"id"`
+	Issuer    string          `json:"issuer"`
+	CreatedAt time.Time       `json:"created_at"`
+	DataJson  json.RawMessage `json:"data_json"`
 }
 
 // OAuth/OIDC writes and point lookups are generated. Only public cursor streams
@@ -2534,14 +2535,14 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type OAuthInsertRefreshTokenParams struct {
-	ID        string       `json:"id"`
-	FamilyID  string       `json:"family_id"`
-	Prefix    string       `json:"prefix"`
-	GrantID   string       `json:"grant_id"`
-	UsedAt    sql.NullTime `json:"used_at"`
-	RevokedAt sql.NullTime `json:"revoked_at"`
-	ExpiresAt time.Time    `json:"expires_at"`
-	DataJson  []byte       `json:"data_json"`
+	ID        string          `json:"id"`
+	FamilyID  string          `json:"family_id"`
+	Prefix    string          `json:"prefix"`
+	GrantID   string          `json:"grant_id"`
+	UsedAt    sql.NullTime    `json:"used_at"`
+	RevokedAt sql.NullTime    `json:"revoked_at"`
+	ExpiresAt time.Time       `json:"expires_at"`
+	DataJson  json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthInsertRefreshToken(ctx context.Context, arg OAuthInsertRefreshTokenParams) error {
@@ -2563,12 +2564,12 @@ INSERT INTO credbound.oauth_resources (id, issuer_id, workspace_id, resource, cr
 `
 
 type OAuthInsertResourceParams struct {
-	ID          string    `json:"id"`
-	IssuerID    string    `json:"issuer_id"`
-	WorkspaceID string    `json:"workspace_id"`
-	Resource    string    `json:"resource"`
-	CreatedAt   time.Time `json:"created_at"`
-	DataJson    []byte    `json:"data_json"`
+	ID          string          `json:"id"`
+	IssuerID    string          `json:"issuer_id"`
+	WorkspaceID string          `json:"workspace_id"`
+	Resource    string          `json:"resource"`
+	CreatedAt   time.Time       `json:"created_at"`
+	DataJson    json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthInsertResource(ctx context.Context, arg OAuthInsertResourceParams) error {
@@ -2587,9 +2588,9 @@ const oAuthIssuerJSONByID = `-- name: OAuthIssuerJSONByID :one
 SELECT data_json FROM credbound.oauth_issuers WHERE id = $1
 `
 
-func (q *Queries) OAuthIssuerJSONByID(ctx context.Context, id string) ([]byte, error) {
+func (q *Queries) OAuthIssuerJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthIssuerJSONByID, id)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -2598,9 +2599,9 @@ const oAuthIssuerJSONByURL = `-- name: OAuthIssuerJSONByURL :one
 SELECT data_json FROM credbound.oauth_issuers WHERE issuer = $1
 `
 
-func (q *Queries) OAuthIssuerJSONByURL(ctx context.Context, issuer string) ([]byte, error) {
+func (q *Queries) OAuthIssuerJSONByURL(ctx context.Context, issuer string) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthIssuerJSONByURL, issuer)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -2659,9 +2660,9 @@ SELECT data_json, used_at, revoked_at FROM credbound.oauth_refresh_tokens WHERE 
 `
 
 type OAuthRefreshTokenByPrefixRow struct {
-	DataJson  []byte       `json:"data_json"`
-	UsedAt    sql.NullTime `json:"used_at"`
-	RevokedAt sql.NullTime `json:"revoked_at"`
+	DataJson  json.RawMessage `json:"data_json"`
+	UsedAt    sql.NullTime    `json:"used_at"`
+	RevokedAt sql.NullTime    `json:"revoked_at"`
 }
 
 func (q *Queries) OAuthRefreshTokenByPrefix(ctx context.Context, prefix string) (OAuthRefreshTokenByPrefixRow, error) {
@@ -2675,9 +2676,9 @@ const oAuthRefreshTokenJSONByID = `-- name: OAuthRefreshTokenJSONByID :one
 SELECT data_json FROM credbound.oauth_refresh_tokens WHERE id = $1
 `
 
-func (q *Queries) OAuthRefreshTokenJSONByID(ctx context.Context, id string) ([]byte, error) {
+func (q *Queries) OAuthRefreshTokenJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthRefreshTokenJSONByID, id)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -2687,8 +2688,8 @@ SELECT id, data_json FROM credbound.oauth_refresh_tokens WHERE grant_id = $1 AND
 `
 
 type OAuthRefreshTokenRecordsByGrantRow struct {
-	ID       string `json:"id"`
-	DataJson []byte `json:"data_json"`
+	ID       string          `json:"id"`
+	DataJson json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthRefreshTokenRecordsByGrant(ctx context.Context, grantID string) ([]OAuthRefreshTokenRecordsByGrantRow, error) {
@@ -2718,9 +2719,9 @@ const oAuthResourceJSONByID = `-- name: OAuthResourceJSONByID :one
 SELECT data_json FROM credbound.oauth_resources WHERE id = $1
 `
 
-func (q *Queries) OAuthResourceJSONByID(ctx context.Context, id string) ([]byte, error) {
+func (q *Queries) OAuthResourceJSONByID(ctx context.Context, id string) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthResourceJSONByID, id)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -2729,9 +2730,9 @@ const oAuthResourceJSONByURI = `-- name: OAuthResourceJSONByURI :one
 SELECT data_json FROM credbound.oauth_resources WHERE resource = $1
 `
 
-func (q *Queries) OAuthResourceJSONByURI(ctx context.Context, resource string) ([]byte, error) {
+func (q *Queries) OAuthResourceJSONByURI(ctx context.Context, resource string) (json.RawMessage, error) {
 	row := q.db.QueryRowContext(ctx, oAuthResourceJSONByURI, resource)
-	var data_json []byte
+	var data_json json.RawMessage
 	err := row.Scan(&data_json)
 	return data_json, err
 }
@@ -2741,9 +2742,9 @@ UPDATE credbound.oauth_initial_access_tokens SET revoked_at = $2, data_json = $3
 `
 
 type OAuthRevokeInitialAccessTokenParams struct {
-	ID        string       `json:"id"`
-	RevokedAt sql.NullTime `json:"revoked_at"`
-	DataJson  []byte       `json:"data_json"`
+	ID        string          `json:"id"`
+	RevokedAt sql.NullTime    `json:"revoked_at"`
+	DataJson  json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthRevokeInitialAccessToken(ctx context.Context, arg OAuthRevokeInitialAccessTokenParams) (int64, error) {
@@ -2776,9 +2777,9 @@ UPDATE credbound.oauth_refresh_tokens SET revoked_at = $2, data_json = $3 WHERE 
 `
 
 type OAuthRevokeRefreshTokenParams struct {
-	ID        string       `json:"id"`
-	RevokedAt sql.NullTime `json:"revoked_at"`
-	DataJson  []byte       `json:"data_json"`
+	ID        string          `json:"id"`
+	RevokedAt sql.NullTime    `json:"revoked_at"`
+	DataJson  json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthRevokeRefreshToken(ctx context.Context, arg OAuthRevokeRefreshTokenParams) (int64, error) {
@@ -2794,8 +2795,8 @@ UPDATE credbound.oauth_access_tokens SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateAccessTokenJSONParams struct {
-	ID       string `json:"id"`
-	DataJson []byte `json:"data_json"`
+	ID       string          `json:"id"`
+	DataJson json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthUpdateAccessTokenJSON(ctx context.Context, arg OAuthUpdateAccessTokenJSONParams) (int64, error) {
@@ -2811,8 +2812,8 @@ UPDATE credbound.oauth_client_access_tokens SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateClientAccessTokenJSONParams struct {
-	ID       string `json:"id"`
-	DataJson []byte `json:"data_json"`
+	ID       string          `json:"id"`
+	DataJson json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthUpdateClientAccessTokenJSON(ctx context.Context, arg OAuthUpdateClientAccessTokenJSONParams) (int64, error) {
@@ -2828,8 +2829,8 @@ UPDATE credbound.oauth_clients SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateClientJSONParams struct {
-	ID       string `json:"id"`
-	DataJson []byte `json:"data_json"`
+	ID       string          `json:"id"`
+	DataJson json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthUpdateClientJSON(ctx context.Context, arg OAuthUpdateClientJSONParams) (int64, error) {
@@ -2845,8 +2846,8 @@ UPDATE credbound.oauth_grants SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateGrantJSONParams struct {
-	ID       string `json:"id"`
-	DataJson []byte `json:"data_json"`
+	ID       string          `json:"id"`
+	DataJson json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthUpdateGrantJSON(ctx context.Context, arg OAuthUpdateGrantJSONParams) (int64, error) {
@@ -2862,9 +2863,9 @@ UPDATE credbound.oauth_issuers SET data_json = $3 WHERE id = $1 AND issuer = $2
 `
 
 type OAuthUpdateIssuerParams struct {
-	ID       string `json:"id"`
-	Issuer   string `json:"issuer"`
-	DataJson []byte `json:"data_json"`
+	ID       string          `json:"id"`
+	Issuer   string          `json:"issuer"`
+	DataJson json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthUpdateIssuer(ctx context.Context, arg OAuthUpdateIssuerParams) (int64, error) {
@@ -2880,8 +2881,8 @@ UPDATE credbound.oauth_issuers SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateIssuerJSONParams struct {
-	ID       string `json:"id"`
-	DataJson []byte `json:"data_json"`
+	ID       string          `json:"id"`
+	DataJson json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthUpdateIssuerJSON(ctx context.Context, arg OAuthUpdateIssuerJSONParams) (int64, error) {
@@ -2897,8 +2898,8 @@ UPDATE credbound.oauth_resources SET data_json = $2 WHERE id = $1
 `
 
 type OAuthUpdateResourceJSONParams struct {
-	ID       string `json:"id"`
-	DataJson []byte `json:"data_json"`
+	ID       string          `json:"id"`
+	DataJson json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthUpdateResourceJSON(ctx context.Context, arg OAuthUpdateResourceJSONParams) (int64, error) {
@@ -2915,11 +2916,11 @@ ON CONFLICT (issuer_id, client_id) DO UPDATE SET data_json = EXCLUDED.data_json
 `
 
 type OAuthUpsertCIMDClientParams struct {
-	ID        string    `json:"id"`
-	IssuerID  string    `json:"issuer_id"`
-	ClientID  string    `json:"client_id"`
-	CreatedAt time.Time `json:"created_at"`
-	DataJson  []byte    `json:"data_json"`
+	ID        string          `json:"id"`
+	IssuerID  string          `json:"issuer_id"`
+	ClientID  string          `json:"client_id"`
+	CreatedAt time.Time       `json:"created_at"`
+	DataJson  json.RawMessage `json:"data_json"`
 }
 
 func (q *Queries) OAuthUpsertCIMDClient(ctx context.Context, arg OAuthUpsertCIMDClientParams) error {
@@ -2940,11 +2941,11 @@ WHERE id = $1 AND registration_count = $4 AND revoked_at IS NULL AND expires_at 
 `
 
 type OAuthUseInitialAccessTokenParams struct {
-	ID                  string    `json:"id"`
-	RegistrationCount   int64     `json:"registration_count"`
-	DataJson            []byte    `json:"data_json"`
-	RegistrationCount_2 int64     `json:"registration_count_2"`
-	ExpiresAt           time.Time `json:"expires_at"`
+	ID                  string          `json:"id"`
+	RegistrationCount   int32           `json:"registration_count"`
+	DataJson            json.RawMessage `json:"data_json"`
+	RegistrationCount_2 int32           `json:"registration_count_2"`
+	ExpiresAt           time.Time       `json:"expires_at"`
 }
 
 func (q *Queries) OAuthUseInitialAccessToken(ctx context.Context, arg OAuthUseInitialAccessTokenParams) (int64, error) {
@@ -3477,12 +3478,12 @@ WHERE id = $1 AND workspace_id = $6
 `
 
 type UpdateSCIMConfigurationParams struct {
-	ID                    string    `json:"id"`
-	DefaultRole           string    `json:"default_role"`
-	TrustDirectoryEmails  bool      `json:"trust_directory_emails"`
-	GroupRoleMappingsJson []byte    `json:"group_role_mappings_json"`
-	UpdatedAt             time.Time `json:"updated_at"`
-	WorkspaceID           string    `json:"workspace_id"`
+	ID                    string          `json:"id"`
+	DefaultRole           string          `json:"default_role"`
+	TrustDirectoryEmails  bool            `json:"trust_directory_emails"`
+	GroupRoleMappingsJson json.RawMessage `json:"group_role_mappings_json"`
+	UpdatedAt             time.Time       `json:"updated_at"`
+	WorkspaceID           string          `json:"workspace_id"`
 }
 
 func (q *Queries) UpdateSCIMConfiguration(ctx context.Context, arg UpdateSCIMConfigurationParams) (int64, error) {
@@ -3506,16 +3507,16 @@ WHERE configuration_id = $1 AND id = $2
 `
 
 type UpdateSCIMUserParams struct {
-	ConfigurationID    string         `json:"configuration_id"`
-	ID                 string         `json:"id"`
-	ExternalID         sql.NullString `json:"external_id"`
-	NormalizedUserName string         `json:"normalized_user_name"`
-	DisplayName        string         `json:"display_name"`
-	EmailsJson         []byte         `json:"emails_json"`
-	ProfileJson        []byte         `json:"profile_json"`
-	Active             bool           `json:"active"`
-	UpdatedAt          time.Time      `json:"updated_at"`
-	DeprovisionedAt    sql.NullTime   `json:"deprovisioned_at"`
+	ConfigurationID    string          `json:"configuration_id"`
+	ID                 string          `json:"id"`
+	ExternalID         sql.NullString  `json:"external_id"`
+	NormalizedUserName string          `json:"normalized_user_name"`
+	DisplayName        string          `json:"display_name"`
+	EmailsJson         json.RawMessage `json:"emails_json"`
+	ProfileJson        json.RawMessage `json:"profile_json"`
+	Active             bool            `json:"active"`
+	UpdatedAt          time.Time       `json:"updated_at"`
+	DeprovisionedAt    sql.NullTime    `json:"deprovisioned_at"`
 }
 
 func (q *Queries) UpdateSCIMUser(ctx context.Context, arg UpdateSCIMUserParams) (int64, error) {
@@ -3702,14 +3703,14 @@ WHERE credbound.scim_groups.configuration_id = EXCLUDED.configuration_id
 `
 
 type UpsertSCIMGroupParams struct {
-	ID              string         `json:"id"`
-	ConfigurationID string         `json:"configuration_id"`
-	ExternalID      sql.NullString `json:"external_id"`
-	DisplayName     string         `json:"display_name"`
-	MemberIdsJson   []byte         `json:"member_ids_json"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
-	DeletedAt       sql.NullTime   `json:"deleted_at"`
+	ID              string          `json:"id"`
+	ConfigurationID string          `json:"configuration_id"`
+	ExternalID      sql.NullString  `json:"external_id"`
+	DisplayName     string          `json:"display_name"`
+	MemberIdsJson   json.RawMessage `json:"member_ids_json"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	DeletedAt       sql.NullTime    `json:"deleted_at"`
 }
 
 func (q *Queries) UpsertSCIMGroup(ctx context.Context, arg UpsertSCIMGroupParams) error {

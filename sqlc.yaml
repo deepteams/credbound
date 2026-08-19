@@ -19,17 +19,3 @@ sql:
             go_type:
               import: database/sql
               type: NullString
-          # SQLite has one integer width, so PostgreSQL's narrower integers are
-          # widened to int64 here. Both stores then share identical parameter
-          # and row types, which is what lets the PostgreSQL store be derived
-          # from the SQLite one without per-field conversions.
-          - db_type: pg_catalog.int2
-            go_type: int64
-          - db_type: pg_catalog.int4
-            go_type: int64
-          # jsonb maps to json.RawMessage by default; []byte is the same
-          # underlying type and is what the SQLite TEXT columns map to.
-          - db_type: jsonb
-            go_type:
-              type: byte
-              slice: true

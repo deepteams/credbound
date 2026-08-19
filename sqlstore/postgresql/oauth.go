@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"strings"
 	"time"
 
 	"github.com/deepteams/credbound"
@@ -75,9 +76,7 @@ func (s *Store) OAuthIssuerByURL(ctx context.Context, issuer string) (credbound.
 
 // OAuthIssuers streams all issuers, newest first, as one cursor page.
 func (s *Store) OAuthIssuers(ctx context.Context, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthIssuer], error] {
-	return oauthPage(s, ctx, `SELECT data_json, created_at, id FROM credbound_oauth_issuers
-WHERE (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, nil, page, func(value credbound.OAuthIssuer) credbound.OAuthIssuer { return value })
+	return oauthPage(s, ctx, "credbound.oauth_issuers", nil, page, func(value credbound.OAuthIssuer) credbound.OAuthIssuer { return value })
 }
 
 // CreateOAuthProtectedResource stores a protected resource; a duplicate ID
@@ -131,9 +130,7 @@ func (s *Store) OAuthProtectedResourceByURI(ctx context.Context, resource string
 // OAuthProtectedResources streams resources, optionally filtered by
 // workspace, newest first, as one cursor page.
 func (s *Store) OAuthProtectedResources(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthProtectedResource], error] {
-	return oauthPage(s, ctx, `SELECT data_json, created_at, id FROM credbound_oauth_resources
-WHERE workspace_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, []any{workspaceID}, page, func(value credbound.OAuthProtectedResource) credbound.OAuthProtectedResource { return value })
+	return oauthPage(s, ctx, "credbound.oauth_resources", []oauthFilter{{"workspace_id", workspaceID}}, page, func(value credbound.OAuthProtectedResource) credbound.OAuthProtectedResource { return value })
 }
 
 // CreateOAuthClient stores a dynamically registered client, consuming a use
@@ -149,8 +146,7 @@ func (s *Store) CreateOAuthClient(ctx context.Context, value credbound.OAuthClie
 			// Open registration counts existing clients then inserts, with no
 			// indexed guard, so the issuer row is locked first: without it two
 			// concurrent registrations could each read a stale count and
-			// overrun the limit. The lock is a plain read on SQLite, whose
-			// write lock already serializes mutations.
+			// overrun the limit.
 			if _, err := q.OAuthLockIssuer(ctx, value.IssuerID); err != nil {
 				return mapError(err)
 			}
@@ -187,7 +183,7 @@ func (s *Store) CreateOAuthClient(ctx context.Context, value credbound.OAuthClie
 				return err
 			}
 			count, err := q.OAuthUseInitialAccessToken(ctx, db.OAuthUseInitialAccessTokenParams{
-				ID: token.ID, RegistrationCount: int64(token.RegistrationCount), DataJson: tokenData, RegistrationCount_2: int64(previousCount), ExpiresAt: usedAt,
+				ID: token.ID, RegistrationCount: int32(token.RegistrationCount), DataJson: tokenData, RegistrationCount_2: int32(previousCount), ExpiresAt: usedAt,
 			})
 			if err != nil || count != 1 {
 				return credbound.ErrConflict
@@ -277,9 +273,7 @@ func (s *Store) OAuthClientByClientID(ctx context.Context, issuerID, clientID st
 // OAuthClients streams the issuer's clients, newest first, as one cursor
 // page.
 func (s *Store) OAuthClients(ctx context.Context, issuerID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthClient], error] {
-	return oauthPage(s, ctx, `SELECT data_json, created_at, id FROM credbound_oauth_clients
-WHERE issuer_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, []any{issuerID}, page, func(value credbound.OAuthClient) credbound.OAuthClient {
+	return oauthPage(s, ctx, "credbound.oauth_clients", []oauthFilter{{"issuer_id", issuerID}}, page, func(value credbound.OAuthClient) credbound.OAuthClient {
 		value.SecretDigest = nil
 		return value
 	})
@@ -294,7 +288,7 @@ func (s *Store) CreateOAuthInitialAccessToken(ctx context.Context, value credbou
 			return err
 		}
 		return mapError(q.OAuthInsertInitialAccessToken(ctx, db.OAuthInsertInitialAccessTokenParams{
-			ID: value.ID, IssuerID: value.IssuerID, Prefix: value.Prefix, RegistrationCount: int64(value.RegistrationCount), MaxRegistrations: int64(value.MaxRegistrations), ExpiresAt: value.ExpiresAt, RevokedAt: nullableTime(value.RevokedAt), DataJson: data,
+			ID: value.ID, IssuerID: value.IssuerID, Prefix: value.Prefix, RegistrationCount: int32(value.RegistrationCount), MaxRegistrations: int32(value.MaxRegistrations), ExpiresAt: value.ExpiresAt, RevokedAt: nullableTime(value.RevokedAt), DataJson: data,
 		}))
 	})
 }
@@ -377,10 +371,7 @@ func (s *Store) RevokeOAuthGrant(ctx context.Context, id string, at time.Time, c
 // OAuthGrants streams grants, optionally filtered by user and workspace,
 // newest first, as one cursor page.
 func (s *Store) OAuthGrants(ctx context.Context, userID, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthGrant], error] {
-	return oauthPage(s, ctx, `SELECT data_json, created_at, id FROM credbound_oauth_grants
-WHERE (NOT ? OR user_id = ?) AND (NOT ? OR workspace_id = ?)
-AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, []any{userID != "", nullableUUID(userID), workspaceID != "", nullableUUID(workspaceID)}, page, func(value credbound.OAuthGrant) credbound.OAuthGrant { return value })
+	return oauthPage(s, ctx, "credbound.oauth_grants", []oauthFilter{{"user_id", userID}, {"workspace_id", workspaceID}}, page, func(value credbound.OAuthGrant) credbound.OAuthGrant { return value })
 }
 
 // OAuthAuthorizationCodeByPrefix returns the authorization code record
@@ -665,7 +656,18 @@ func (s *Store) revokeOAuthAccessTokens(ctx context.Context, q *db.Queries, gran
 	return nil
 }
 
-func oauthPage[T any](s *Store, ctx context.Context, query string, filterArgs []any, page credbound.PageRequest, public func(T) T) iter.Seq2[credbound.PageEvent[T], error] {
+// oauthFilter is an optional equality clause on one of a record table's uuid
+// columns; an empty value means the caller did not filter on it.
+type oauthFilter struct {
+	column string
+	value  string
+}
+
+// oauthPage streams one cursor page of an OAuth record table. table and the
+// filter columns are package constants, never caller input; only the values
+// are bound. Clauses are added when they apply rather than guarded in SQL, so
+// each shape stays indexable.
+func oauthPage[T any](s *Store, ctx context.Context, table string, filters []oauthFilter, page credbound.PageRequest, public func(T) T) iter.Seq2[credbound.PageEvent[T], error] {
 	return func(yield func(credbound.PageEvent[T], error) bool) {
 		streamCtx, cancel := context.WithTimeout(ctx, s.streamTimeout)
 		defer cancel()
@@ -675,8 +677,25 @@ func oauthPage[T any](s *Store, ctx context.Context, query string, filterArgs []
 			yield(zero, err)
 			return
 		}
-		args := append([]any(nil), filterArgs...)
-		args = append(args, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
+		query := "SELECT data_json, created_at, id FROM " + table
+		var args []any
+		var clauses []string
+		for _, filter := range filters {
+			if filter.value == "" {
+				continue
+			}
+			args = append(args, filter.value)
+			clauses = append(clauses, fmt.Sprintf("%s = $%d::uuid", filter.column, len(args)))
+		}
+		if cursor.ID != "" {
+			args = append(args, cursor.Time, cursor.ID)
+			clauses = append(clauses, fmt.Sprintf("(created_at, id) < ($%d, $%d::uuid)", len(args)-1, len(args)))
+		}
+		if len(clauses) > 0 {
+			query += "\nWHERE " + strings.Join(clauses, " AND ")
+		}
+		args = append(args, page.Limit+1)
+		query += fmt.Sprintf("\nORDER BY created_at DESC, id DESC LIMIT $%d", len(args))
 		rows, err := s.query(streamCtx, query, args...)
 		if err != nil {
 			var zero credbound.PageEvent[T]
@@ -721,11 +740,9 @@ func oauthPage[T any](s *Store, ctx context.Context, query string, filterArgs []
 }
 
 func (s *Store) oauthMutate(ctx context.Context, commit credbound.Commit, fn func(*sql.Tx, *db.Queries) error) error {
-	// OAuth writes also append to the singleton audit chain and run
-	// read-then-write invariant checks (the DCR registration count). On SQLite
-	// the write lock serializes them process-wide; on PostgreSQL it is a no-op
-	// and the same invariants rest on the row locks taken inside the callback.
-	defer s.locks.write()()
+	// OAuth writes append to the singleton audit chain and run read-then-write
+	// invariant checks (the DCR registration count). Both rest on row locks
+	// taken inside the callback, so mutations run concurrently.
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return mapError(err)

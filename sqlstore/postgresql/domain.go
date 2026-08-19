@@ -116,10 +116,11 @@ func (s *Store) WorkspaceDomains(ctx context.Context, workspaceID string, page c
 			yield(credbound.PageEvent[credbound.WorkspaceDomain]{}, err)
 			return
 		}
-		rows, err := s.query(streamCtx, `SELECT id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at
-FROM credbound_workspace_domains
-WHERE workspace_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, workspaceID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
+		query, args := workspaceDomainsFirstPage, []any{workspaceID, page.Limit + 1}
+		if cursor.ID != "" {
+			query, args = workspaceDomainsAfterCursor, []any{workspaceID, cursor.Time, cursor.ID, page.Limit + 1}
+		}
+		rows, err := s.query(streamCtx, query, args...)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.WorkspaceDomain]{}, mapError(err))
 			return

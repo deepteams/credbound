@@ -115,9 +115,7 @@ func (s *Store) SetUserDisabled(ctx context.Context, userID string, disabled boo
 			return mapError(err)
 		}
 		if disabled {
-			// Lock the rows this read-then-write check depends on. They are
-			// plain reads on SQLite, whose write lock already serializes
-			// mutations, and SELECT … FOR UPDATE on PostgreSQL.
+			// Lock the rows this read-then-write check depends on.
 			if _, err := q.LockRootAdministrators(ctx); err != nil {
 				return mapError(err)
 			}
@@ -177,11 +175,11 @@ func (s *Store) Users(ctx context.Context, page credbound.PageRequest) iter.Seq2
 			yield(credbound.PageEvent[credbound.User]{}, err)
 			return
 		}
-		rows, err := s.query(streamCtx, `SELECT u.id, e.address, u.display_name, u.disabled, u.last_seen_at, u.created_at, u.updated_at
-FROM credbound_users u
-JOIN credbound_user_emails e ON e.user_id = u.id AND e.is_primary
-WHERE (NOT ? OR u.created_at < ? OR (u.created_at = ? AND u.id < ?))
-ORDER BY u.created_at DESC, u.id DESC LIMIT ?`, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
+		query, args := usersFirstPage, []any{page.Limit + 1}
+		if cursor.ID != "" {
+			query, args = usersAfterCursor, []any{cursor.Time, cursor.ID, page.Limit + 1}
+		}
+		rows, err := s.query(streamCtx, query, args...)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.User]{}, mapError(err))
 			return
@@ -274,11 +272,12 @@ func (s *Store) LoginThrottleByUserID(ctx context.Context, userID string) (credb
 // an opaque digest regardless of account existence, so it opens no audit
 // transaction and leaks nothing.
 func (s *Store) ClaimEmailIssuance(ctx context.Context, address, purpose string, at, notBefore time.Time) (bool, error) {
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM credbound_email_issuance WHERE last_issued_at <= ?`, notBefore); err != nil {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM credbound.email_issuance WHERE last_issued_at <= $1`, notBefore); err != nil {
 		return false, mapError(err)
 	}
-	result, err := s.db.ExecContext(ctx, `INSERT INTO credbound_email_issuance (address, purpose, last_issued_at) VALUES (?, ?, ?)
-ON CONFLICT (address, purpose) DO UPDATE SET last_issued_at = excluded.last_issued_at WHERE credbound_email_issuance.last_issued_at <= ?`,
+	result, err := s.db.ExecContext(ctx, `INSERT INTO credbound.email_issuance (address, purpose, last_issued_at) VALUES ($1, $2, $3)
+ON CONFLICT (address, purpose) DO UPDATE SET last_issued_at = EXCLUDED.last_issued_at
+WHERE credbound.email_issuance.last_issued_at <= $4`,
 		address, purpose, at, notBefore)
 	if err != nil {
 		return false, mapError(err)
@@ -583,10 +582,11 @@ func (s *Store) Emails(ctx context.Context, userID string, page credbound.PageRe
 			yield(credbound.PageEvent[credbound.EmailAddress]{}, err)
 			return
 		}
-		rows, err := s.query(streamCtx, `SELECT id, user_id, address, is_primary, verified_at, created_at, updated_at
-FROM credbound_user_emails
-WHERE user_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, userID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
+		query, args := emailsFirstPage, []any{userID, page.Limit + 1}
+		if cursor.ID != "" {
+			query, args = emailsAfterCursor, []any{userID, cursor.Time, cursor.ID, page.Limit + 1}
+		}
+		rows, err := s.query(streamCtx, query, args...)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.EmailAddress]{}, mapError(err))
 			return
@@ -790,8 +790,7 @@ func (s *Store) Passkeys(ctx context.Context, userID string) iter.Seq2[credbound
 	return func(yield func(credbound.Passkey, error) bool) {
 		streamCtx, cancel := context.WithTimeout(ctx, s.streamTimeout)
 		defer cancel()
-		rows, err := s.query(streamCtx, `SELECT id, user_id, name, credential_id, credential_json, created_at, last_used_at
-FROM credbound_passkeys WHERE user_id = ? ORDER BY created_at, id`, userID)
+		rows, err := s.query(streamCtx, passkeysByUser, userID)
 		if err != nil {
 			yield(credbound.Passkey{}, mapError(err))
 			return
@@ -943,9 +942,7 @@ func (s *Store) AnonymizeUser(ctx context.Context, userID string, at time.Time, 
 		if _, err := q.GetUserByID(ctx, userID); err != nil {
 			return mapError(err)
 		}
-		// Lock the rows this read-then-write check depends on. They are
-		// plain reads on SQLite, whose write lock already serializes
-		// mutations, and SELECT … FOR UPDATE on PostgreSQL.
+		// Lock the rows this read-then-write check depends on.
 		if _, err := q.LockRootAdministrators(ctx); err != nil {
 			return mapError(err)
 		}
@@ -1024,10 +1021,11 @@ func (s *Store) PATs(ctx context.Context, userID string, page credbound.PageRequ
 			yield(credbound.PageEvent[credbound.PAT]{}, err)
 			return
 		}
-		rows, err := s.query(streamCtx, `SELECT id, user_id, name, prefix, digest, workspace_id, scopes_json, created_at, expires_at, last_used_at, revoked_at
-FROM credbound_personal_access_tokens
-WHERE user_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, userID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
+		query, args := patsFirstPage, []any{userID, page.Limit + 1}
+		if cursor.ID != "" {
+			query, args = patsAfterCursor, []any{userID, cursor.Time, cursor.ID, page.Limit + 1}
+		}
+		rows, err := s.query(streamCtx, query, args...)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.PAT]{}, mapError(err))
 			return
@@ -1158,10 +1156,11 @@ func (s *Store) WorkspaceInvitations(ctx context.Context, workspaceID string, pa
 			yield(credbound.PageEvent[credbound.WorkspaceInvitation]{}, err)
 			return
 		}
-		rows, err := s.query(streamCtx, `SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
-FROM credbound_workspace_invitations
-WHERE workspace_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, workspaceID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
+		query, args := invitationsFirstPage, []any{workspaceID, page.Limit + 1}
+		if cursor.ID != "" {
+			query, args = invitationsAfterCursor, []any{workspaceID, cursor.Time, cursor.ID, page.Limit + 1}
+		}
+		rows, err := s.query(streamCtx, query, args...)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.WorkspaceInvitation]{}, mapError(err))
 			return
@@ -1294,12 +1293,8 @@ func (s *Store) workspaces(ctx context.Context, userID string, page credbound.Pa
 			yield(credbound.PageEvent[credbound.Workspace]{}, err)
 			return
 		}
-		query := `SELECT w.id, w.name, w.created_at, w.updated_at, w.disabled_at, w.require_mfa
-FROM credbound_workspaces w
-WHERE (NOT ? OR EXISTS (SELECT 1 FROM credbound_memberships m WHERE m.workspace_id = w.id AND m.user_id = ?))
-AND (NOT ? OR w.created_at < ? OR (w.created_at = ? AND w.id < ?))
-ORDER BY w.created_at DESC, w.id DESC LIMIT ?`
-		rows, err := s.query(streamCtx, query, userID != "", nullableUUID(userID), cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
+		query, args := workspacesQuery(userID, cursor, page.Limit+1)
+		rows, err := s.query(streamCtx, query, args...)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.Workspace]{}, mapError(err))
 			return
@@ -1422,10 +1417,11 @@ func (s *Store) Memberships(ctx context.Context, workspaceID string, page credbo
 			yield(credbound.PageEvent[credbound.Membership]{}, err)
 			return
 		}
-		rows, err := s.query(streamCtx, `SELECT workspace_id, user_id, role, status, provisioning_source, created_at, updated_at
-FROM credbound_memberships
-WHERE workspace_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND user_id < ?))
-ORDER BY created_at DESC, user_id DESC LIMIT ?`, workspaceID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
+		query, args := membershipsFirstPage, []any{workspaceID, page.Limit + 1}
+		if cursor.ID != "" {
+			query, args = membershipsAfterCursor, []any{workspaceID, cursor.Time, cursor.ID, page.Limit + 1}
+		}
+		rows, err := s.query(streamCtx, query, args...)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.Membership]{}, mapError(err))
 			return
@@ -1616,10 +1612,11 @@ func (s *Store) SSOIdentities(ctx context.Context, userID string, page credbound
 			yield(credbound.PageEvent[credbound.SSOIdentity]{}, err)
 			return
 		}
-		rows, err := s.query(streamCtx, `SELECT id, user_id, provider_configuration_id, provider_kind, issuer, subject, email, created_at, last_used_at
-FROM credbound_sso_identities
-WHERE user_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, userID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
+		query, args := ssoIdentitiesFirstPage, []any{userID, page.Limit + 1}
+		if cursor.ID != "" {
+			query, args = ssoIdentitiesAfterCursor, []any{userID, cursor.Time, cursor.ID, page.Limit + 1}
+		}
+		rows, err := s.query(streamCtx, query, args...)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.SSOIdentity]{}, mapError(err))
 			return
@@ -1663,16 +1660,18 @@ func (s *Store) AppendAudit(ctx context.Context, commit credbound.Commit) error 
 // AuditEvents streams the workspace's audit events, newest first, as one
 // cursor page.
 func (s *Store) AuditEvents(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.AuditEvent], error] {
-	return s.auditEvents(ctx, page, `workspace_id = ? AND`, []any{workspaceID})
+	return s.auditEvents(ctx, page, workspaceID)
 }
 
 // InstanceAuditEvents streams audit events across the whole instance, newest
 // first, as one cursor page.
 func (s *Store) InstanceAuditEvents(ctx context.Context, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.AuditEvent], error] {
-	return s.auditEvents(ctx, page, "", nil)
+	return s.auditEvents(ctx, page, "")
 }
 
-func (s *Store) auditEvents(ctx context.Context, page credbound.PageRequest, filter string, filterArgs []any) iter.Seq2[credbound.PageEvent[credbound.AuditEvent], error] {
+// auditEvents streams one cursor page, scoped to a workspace when workspaceID
+// is set and across the whole instance when it is empty.
+func (s *Store) auditEvents(ctx context.Context, page credbound.PageRequest, workspaceID string) iter.Seq2[credbound.PageEvent[credbound.AuditEvent], error] {
 	return func(yield func(credbound.PageEvent[credbound.AuditEvent], error) bool) {
 		streamCtx, cancel := context.WithTimeout(ctx, s.streamTimeout)
 		defer cancel()
@@ -1681,11 +1680,7 @@ func (s *Store) auditEvents(ctx context.Context, page credbound.PageRequest, fil
 			yield(credbound.PageEvent[credbound.AuditEvent]{}, err)
 			return
 		}
-		query := `SELECT id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash
-FROM credbound_audit_events
-WHERE ` + filter + ` (NOT ? OR occurred_at < ? OR (occurred_at = ? AND id < ?))
-ORDER BY occurred_at DESC, id DESC LIMIT ?`
-		args := append(filterArgs, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
+		query, args := auditEventsQuery(workspaceID, cursor, page.Limit+1)
 		rows, err := s.query(streamCtx, query, args...)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.AuditEvent]{}, mapError(err))
@@ -1723,7 +1718,6 @@ func (s *Store) mutate(ctx context.Context, commit credbound.Commit, fn func(*db
 }
 
 func (s *Store) mutateIf(ctx context.Context, commit credbound.Commit, fn func(*db.Queries) (bool, error)) error {
-	defer s.locks.write()()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return mapError(err)
@@ -1795,7 +1789,7 @@ func (s *Store) AuditChainHead(ctx context.Context) (int64, []byte, error) {
 }
 
 const chainedAuditQuery = `SELECT id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash
-FROM credbound_audit_events WHERE sequence IS NOT NULL AND sequence > ? ORDER BY sequence`
+FROM credbound.audit_events WHERE sequence IS NOT NULL AND sequence > $1 ORDER BY sequence`
 
 // ChainedAuditEvents streams every chained audit event in sequence order for
 // verification with credbound.VerifyAuditChain.

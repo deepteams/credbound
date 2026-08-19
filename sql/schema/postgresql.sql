@@ -60,6 +60,7 @@ CREATE TABLE credbound.consumed_ceremonies (id uuid PRIMARY KEY CHECK (substring
 CREATE INDEX users_page_idx ON credbound.users(created_at DESC, id DESC);
 CREATE INDEX workspaces_page_idx ON credbound.workspaces(created_at DESC, id DESC);
 CREATE INDEX memberships_user_idx ON credbound.memberships(user_id);
+CREATE INDEX memberships_page_idx ON credbound.memberships(workspace_id, created_at DESC, user_id DESC);
 CREATE INDEX pats_workspace_idx ON credbound.personal_access_tokens(workspace_id) WHERE workspace_id IS NOT NULL;
 CREATE INDEX scim_users_user_idx ON credbound.scim_users(user_id);
 CREATE INDEX workspace_invitations_accepted_user_idx ON credbound.workspace_invitations(accepted_user_id) WHERE accepted_user_id IS NOT NULL;

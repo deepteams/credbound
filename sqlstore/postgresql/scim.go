@@ -475,20 +475,36 @@ func scanSCIMGroup(row scanner) (credbound.SCIMGroup, error) {
 	return decodeSCIMGroup(id, configurationID, external.String, displayName, members, createdAt, updatedAt, deleted)
 }
 
-func scimUserListQuery(configurationID string, filter credbound.SCIMFilter, cursor cursor, limit int) (string, []any, error) {
+// scimUserListQuery assembles the SCIM user listing: the filter comes from the
+// protocol and is optional, as is the cursor, so both are numbered as they are
+// added rather than guarded in SQL.
+func scimUserListQuery(configurationID string, filter credbound.SCIMFilter, after cursor, limit int) (string, []any, error) {
 	query := `SELECT id, configuration_id, user_id, external_id, normalized_user_name, display_name, emails_json, profile_json, active, created_at, updated_at, deprovisioned_at
-FROM credbound_scim_users WHERE configuration_id = ? AND deprovisioned_at IS NULL`
+FROM credbound.scim_users WHERE configuration_id = $1::uuid AND deprovisioned_at IS NULL`
 	args := []any{configurationID}
+	add := func(clause string, value any) {
+		args = append(args, value)
+		query += fmt.Sprintf(clause, len(args))
+	}
 	switch filter.Attribute {
 	case "":
 	case "id":
-		query, args = query+scimIDFilter, append(args, filter.Value)
+		// The filter value reaches us from an IdP, so it may not be a UUID at
+		// all. Comparing it against the uuid column would fail the whole
+		// listing; a caller filtering on a malformed id gets an empty page,
+		// which is what "no such resource" means in SCIM.
+		if !validUUID(filter.Value) {
+			return query + " AND false", args, nil
+		}
+		add(" AND id = $%d::uuid", filter.Value)
 	case "externalId":
-		query, args = query+` AND external_id = ?`, append(args, filter.Value)
+		add(" AND external_id = $%d", filter.Value)
 	case "userName":
-		query, args = query+` AND normalized_user_name = ?`, append(args, strings.ToLower(strings.TrimSpace(filter.Value)))
+		add(" AND normalized_user_name = $%d", strings.ToLower(strings.TrimSpace(filter.Value)))
 	case "emails.value":
-		query, args = query+scimEmailFilter, append(args, strings.ToLower(strings.TrimSpace(filter.Value)))
+		// emails_json is jsonb, so the containment operator can use a GIN index
+		// on it, unlike an equality test over an unnested array.
+		add(` AND emails_json @> jsonb_build_array(jsonb_build_object('value', $%d::text))`, strings.ToLower(strings.TrimSpace(filter.Value)))
 	case "active":
 		value := false
 		if strings.EqualFold(filter.Value, "true") {
@@ -496,33 +512,48 @@ FROM credbound_scim_users WHERE configuration_id = ? AND deprovisioned_at IS NUL
 		} else if !strings.EqualFold(filter.Value, "false") {
 			return "", nil, fmt.Errorf("%w: invalid active filter", credbound.ErrInvalidInput)
 		}
-		query, args = query+` AND active = ?`, append(args, value)
+		add(" AND active = $%d", value)
 	default:
 		return "", nil, fmt.Errorf("%w: unsupported SCIM user filter", credbound.ErrInvalidInput)
 	}
-	query += ` AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT ?`
-	args = append(args, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), limit)
-	return query, args, nil
+	if after.ID != "" {
+		args = append(args, after.Time, after.ID)
+		query += fmt.Sprintf(" AND (created_at, id) < ($%d, $%d::uuid)", len(args)-1, len(args))
+	}
+	args = append(args, limit)
+	return query + fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d", len(args)), args, nil
 }
 
-func scimGroupListQuery(configurationID string, filter credbound.SCIMFilter, cursor cursor, limit int) (string, []any, error) {
+// scimGroupListQuery is scimUserListQuery for groups; see it for the reasoning.
+func scimGroupListQuery(configurationID string, filter credbound.SCIMFilter, after cursor, limit int) (string, []any, error) {
 	query := `SELECT id, configuration_id, external_id, display_name, member_ids_json, created_at, updated_at, deleted_at
-FROM credbound_scim_groups WHERE configuration_id = ? AND deleted_at IS NULL`
+FROM credbound.scim_groups WHERE configuration_id = $1::uuid AND deleted_at IS NULL`
 	args := []any{configurationID}
+	add := func(clause string, value any) {
+		args = append(args, value)
+		query += fmt.Sprintf(clause, len(args))
+	}
 	switch filter.Attribute {
 	case "":
 	case "id":
-		query, args = query+scimIDFilter, append(args, filter.Value)
+		// See scimUserListQuery: a malformed id is an empty page, not an error.
+		if !validUUID(filter.Value) {
+			return query + " AND false", args, nil
+		}
+		add(" AND id = $%d::uuid", filter.Value)
 	case "externalId":
-		query, args = query+` AND external_id = ?`, append(args, filter.Value)
+		add(" AND external_id = $%d", filter.Value)
 	case "displayName":
-		query, args = query+` AND display_name = ?`, append(args, filter.Value)
+		add(" AND display_name = $%d", filter.Value)
 	default:
 		return "", nil, fmt.Errorf("%w: unsupported SCIM group filter", credbound.ErrInvalidInput)
 	}
-	query += ` AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT ?`
-	args = append(args, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), limit)
-	return query, args, nil
+	if after.ID != "" {
+		args = append(args, after.Time, after.ID)
+		query += fmt.Sprintf(" AND (created_at, id) < ($%d, $%d::uuid)", len(args)-1, len(args))
+	}
+	args = append(args, limit)
+	return query + fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d", len(args)), args, nil
 }
 
 // SCIMConfigurations streams the workspace's provisioning domains, oldest

@@ -62,6 +62,10 @@ CREATE TABLE credbound.memberships (
 -- sole-admin and orphaned-workspace guards, and the workspace listing's
 -- EXISTS) have nothing to search on without this.
 CREATE INDEX memberships_user_idx ON credbound.memberships(user_id);
+-- The primary key orders by (workspace_id, user_id), which the listing's
+-- (created_at, user_id) paging cannot walk; without this it sorts the
+-- workspace's whole membership on every page.
+CREATE INDEX memberships_page_idx ON credbound.memberships(workspace_id, created_at DESC, user_id DESC);
 
 CREATE TABLE credbound.instance_administrators (
     user_id uuid PRIMARY KEY REFERENCES credbound.users(id) ON DELETE CASCADE,
