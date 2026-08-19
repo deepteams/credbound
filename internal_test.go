@@ -247,7 +247,7 @@ func TestAdminPermissionAndValueHelpers(t *testing.T) {
 	if normalizeRecoveryCode(" abcd- efgh ") != "ABCDEFGH" {
 		t.Fatal("recovery code normalization is incorrect")
 	}
-	if _, ok := parsePAT("cbp_000000000000_" + strings.Repeat("*", 43)); ok {
+	if _, ok := parsePAT(defaultPATPrefix, "cbp_000000000000_"+strings.Repeat("*", 43)); ok {
 		t.Fatal("invalid base64 PAT accepted")
 	}
 	nopObserver{}.Observe(context.Background(), Operation{})

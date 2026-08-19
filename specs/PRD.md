@@ -198,7 +198,9 @@ regardless of their age.
 
 ### PAT
 
-The raw token has the form `cbp_<prefix>_<secret>`. The prefix enables an indexed
+The raw token has the form `<marker>_<prefix>_<secret>`, where the marker is
+`Config.PATPrefix` (`cbp` by default) so that deployments issuing PATs can be
+told apart from a token's text alone. The prefix enables an indexed
 lookup; the secret is checked in constant time against an HMAC-SHA-256. Successful
 authentication updates `last_used_at` and honors expiration, revocation, and
 the optional workspace. The scopes chosen at creation are the ceiling of what

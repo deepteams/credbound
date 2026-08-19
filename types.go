@@ -439,10 +439,11 @@ type TOTPStatus struct {
 	UpdatedAt           time.Time
 }
 
-// PAT is the persisted metadata of a personal access token. The raw token
-// has the form cbp_<prefix>_<secret>; Prefix enables an indexed lookup and
-// only the HMAC Digest of the full token is stored. A PAT bound to a
-// WorkspaceID authenticates only within that workspace.
+// PAT is the persisted metadata of a personal access token. The raw token has
+// the form <marker>_<prefix>_<secret>, where the marker is Config.PATPrefix
+// ("cbp" by default); Prefix enables an indexed lookup and only the HMAC
+// Digest of the full token is stored. A PAT bound to a WorkspaceID
+// authenticates only within that workspace.
 type PAT struct {
 	ID          UUID
 	UserID      UUID

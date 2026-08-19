@@ -208,6 +208,48 @@ func TestPATLifecycleAndPagination(t *testing.T) {
 	}
 }
 
+// TestPATPrefixIsConfigurable pins Config.PATPrefix: a deployment issues PATs
+// under its own marker and authenticates them, while a token carrying anyone
+// else's marker — the "cbp" default included — is refused before it can reach
+// a store lookup. That is what lets several deployments be told apart from a
+// token's text alone.
+func TestPATPrefixIsConfigurable(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	manager, err := credbound.New(credbound.Config{
+		Store: store, Passwords: &fakePasswords{}, TOTP: fakeTOTP{}, Passkeys: &fakePasskeys{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		Clock: func() time.Time { return now }, Random: &counterReader{next: 0x42},
+		PATPrefix: "acmepat",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authn, _, err := manager.Bootstrap(ctx, credbound.BootstrapInput{
+		Email: "root@example.com", DisplayName: "Root", Password: "correct horse battery", WorkspaceName: "Main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued, err := manager.CreatePAT(ctx, aal2(authn.UserID, now), credbound.CreatePATInput{Name: "deploy", Scopes: []string{"read"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(issued.Token, "acmepat_") {
+		t.Fatalf("issued PAT = %q, want the configured marker", issued.Token)
+	}
+	if _, err := manager.AuthenticatePAT(ctx, issued.Token); err != nil {
+		t.Fatalf("configured-marker PAT = %v", err)
+	}
+	// Only the marker differs from a token this deployment would accept, and
+	// the digest covers it, so swapping it back to the default cannot pass.
+	foreign := "cbp" + strings.TrimPrefix(issued.Token, "acmepat")
+	if _, err := manager.AuthenticatePAT(ctx, foreign); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("default-marker PAT against a configured deployment = %v", err)
+	}
+}
+
 // TestPasskeyCeremoniesEncryptStoredCredential drives the full WebAuthn
 // registration and authentication ceremonies (AUTH-003) and proves the
 // stored credential never rests in plaintext.
@@ -433,6 +475,16 @@ func TestConfigurationValidation(t *testing.T) {
 	bad.PATPepper = []byte("short")
 	if _, err := credbound.New(bad); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("short pepper error = %v", err)
+	}
+	// A PAT marker is compared verbatim against the token's first segment, so
+	// the underscore the parser splits on and any spelling variant are refused
+	// rather than silently yielding a marker no token can ever carry.
+	for _, marker := range []string{"acme_pat", "CBP", "cbp!", strings.Repeat("a", 17), " cbp"} {
+		bad = valid
+		bad.PATPrefix = marker
+		if _, err := credbound.New(bad); !errors.Is(err, credbound.ErrInvalidInput) {
+			t.Fatalf("PAT prefix %q error = %v", marker, err)
+		}
 	}
 	bad = valid
 	bad.AdminPermissions = map[credbound.InstanceRole][]credbound.Permission{

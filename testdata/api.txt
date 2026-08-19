@@ -259,6 +259,7 @@ credbound field Config.MinPasswordLen int
 credbound field Config.OAuth *OAuthConfig
 credbound field Config.Observer Observer
 credbound field Config.PATPepper []byte
+credbound field Config.PATPrefix string
 credbound field Config.Passkeys PasskeyProvider
 credbound field Config.PasswordPolicy PasswordPolicy
 credbound field Config.PasswordResetTTL time.Duration

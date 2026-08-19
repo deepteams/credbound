@@ -45,6 +45,17 @@ breaking changes may land in any release and are called out explicitly.
   every first-party store); `AnonymizeUser` scrubs SCIM profiles and
   accepted-invitation addresses in the same transaction.
 
+- `Config.PATPrefix` sets the marker a PAT carries ahead of its indexed
+  prefix and secret, replacing the hardcoded `cbp`; zero keeps `cbp`, and
+  one to sixteen lowercase letters or digits are accepted (no underscore,
+  the separator the parser splits on). Several deployments issuing PATs can
+  now be told apart from a token's text alone — which is what a per-service
+  check or a secret-scanning rule needs. Pick it before the first PAT is
+  issued: the digest covers the whole token, marker included, and only the
+  digest is stored, so a later change leaves every outstanding PAT
+  unauthenticatable. SCIM credentials, sessions and OAuth tokens keep their
+  own markers.
+
 ### Changed
 
 - **Breaking: identifiers are `credbound.UUID`, not `string`.** Every identifier

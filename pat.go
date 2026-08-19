@@ -10,6 +10,26 @@ import (
 	"strings"
 )
 
+// defaultPATPrefix is the marker a PAT carries when Config.PATPrefix is unset.
+const defaultPATPrefix = "cbp"
+
+// validTokenMarker reports whether a value can serve as the leading marker of
+// a token. The parsers split on "_", so a marker may not contain one; case is
+// excluded because a marker is compared verbatim, and accepting several
+// spellings of one deployment's tokens is exactly what the token parsers
+// refuse.
+func validTokenMarker(marker string) bool {
+	if len(marker) == 0 || len(marker) > 16 {
+		return false
+	}
+	for _, char := range marker {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') {
+			return false
+		}
+	}
+	return true
+}
+
 // CreatePAT issues a personal access token with at least 256 bits of entropy
 // and returns the raw token exactly once; only its HMAC digest is persisted,
 // atomically with the audit event. It requires a fresh AAL2 step-up, and
@@ -50,7 +70,7 @@ func (m *Manager) CreatePAT(ctx context.Context, actor Authentication, input Cre
 		return IssuedPAT{}, err
 	}
 	prefix := hex.EncodeToString(prefixBytes)
-	raw := "cbp_" + prefix + "_" + base64.RawURLEncoding.EncodeToString(secret)
+	raw := m.patPrefix + "_" + prefix + "_" + base64.RawURLEncoding.EncodeToString(secret)
 	id, err := m.newID()
 	if err != nil {
 		return IssuedPAT{}, err
@@ -88,7 +108,8 @@ func (m *Manager) CreatePAT(ctx context.Context, actor Authentication, input Cre
 	return IssuedPAT{PAT: pat, Token: raw}, nil
 }
 
-// AuthenticatePAT validates a raw cbp_ token in constant time against its
+// AuthenticatePAT validates a raw PAT, whose marker is Config.PATPrefix, in
+// constant time against its
 // stored digest and returns a non-interactive AAL1 authentication carrying
 // the PAT's workspace binding and scopes; last_used_at is updated atomically
 // with the audit event. Malformed, unknown, expired and revoked tokens, as
@@ -97,7 +118,7 @@ func (m *Manager) CreatePAT(ctx context.Context, actor Authentication, input Cre
 func (m *Manager) AuthenticatePAT(ctx context.Context, raw string) (_ Authentication, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.pat.authenticate", started, err) }()
-	prefix, validShape := parsePAT(raw)
+	prefix, validShape := parsePAT(m.patPrefix, raw)
 	var pat PAT
 	if validShape {
 		pat, err = m.store.PATByPrefix(ctx, prefix)
@@ -218,9 +239,14 @@ func (m *Manager) PATs(ctx context.Context, actor Authentication, userID UUID, p
 	return m.store.PATs(ctx, userID, page)
 }
 
-func parsePAT(raw string) (string, bool) {
+// parsePAT validates the `<marker>_<12 hex>_<43 chars>` PAT shape against the
+// marker this deployment issues and returns the prefix the store indexes. The
+// marker is a parameter, like it is for the sibling parsers, because it is
+// configurable (Config.PATPrefix): a PAT minted by another deployment must not
+// even reach a lookup here.
+func parsePAT(marker, raw string) (string, bool) {
 	parts := strings.SplitN(raw, "_", 3)
-	if len(parts) != 3 || parts[0] != "cbp" || len(parts[1]) != 12 || len(parts[2]) != 43 {
+	if len(parts) != 3 || parts[0] != marker || len(parts[1]) != 12 || len(parts[2]) != 43 {
 		return "", false
 	}
 	if _, err := hex.DecodeString(parts[1]); err != nil {

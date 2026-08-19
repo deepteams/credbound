@@ -69,6 +69,20 @@ type Config struct {
 	// reads still accept, so outstanding recovery codes survive a pepper
 	// rotation; new codes always digest under RecoveryPepper.
 	RetiredRecoveryPeppers [][]byte
+	// PATPrefix is the marker a PAT carries, ahead of its indexed prefix and
+	// secret: PATPrefix_<12 hex>_<43 characters>. Zero keeps "cbp". Give each
+	// deployment its own value when several of them issue PATs, so a token can
+	// be attributed — and matched by a secret scanner — from its text alone.
+	// One to sixteen lowercase letters or digits, no underscore: that is the
+	// separator the parser splits on.
+	//
+	// Choose it once, before the first PAT is issued: the digest covers the
+	// whole token, marker included, and only the digest is stored, so a later
+	// change makes every outstanding PAT fail to authenticate with no raw
+	// token left to re-digest. Peppers rotate (RetiredPATPeppers); this does
+	// not. It leaves SCIM credentials, sessions and OAuth tokens untouched,
+	// which keep their own markers.
+	PATPrefix string
 	// StepUpMaxAge bounds how old an interactive AAL2 authentication may be
 	// to satisfy RequireStepUp. Zero keeps the default of 10 minutes.
 	StepUpMaxAge time.Duration
@@ -228,6 +242,7 @@ type Manager struct {
 	sealKey        []byte
 	digestKey      []byte
 	patPepper      []byte
+	patPrefix      string
 	recoveryPepper []byte
 	// read* rings list every key accepted when reading, active first, so a
 	// rotation with Retired* configured never invalidates existing data;
@@ -299,6 +314,12 @@ func New(cfg Config) (*Manager, error) {
 		if len(retired) < 32 {
 			return nil, fmt.Errorf("%w: every retired pepper must contain at least 32 bytes", ErrInvalidInput)
 		}
+	}
+	if cfg.PATPrefix == "" {
+		cfg.PATPrefix = defaultPATPrefix
+	}
+	if !validTokenMarker(cfg.PATPrefix) {
+		return nil, fmt.Errorf("%w: PAT prefix must be 1 to 16 lowercase letters or digits", ErrInvalidInput)
 	}
 	if cfg.StepUpMaxAge <= 0 {
 		cfg.StepUpMaxAge = 10 * time.Minute
@@ -485,6 +506,7 @@ func New(cfg Config) (*Manager, error) {
 		sealKey:               sealKey,
 		digestKey:             digestKey,
 		patPepper:             append([]byte(nil), cfg.PATPepper...),
+		patPrefix:             cfg.PATPrefix,
 		recoveryPepper:        append([]byte(nil), cfg.RecoveryPepper...),
 		readSealKeys:          readSealKeys,
 		readDigestKeys:        readDigestKeys,

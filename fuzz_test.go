@@ -55,16 +55,21 @@ func FuzzParseSecretToken(f *testing.F) {
 
 // FuzzParsePAT pins the PAT shape: an accepted token always yields the
 // 12-hex-character prefix the store indexes, so a lookup can never be driven
-// by an arbitrary string.
+// by an arbitrary string. The marker is fuzzed alongside the token because it
+// is configurable (Config.PATPrefix) — a deployment's own marker is the only
+// one its parser may accept, whatever it was set to.
 func FuzzParsePAT(f *testing.F) {
-	f.Add("cbp_0123456789ab_" + base64.RawURLEncoding.EncodeToString(make([]byte, 32)))
-	f.Add("cbp_0123456789ab_short")
-	f.Add("cbp__")
-	f.Add("cbs_0123456789ab_" + strings.Repeat("A", 43))
-	f.Add("cbp_0123456789AB_" + strings.Repeat("A", 43))
+	f.Add("cbp", "cbp_0123456789ab_"+base64.RawURLEncoding.EncodeToString(make([]byte, 32)))
+	f.Add("cbp", "cbp_0123456789ab_short")
+	f.Add("cbp", "cbp__")
+	f.Add("cbp", "cbs_0123456789ab_"+strings.Repeat("A", 43))
+	f.Add("cbp", "cbp_0123456789AB_"+strings.Repeat("A", 43))
+	f.Add("acmepat", "acmepat_0123456789ab_"+strings.Repeat("A", 43))
+	f.Add("", "_0123456789ab_"+strings.Repeat("A", 43))
+	f.Add("cb_p", "cb_p_0123456789ab_"+strings.Repeat("A", 43))
 
-	f.Fuzz(func(t *testing.T, raw string) {
-		prefix, ok := parsePAT(raw)
+	f.Fuzz(func(t *testing.T, marker, raw string) {
+		prefix, ok := parsePAT(marker, raw)
 		if !ok {
 			if prefix != "" {
 				t.Fatalf("rejected PAT returned the prefix %q", prefix)
@@ -77,8 +82,13 @@ func FuzzParsePAT(f *testing.F) {
 		if _, err := hex.DecodeString(prefix); err != nil {
 			t.Fatalf("accepted PAT prefix %q is not hexadecimal", prefix)
 		}
-		if !strings.HasPrefix(raw, "cbp_"+prefix+"_") {
-			t.Fatalf("accepted PAT %q does not have the cbp shape", raw)
+		if !strings.HasPrefix(raw, marker+"_"+prefix+"_") {
+			t.Fatalf("accepted PAT %q does not carry the marker %q", raw, marker)
+		}
+		// A marker New would reject can never be the one in force, so an
+		// accepted token always carries a marker a deployment could configure.
+		if validTokenMarker(marker) && strings.Contains(marker, "_") {
+			t.Fatalf("marker %q passes validation yet holds the separator", marker)
 		}
 	})
 }
