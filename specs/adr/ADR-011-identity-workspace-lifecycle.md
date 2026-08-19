@@ -73,15 +73,17 @@ requires `workspace.users.read`; `admin` receives this built-in permission.
 
 ### Recovery and privacy boundary
 
-Password reset and account recovery remain outside the initial protocol
-surface. They require a host-owned delivery and abuse-prevention policy. A
-future implementation must use single-use, expiring HMAC credentials, perform
-enumeration-resistant initiation, revoke existing authenticators according to
-an explicit policy, and audit completion atomically.
+Password reset and account recovery were outside the initial protocol
+surface because they require a host-owned delivery and abuse-prevention
+policy. They have since shipped under ADR-012 (`BeginPasswordReset`,
+`CompletePasswordReset`), which honors the constraints recorded here:
+single-use, expiring HMAC credentials, enumeration-resistant initiation, an
+explicit revocation policy, and atomically audited completion.
 
 Physical deletion is not exposed. A host handles a privacy request by disabling
-the user, exporting or deleting its own business data, and applying a separately
-reviewed anonymization policy. Credbound audit records remain append-only and
+the user, exporting or deleting its own business data, and running the
+anonymization that has since shipped (`Manager.AnonymizeUser`, alongside the
+`ExportUserData` DSAR read). Credbound audit records remain append-only and
 must not contain mutable profile data or secrets.
 
 ### Key and pepper rotation
@@ -104,7 +106,7 @@ retiring symmetric secret.
 
 - Hosts no longer write identity tables directly for ordinary lifecycle work.
 - Security-sensitive cascades and the last-administrator invariant are enforced
-inside a store transaction for both SQLite and PostgreSQL.
+inside a store transaction.
 - PostgreSQL locks the affected root-administrator set and workspace rows while
   evaluating these invariants, so concurrent demotions or disablements cannot
   both pass a stale count.

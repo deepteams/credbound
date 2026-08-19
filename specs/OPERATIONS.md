@@ -19,20 +19,34 @@ Never reuse a value across purposes, persist it in the application database,
 pass it on a command line, or emit it to logs and telemetry. Startup must fail
 when a required value is absent or malformed.
 
+Internally, the manager derives two HKDF-SHA256 subkeys from `SecretKey` — one
+for AEAD sealing, one for HMAC digests — so the two primitives never share key
+material. Long-lived sealed material written before this separation (TOTP
+secrets and passkey credentials) keeps decrypting through a raw-key fallback
+until v1 ships a re-seal migration; new data always seals under the active
+derived key. Token digests written under the raw key are no longer accepted:
+every one guarded a single-use credential whose TTL expired long before that
+window closed. No migration is required today, and rotation guidance for
+`SecretKey` is unchanged.
+
 ## Rotation
 
-`SecretKey`, PAT, recovery, and OAuth peppers are single active values in v0;
-there is no transparent symmetric key ring. Plan their rotation as a credential
-invalidation or explicit data-migration event:
+`SecretKey`, `PATPepper`, and `RecoveryPepper` rotate through the read ring:
+deploy the new active value with the previous one listed in
+`RetiredSecretKeys`, `RetiredPATPeppers`, or `RetiredRecoveryPeppers`. Reads
+(sealed TOTP secrets and passkey credentials, session and email-proof
+digests, PATs, SCIM credentials, recovery codes) accept the retired keys;
+every write uses the new active key. Remove a retired key once nothing
+issued under it remains — re-enroll or reissue long-lived material (TOTP,
+passkeys, PATs, recovery codes) to drain it, or keep the retired key for
+their lifetime. Monitor authentication and audit failures after each
+deployment, and destroy retired material only after rollback is no longer
+needed.
 
-1. announce the affected sign-in or API interruption;
-2. revoke affected PATs, OAuth grants/tokens, and recovery codes as applicable;
-3. migrate encrypted TOTP material with a separately reviewed tool or require
-   TOTP re-enrollment before replacing `SecretKey`;
-4. wait at least the configured ceremony lifetime before removing the old key
-   if only sealed continuations are affected;
-5. deploy the new secret and monitor authentication and audit failures;
-6. destroy retired symmetric material only after rollback is no longer needed.
+`OAuthConfig.Pepper` remains a single active value: pairwise OIDC subjects
+derive from it, so rotating it changes every subject identifier clients see.
+Its rotation stays an explicit revocation event (revoke grants and tokens,
+accept re-consent) until a dedicated subject key ships.
 
 OIDC signing rotation is different. Construct `oidcadapter.NewES256KeyRing`
 with the new active private key and the old public key as a retiring
@@ -47,7 +61,7 @@ with the host service's own Goose migrations without version collisions. On
 PostgreSQL every Credbound object lives in the dedicated `credbound` schema,
 which the first migration creates; the host keeps its own tables outside that
 schema and no `search_path` configuration is required. Do not edit a migration
-that has shipped. PostgreSQL and SQLite must enable their documented
+that has shipped. PostgreSQL must enable its documented
 foreign-key behavior. Back up the database and secret-manager
 references together; a database backup without its encryption key cannot
 restore TOTP authentication.
@@ -56,6 +70,17 @@ Test restoration on an isolated environment. Audit tables are append-only:
 recovery tooling must not rewrite or delete audit rows. Transaction-hook writes
 must use the provided bounded transaction capability so application outbox,
 billing, or credit changes commit atomically with the Credbound mutation.
+
+`VerifyAuditChain` detects any rewrite or reordering of retained events, but a
+writer with full database access who deletes the newest events and rewinds the
+chain head to a consistent earlier state is indistinguishable from a shorter
+history. For guarantees against tail truncation, periodically anchor the chain
+head hash and sequence number outside the database (an object-lock bucket, a
+transparency log, or a signed release note) and compare during audits. The
+anchored head doubles as the `AuditChainCheckpoint` for
+`VerifyAuditChainFrom`, which verifies only the events appended since, so
+routine verification stays cheap as the log grows; run the full
+`VerifyAuditChain` when the anchor itself is in question.
 
 ## OAuth, CIMD, and DCR
 
@@ -81,8 +106,11 @@ billing, or credit changes commit atomically with the Credbound mutation.
 - Compromised workspace: disable the workspace, then review memberships, SCIM
   credentials, OAuth grants, hooks, and application sessions.
 - Compromised PAT or OAuth grant: revoke the individual PAT, token, or grant.
-- Compromised OAuth client: disable the client and rotate any client key or
-  secret before re-enabling it.
+- Compromised OAuth client: disable the client, rotate its credentials with
+  `RotateOAuthClientSecret` (client_secret_basic) or `ReplaceOAuthClientJWKS`
+  (private_key_jwt with an inline JWKS), then re-enable it; the `client_id`
+  is preserved. A client publishing a `jwks_uri` rotates by republishing its
+  own document, and a CIMD client through its metadata.
 - Compromised issuer signing key: activate a new key immediately. Retain the old
   public key only when doing so is safe; otherwise remove it and accept that
   outstanding ID Tokens will fail validation.
@@ -91,15 +119,22 @@ billing, or credit changes commit atomically with the Credbound mutation.
 
 ## Recovery and privacy
 
-Password reset and destructive account deletion are not generic v0 endpoints.
-The host must design enumeration-resistant delivery, abuse controls, identity
-proofing, session revocation, and audit policy before adding recovery.
+Password reset ships as enumeration-resistant primitives — BeginPasswordReset
+and CompletePasswordReset, the latter atomically revoking the account's PATs
+and OAuth grants and clearing its lockout — but the host still owns token
+delivery, abuse controls, and any identity proofing around them. Destructive
+account deletion is not a v0 endpoint: the host designs it, starting from the
+privacy procedure below.
 
-For a privacy request, disable the user first, export or erase application-owned
-business data according to the host retention policy, and review any proposed
-identity anonymization separately. Credbound audit facts remain append-only and
-must contain identifiers and outcomes rather than secrets or mutable profile
-snapshots.
+For a data-subject request, ExportUserData assembles everything Credbound holds
+about the user (profile, emails, memberships, SSO identities, passkey and PAT
+metadata, sessions) for the access/portability side, and AnonymizeUser serves
+erasure: it scrubs the mutable personal data and revokes every credential in one
+transaction. Credbound audit facts remain append-only — AnonymizeUser preserves
+the hash chain, which keeps a pseudonymous user id and the request IP/User-Agent
+under the security-log retention basis rather than deleting them. The host still
+exports or erases its own application-owned business data per its retention
+policy. Neither call touches host-managed records that reference the user.
 
 ## Observability
 

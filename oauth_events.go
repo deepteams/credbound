@@ -5,13 +5,13 @@ import (
 	"slices"
 )
 
-func (m *Manager) newOAuthChange(name EventName, operation string, audit AuditEvent, client OAuthClient, grantID, tokenID, resourceID, workspaceID string, scopes []string) (OAuthChange, Commit, error) {
+func (m *Manager) newOAuthChange(name EventName, operation string, audit AuditEvent, client OAuthClient, grantID, tokenID, resourceID, workspaceID UUID, scopes []string) (OAuthChange, Commit, error) {
 	meta, err := m.newEventMeta(name, operation, audit.ActorID, workspaceID, audit)
 	if err != nil {
 		return OAuthChange{}, Commit{}, err
 	}
 	change := OAuthChange{
-		EventMeta: meta, IssuerID: client.IssuerID, ClientID: client.ID, ClientSource: client.Source,
+		EventMeta: meta, IssuerID: client.IssuerID, ClientRecordID: client.ID, ClientSource: client.Source,
 		GrantID: grantID, TokenID: tokenID, ResourceID: resourceID, Scopes: slices.Clone(scopes),
 	}
 	commit := m.transactionalCommit(audit, "oauth.change", func(ctx context.Context, tx Tx, hook TransactionHook) error {

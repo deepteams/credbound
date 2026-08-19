@@ -19,20 +19,22 @@ import (
 	"github.com/deepteams/credbound"
 )
 
+// TestJWTAssertionVerifierES256AndReplay pins OAUTH-011: a well-formed ES256
+// client assertion verifies once, and presenting the same jti again is
+// refused by the replay store.
 func TestJWTAssertionVerifierES256AndReplay(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinate := func(value []byte) string {
-		padded := make([]byte, 32)
-		copy(padded[32-len(value):], value)
-		return base64.RawURLEncoding.EncodeToString(padded)
+	raw, err := key.PublicKey.Bytes()
+	if err != nil {
+		t.Fatal(err)
 	}
 	jwk, _ := json.Marshal(map[string]any{"keys": []map[string]string{{
 		"kty": "EC", "kid": "client-key", "use": "sig", "alg": "ES256", "crv": "P-256",
-		"x": coordinate(key.X.Bytes()), "y": coordinate(key.Y.Bytes()),
+		"x": base64.RawURLEncoding.EncodeToString(raw[1:33]), "y": base64.RawURLEncoding.EncodeToString(raw[33:65]),
 	}}})
 	verifier, err := NewJWTAssertionVerifier(VerifierConfig{
 		ReplayStore: NewMemoryReplayStore(func() time.Time { return now }), Clock: func() time.Time { return now },
@@ -93,7 +95,7 @@ func TestJWTAssertionVerifierRS256ValidationAndFailures(t *testing.T) {
 		}
 	}
 	badClient := client
-	badClient.JWKS = json.RawMessage(`{"keys":[{"kty":"RSA","kid":"rsa-key","n":"bad","e":"AQAB"}]}`)
+	badClient.JWKS = json.RawMessage(`{"keys":[{"kty":"RSA","kid":"rsa-key","n":credbound.MustParseUUID("00000000-0000-4000-8000-000000000000"),"e":"AQAB"}]}`)
 	if err := verifier.Verify(t.Context(), badClient, "https://auth.example.com/token", signRS256(t, key, map[string]any{
 		"iss": "client", "sub": "client", "aud": "https://auth.example.com/token", "exp": now.Add(time.Minute).Unix(), "iat": now.Unix(), "jti": "bad-key",
 	}), now); !errors.Is(err, credbound.ErrInvalidCredentials) {
@@ -101,6 +103,9 @@ func TestJWTAssertionVerifierRS256ValidationAndFailures(t *testing.T) {
 	}
 }
 
+// TestJWTAssertionVerifierFetchPolicy pins the public-address-pinned JWKS
+// loading of OAUTH-011: HTTP URLs and hosts resolving to private, loopback,
+// or otherwise non-public addresses never serve client keys.
 func TestJWTAssertionVerifierFetchPolicy(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	for _, config := range []VerifierConfig{
@@ -131,13 +136,20 @@ func TestJWTAssertionVerifierFetchPolicy(t *testing.T) {
 	if err := verifier.Verify(t.Context(), client, "audience", assertion, now); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("private JWKS address = %v", err)
 	}
-	for _, raw := range []string{"", "0.0.0.0", "127.0.0.1", "10.0.0.1", "169.254.1.1", "224.0.0.1", "::1"} {
+	for _, raw := range []string{
+		"", "0.0.0.0", "127.0.0.1", "10.0.0.1", "169.254.1.1", "224.0.0.1", "::1",
+		// Ranges net.IP.IsPrivate does not cover but SSRF must still block.
+		"100.64.0.1", "100.127.255.255", "192.0.0.1", "192.0.2.5", "198.18.0.1",
+		"198.51.100.7", "203.0.113.9", "240.0.0.1", "255.255.255.255", "2001:db8::1", "fe80::1",
+	} {
 		if publicIP(net.ParseIP(raw)) {
 			t.Fatalf("non-public address accepted: %q", raw)
 		}
 	}
-	if !publicIP(net.ParseIP("8.8.8.8")) {
-		t.Fatal("public address rejected")
+	for _, raw := range []string{"8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"} {
+		if !publicIP(net.ParseIP(raw)) {
+			t.Fatalf("public address rejected: %q", raw)
+		}
 	}
 }
 
@@ -181,10 +193,14 @@ func TestJWTAssertionVerifierParsingKeyAndJWKSFailures(t *testing.T) {
 			}
 		})
 	}
+	one := make([]byte, 32)
+	one[31] = 1
 	keys := []jwk{
 		{KeyType: "EC", Curve: "P-384"},
 		{KeyType: "EC", Curve: "P-256", X: "%%%", Y: "%%%"},
 		{KeyType: "EC", Curve: "P-256", X: base64.RawURLEncoding.EncodeToString(make([]byte, 31)), Y: base64.RawURLEncoding.EncodeToString(make([]byte, 32))},
+		// (1, 1) is not on P-256: the parse must reject an off-curve point.
+		{KeyType: "EC", Curve: "P-256", X: base64.RawURLEncoding.EncodeToString(one), Y: base64.RawURLEncoding.EncodeToString(one)},
 	}
 	for _, key := range keys {
 		if _, err := ecKey(key); !errors.Is(err, credbound.ErrInvalidCredentials) {

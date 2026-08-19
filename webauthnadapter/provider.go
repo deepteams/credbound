@@ -1,3 +1,20 @@
+// Package webauthnadapter implements the credbound.PasskeyProvider port on
+// top of github.com/go-webauthn/webauthn. Every ceremony requires user
+// verification, so passkey authentication yields AAL2 directly, and user
+// handles are HMAC-derived from the account ID so authenticators never
+// learn stable Credbound identifiers.
+//
+// Wire it into credbound.Config.Passkeys:
+//
+//	passkeys, err := webauthnadapter.New(webauthnadapter.Config{
+//		RPID:          "example.com",
+//		RPDisplayName: "Example",
+//		RPOrigins:     []string{"https://app.example.com"},
+//		UserHandleKey: key, // at least 32 secret bytes
+//	})
+//
+// Credbound seals the ceremony session into its continuation; the host only
+// shuttles the JSON options and browser responses.
 package webauthnadapter
 
 import (
@@ -14,14 +31,32 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 )
 
+// Config identifies the WebAuthn relying party and the key material used to
+// derive user handles.
 type Config struct {
-	RPID           string
-	RPDisplayName  string
-	RPOrigins      []string
-	UserHandleKey  []byte
+	// RPID is the relying-party identifier, normally the registrable
+	// domain (e.g. "example.com"). Changing it invalidates every
+	// registered passkey.
+	RPID string
+	// RPDisplayName is the human-readable relying-party name shown by
+	// authenticators during ceremonies.
+	RPDisplayName string
+	// RPOrigins lists the exact web origins allowed to complete
+	// ceremonies (e.g. "https://app.example.com"). Responses from any
+	// other origin are rejected.
+	RPOrigins []string
+	// UserHandleKey is a secret of at least 32 bytes used to HMAC user IDs
+	// into WebAuthn user handles. Keep it stable — rotating it orphans
+	// discoverable credentials — and never reuse another Credbound key.
+	UserHandleKey []byte
+	// MaxCredentials caps how many stored passkeys one user may present in
+	// a ceremony, 1 through 100. Zero defaults to 20.
 	MaxCredentials int
 }
 
+// Provider runs WebAuthn registration and authentication ceremonies with
+// mandatory user verification. It is safe for concurrent use and implements
+// credbound.PasskeyProvider.
 type Provider struct {
 	webAuthn       engine
 	userHandleKey  []byte
@@ -35,8 +70,13 @@ type engine interface {
 	CreateCredential(webauthn.User, webauthn.SessionData, *protocol.ParsedCredentialCreationData) (*webauthn.Credential, error)
 	BeginLogin(webauthn.User, ...webauthn.LoginOption) (*protocol.CredentialAssertion, *webauthn.SessionData, error)
 	ValidateLogin(webauthn.User, webauthn.SessionData, *protocol.ParsedCredentialAssertionData) (*webauthn.Credential, error)
+	BeginDiscoverableLogin(...webauthn.LoginOption) (*protocol.CredentialAssertion, *webauthn.SessionData, error)
+	ValidateDiscoverableLogin(webauthn.DiscoverableUserHandler, webauthn.SessionData, *protocol.ParsedCredentialAssertionData) (*webauthn.Credential, error)
 }
 
+// New validates config and returns a Provider. A user handle key shorter
+// than 32 bytes, an out-of-range credential cap or an invalid relying-party
+// configuration is rejected.
 func New(config Config) (*Provider, error) {
 	if len(config.UserHandleKey) < 32 {
 		return nil, errors.New("webauthn: user handle key must contain at least 32 bytes")
@@ -64,6 +104,9 @@ func New(config Config) (*Provider, error) {
 	}, nil
 }
 
+// BeginRegistration starts a passkey registration ceremony and returns the
+// browser creation options plus the opaque session Credbound seals into the
+// continuation.
 func (p *Provider) BeginRegistration(ctx context.Context, input credbound.PasskeyUser) (json.RawMessage, []byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
@@ -85,6 +128,9 @@ func (p *Provider) BeginRegistration(ctx context.Context, input credbound.Passke
 	return marshalCeremony(creation, session)
 }
 
+// FinishRegistration validates the browser's attestation response against
+// the sealed session and returns the new credential ID and its JSON
+// encoding for storage.
 func (p *Provider) FinishRegistration(ctx context.Context, input credbound.PasskeyUser, rawSession, response []byte) ([]byte, []byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
@@ -112,6 +158,9 @@ func (p *Provider) FinishRegistration(ctx context.Context, input credbound.Passk
 	return slices.Clone(credential.ID), encoded, nil
 }
 
+// BeginAuthentication starts an assertion ceremony over the user's stored
+// passkeys and returns the browser request options plus the opaque session.
+// It fails when the user has no passkey.
 func (p *Provider) BeginAuthentication(ctx context.Context, input credbound.PasskeyUser) (json.RawMessage, []byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
@@ -121,7 +170,7 @@ func (p *Provider) BeginAuthentication(ctx context.Context, input credbound.Pass
 		return nil, nil, err
 	}
 	if len(user.credentials) == 0 {
-		return nil, nil, errors.New("webauthn: user has no passkey")
+		return nil, nil, credbound.ErrNoPasskey
 	}
 	assertion, session, err := p.webAuthn.BeginLogin(user, webauthn.WithUserVerification(protocol.VerificationRequired))
 	if err != nil {
@@ -130,6 +179,34 @@ func (p *Provider) BeginAuthentication(ctx context.Context, input credbound.Pass
 	return marshalCeremony(assertion, session)
 }
 
+// BeginDecoyAuthentication fabricates a stable synthetic credential from the
+// seed and runs the same assertion ceremony, so a caller cannot tell whether
+// the address actually has a passkey. The seed is the manager's per-address
+// digest; equal seeds yield an equal challenge shape across probes.
+func (p *Provider) BeginDecoyAuthentication(ctx context.Context, seed []byte) (json.RawMessage, []byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	credentialMAC := hmac.New(sha256.New, p.userHandleKey)
+	_, _ = credentialMAC.Write([]byte("credbound-passkey-decoy-credential"))
+	_, _ = credentialMAC.Write(seed)
+	handleMAC := hmac.New(sha256.New, p.userHandleKey)
+	_, _ = handleMAC.Write([]byte("credbound-passkey-decoy-handle"))
+	_, _ = handleMAC.Write(seed)
+	decoy := user{
+		id:          handleMAC.Sum(nil),
+		credentials: []webauthn.Credential{{ID: credentialMAC.Sum(nil)}},
+	}
+	assertion, session, err := p.webAuthn.BeginLogin(decoy, webauthn.WithUserVerification(protocol.VerificationRequired))
+	if err != nil {
+		return nil, nil, err
+	}
+	return marshalCeremony(assertion, session)
+}
+
+// FinishAuthentication validates the browser's assertion response against
+// the sealed session and returns the matched credential ID and its updated
+// JSON encoding (sign counter, flags) for persistence via TouchPasskey.
 func (p *Provider) FinishAuthentication(ctx context.Context, input credbound.PasskeyUser, rawSession, response []byte) ([]byte, []byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
@@ -149,6 +226,76 @@ func (p *Provider) FinishAuthentication(ctx context.Context, input credbound.Pas
 	credential, err := p.webAuthn.ValidateLogin(user, session, parsed)
 	if err != nil {
 		return nil, nil, err
+	}
+	// ValidateLogin never errors on a regressed signature counter: it sets
+	// CloneWarning and leaves the stored counter untouched. Reject the
+	// assertion so a cloned authenticator (a replayed or exfiltrated
+	// credential presenting a stale counter) cannot authenticate. The manager
+	// audits this as a distinct failure.
+	if credential.Authenticator.CloneWarning {
+		return nil, nil, credbound.ErrPasskeyCloneDetected
+	}
+	encoded, err := json.Marshal(credential)
+	if err != nil {
+		return nil, nil, err
+	}
+	return slices.Clone(credential.ID), encoded, nil
+}
+
+// BeginDiscoverableAuthentication starts a usernameless assertion ceremony:
+// the request options carry an empty allowCredentials list and the
+// authenticator offers its resident (discoverable) credentials, so no
+// per-account challenge exists to enumerate.
+func (p *Provider) BeginDiscoverableAuthentication(ctx context.Context) (json.RawMessage, []byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	assertion, session, err := p.webAuthn.BeginDiscoverableLogin(webauthn.WithUserVerification(protocol.VerificationRequired))
+	if err != nil {
+		return nil, nil, err
+	}
+	return marshalCeremony(assertion, session)
+}
+
+// FinishDiscoverableAuthentication validates the browser's assertion
+// response, resolving the account through the lookup by the asserted
+// credential ID and verifying the asserted user handle is the HMAC of that
+// account's ID, so a tampered handle can never bind the assertion to a
+// different user.
+func (p *Provider) FinishDiscoverableAuthentication(ctx context.Context, rawSession, response []byte, lookup credbound.PasskeyUserLookup) ([]byte, []byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	session, err := unmarshalSession(rawSession)
+	if err != nil {
+		return nil, nil, err
+	}
+	parsed, err := p.parseAssertion(response)
+	if err != nil {
+		return nil, nil, err
+	}
+	handler := func(rawID, userHandle []byte) (webauthn.User, error) {
+		input, err := lookup(ctx, rawID)
+		if err != nil {
+			return nil, err
+		}
+		resolved, err := p.convertUser(input)
+		if err != nil {
+			return nil, err
+		}
+		if !hmac.Equal(resolved.id, userHandle) {
+			return nil, errors.New("webauthn: user handle does not match the credential owner")
+		}
+		return resolved, nil
+	}
+	credential, err := p.webAuthn.ValidateDiscoverableLogin(handler, session, parsed)
+	if err != nil {
+		return nil, nil, err
+	}
+	// See FinishAuthentication: a regressed signature counter marks a
+	// possibly cloned authenticator and must not authenticate.
+	if credential.Authenticator.CloneWarning {
+		return nil, nil, credbound.ErrPasskeyCloneDetected
 	}
 	encoded, err := json.Marshal(credential)
 	if err != nil {
@@ -171,7 +318,10 @@ func (u user) WebAuthnCredentials() []webauthn.Credential { return slices.Clone(
 
 func (p *Provider) convertUser(input credbound.PasskeyUser) (user, error) {
 	handle := hmac.New(sha256.New, p.userHandleKey)
-	_, _ = handle.Write([]byte(input.User.ID))
+	// The derived handle is stored by the authenticator itself, so it must keep
+	// deriving from the identifier's canonical text: hashing the raw bytes
+	// instead would orphan every passkey already registered.
+	_, _ = handle.Write([]byte(input.User.ID.String()))
 	result := user{id: handle.Sum(nil), name: input.User.Email, displayName: input.User.DisplayName}
 	for passkey, err := range input.Credentials {
 		if err != nil {
@@ -212,4 +362,7 @@ func unmarshalSession(raw []byte) (webauthn.SessionData, error) {
 	return session, nil
 }
 
-var _ credbound.PasskeyProvider = (*Provider)(nil)
+var (
+	_ credbound.PasskeyProvider             = (*Provider)(nil)
+	_ credbound.DiscoverablePasskeyProvider = (*Provider)(nil)
+)

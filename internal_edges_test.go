@@ -31,8 +31,10 @@ func (r *edgeReader) Read(target []byte) (int, error) {
 
 type valueSSOProvider struct{}
 
-func (valueSSOProvider) ConfigurationID() string { return "0198b463-0000-7000-8000-000000000001" }
-func (valueSSOProvider) Kind() SSOProviderKind   { return SSOProviderOIDC }
+func (valueSSOProvider) ConfigurationID() UUID {
+	return MustParseUUID("0198b463-0000-7000-8000-000000000001")
+}
+func (valueSSOProvider) Kind() SSOProviderKind { return SSOProviderOIDC }
 func (valueSSOProvider) Begin(context.Context, SSORequest) (SSOProviderChallenge, error) {
 	return SSOProviderChallenge{}, nil
 }
@@ -50,17 +52,26 @@ func TestInternalSecurityHelperEdges(t *testing.T) {
 	}
 	nopObserver{}.Observe(t.Context(), Operation{})
 
+	// A malformed identifier cannot reach validUUIDv7 any more — it is sixteen
+	// bytes or it is not a UUID — so parsing is what rejects these.
+	for _, malformed := range []string{"", "0198b463-0000-7000-8000-00000000000g", "0198b463000070008000000000000001x"} {
+		if _, err := ParseUUID(malformed); err == nil {
+			t.Fatalf("malformed identifier accepted: %q", malformed)
+		}
+	}
+	// What validUUIDv7 still judges is the version and the variant.
 	for _, invalid := range []string{
-		"", "0198b463-0000-6000-8000-000000000001", "0198b463-0000-7000-7000-000000000001",
-		"0198b463-0000-7000-8000-00000000000g",
+		"00000000-0000-0000-0000-000000000000",
+		"0198b463-0000-6000-8000-000000000001",
+		"0198b463-0000-7000-7000-000000000001",
 	} {
-		if validUUIDv7(invalid) {
+		if validUUIDv7(MustParseUUID(invalid)) {
 			t.Fatalf("invalid UUIDv7 accepted: %q", invalid)
 		}
 	}
 
 	boom := errors.New("random unavailable")
-	manager := &Manager{secretKey: []byte("short"), random: &edgeReader{err: boom}, clock: func() time.Time { return time.Unix(1, 0) }}
+	manager := &Manager{secretKey: []byte("short"), sealKey: []byte("short"), random: &edgeReader{err: boom}, clock: func() time.Time { return time.Unix(1, 0) }}
 	if _, err := manager.seal([]byte("payload")); err == nil {
 		t.Fatal("invalid AES key accepted for sealing")
 	}
@@ -68,6 +79,7 @@ func TestInternalSecurityHelperEdges(t *testing.T) {
 		t.Fatal("invalid AES key accepted for opening")
 	}
 	manager.secretKey = make([]byte, 32)
+	manager.sealKey = make([]byte, 32)
 	if _, err := manager.encodeContinuation(ceremonyContinuation{}); !errors.Is(err, boom) {
 		t.Fatalf("continuation random failure = %v", err)
 	}
@@ -138,5 +150,30 @@ func TestRandomReaderShortRead(t *testing.T) {
 	}
 	if _, err := io.ReadAll(strings.NewReader("ok")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// ParseUUID takes the canonical form only. The vendored parser also accepts the
+// compact, braced and urn:uuid: spellings; letting those through would give one
+// record several spellings that String never renders back.
+func TestParseUUIDRejectsNonCanonicalSpellings(t *testing.T) {
+	const canonical = "0198b463-0000-7000-8000-000000000001"
+	if id, err := ParseUUID(canonical); err != nil || id.String() != canonical {
+		t.Fatalf("canonical form = %v, %v", id, err)
+	}
+	for _, spelling := range []string{
+		"0198b46300007000800000000000001",               // compact, one short
+		"0198b4630000700080000000000000001",             // compact
+		"{0198b463-0000-7000-8000-000000000001}",        // braced
+		"urn:uuid:0198b463-0000-7000-8000-000000000001", // URN
+		" 0198b463-0000-7000-8000-000000000001",         // padded
+	} {
+		if _, err := ParseUUID(spelling); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("non-canonical spelling accepted: %q (%v)", spelling, err)
+		}
+	}
+	// Case is still accepted on input, because String normalizes it back.
+	if id, err := ParseUUID("0198B463-0000-7000-8000-00000000000A"); err != nil || id.String() != "0198b463-0000-7000-8000-00000000000a" {
+		t.Fatalf("upper-case form = %v, %v", id, err)
 	}
 }

@@ -48,6 +48,9 @@ func (handlerPasskeys) FinishRegistration(context.Context, credbound.PasskeyUser
 func (handlerPasskeys) BeginAuthentication(context.Context, credbound.PasskeyUser) (json.RawMessage, []byte, error) {
 	return nil, nil, errors.New("unused")
 }
+func (handlerPasskeys) BeginDecoyAuthentication(context.Context, []byte) (json.RawMessage, []byte, error) {
+	return nil, nil, errors.New("unused")
+}
 func (handlerPasskeys) FinishAuthentication(context.Context, credbound.PasskeyUser, []byte, []byte) ([]byte, []byte, error) {
 	return nil, nil, errors.New("unused")
 }
@@ -76,7 +79,7 @@ type handlerFixture struct {
 	manager   *credbound.Manager
 	handler   *Handler
 	actor     credbound.Authentication
-	issuerID  string
+	issuerID  credbound.UUID
 	clientID  string
 	consent   credbound.OAuthConsent
 	verifier  string
@@ -150,6 +153,10 @@ func (f *handlerFixture) request(method, target, body, contentType string) *http
 	return response
 }
 
+// TestHandlerDiscoveryAuthorizationTokensAndProtection pins OAUTH-009: the
+// handler serves RFC 8414 and RFC 9728 metadata plus the token and revocation
+// endpoints as a plain http.Handler — no server is started, and consent is
+// delegated to the host's PresentConsent callback rather than an imposed UI.
 func TestHandlerDiscoveryAuthorizationTokensAndProtection(t *testing.T) {
 	if _, err := New(nil, HandlerConfig{}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid handler = %v", err)
@@ -262,7 +269,7 @@ func TestHandlerProtocolErrorsAndDCR(t *testing.T) {
 	if response := f.request(http.MethodGet, invalidRedirect, "", ""); response.Code != http.StatusBadRequest || response.Header().Get("Location") != "" {
 		t.Fatalf("invalid redirect = %d %#v", response.Code, response.Header())
 	}
-	if response := f.request(http.MethodPost, "/tenant/token", "grant_type=client_credentials", "application/x-www-form-urlencoded"); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "unsupported_grant_type") {
+	if response := f.request(http.MethodPost, "/tenant/token", "grant_type=password", "application/x-www-form-urlencoded"); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "unsupported_grant_type") {
 		t.Fatalf("unsupported grant = %d %s", response.Code, response.Body.String())
 	}
 	if response := f.request(http.MethodPost, "/tenant/token", strings.Repeat("x", maxProtocolBody+1), "application/x-www-form-urlencoded"); response.Code != http.StatusBadRequest {
@@ -292,12 +299,37 @@ func TestHandlerProtocolErrorsAndDCR(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("client_id=form&client_secret=form-secret"))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.SetBasicAuth("basic", "basic-secret")
-	if id, secret := clientCredentials(request, url.Values{}); id != "basic" || secret != "basic-secret" {
-		t.Fatalf("basic credentials = %q, %q", id, secret)
+	if id, secret, inBody, err := clientCredentials(request, url.Values{}); err != nil || id != "basic" || secret != "basic-secret" || inBody {
+		t.Fatalf("basic credentials = %q, %q, %v, %v", id, secret, inBody, err)
 	}
-	contextRequest := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(WithAuthentication(context.Background(), credbound.OAuthAuthentication{UserID: "user"}))
-	if value, ok := AuthenticationFromContext(contextRequest); !ok || value.UserID != "user" {
+	// Presenting both transports at once is two authentication methods.
+	if _, _, _, err := clientCredentials(request, url.Values{"client_secret": {"form-secret"}}); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("dual-method credentials error = %v", err)
+	}
+	formOnly := httptest.NewRequest(http.MethodPost, "/", nil)
+	if id, secret, inBody, err := clientCredentials(formOnly, url.Values{"client_id": {"form"}, "client_secret": {"form-secret"}}); err != nil || id != "form" || secret != "form-secret" || !inBody {
+		t.Fatalf("form credentials = %q, %q, %v, %v", id, secret, inBody, err)
+	}
+	contextRequest := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(WithAuthentication(context.Background(), credbound.OAuthAuthentication{UserID: credbound.MustParseUUID("0198b463-0000-7000-8000-000000000001")}))
+	if value, ok := AuthenticationFromContext(contextRequest); !ok || value.UserID != credbound.MustParseUUID("0198b463-0000-7000-8000-000000000001") {
 		t.Fatalf("context authentication = %#v, %v", value, ok)
+	}
+	// The OIDC max_age parameter: absent means no constraint, zero forces
+	// re-authentication via the smallest positive age, malformed and negative
+	// values are refused, and seconds convert to a duration.
+	for raw, want := range map[string]struct {
+		age time.Duration
+		ok  bool
+	}{
+		"":    {0, true},
+		"0":   {time.Nanosecond, true},
+		"60":  {time.Minute, true},
+		"-1":  {0, false},
+		"abc": {0, false},
+	} {
+		if age, ok := parseMaxAge(raw); age != want.age || ok != want.ok {
+			t.Fatalf("parseMaxAge(%q) = %v, %v", raw, age, ok)
+		}
 	}
 }
 
@@ -399,7 +431,7 @@ func TestHandlerAdditionalProtocolBranches(t *testing.T) {
 		})
 	}
 	response = httptest.NewRecorder()
-	f.handler.writeAuthorizationError(response, "://bad", "state", "invalid_request", "bad")
+	f.handler.writeAuthorizationError(response, "://bad", "state", "invalid_request", "")
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("invalid authorization redirect = %d", response.Code)
 	}
@@ -411,12 +443,24 @@ func TestHandlerAdditionalProtocolBranches(t *testing.T) {
 	if bearerToken(badBearer) != "" {
 		t.Fatal("Basic token accepted as bearer")
 	}
-	if bearerChallenge("", "", "") != "Bearer" || !strings.Contains(bearerChallenge("meta", "scope\"", "problem"), `scope="scope"`) {
-		t.Fatal("bearer challenge escaping failed")
+	if bearerChallenge("", "", "") != "Bearer" {
+		t.Fatal("empty bearer challenge should be bare")
+	}
+	// A quote is backslash-escaped, not stripped, so the value stays one
+	// well-formed quoted-string parameter (RFC 9110).
+	if got := bearerChallenge("https://rs.example/.well-known?x=1", "scope\"", "insufficient_scope"); !strings.Contains(got, `scope="scope\""`) ||
+		!strings.Contains(got, `resource_metadata="https://rs.example/.well-known?x=1"`) || !strings.Contains(got, `error="insufficient_scope"`) {
+		t.Fatalf("bearer challenge escaping failed: %q", got)
+	}
+	// A control character cannot break out of the header.
+	if strings.ContainsAny(bearerChallenge("a\r\nb", "", ""), "\r\n") {
+		t.Fatal("bearer challenge leaked a control character")
 	}
 	if _, ok := AuthenticationFromContext(httptest.NewRequest(http.MethodGet, "/", nil)); ok {
 		t.Fatal("empty request context contained OAuth authentication")
 	}
+	// OAUTH-008: OIDC is enabled separately per issuer — an OAuth-only issuer
+	// serves RFC 8414 discovery while openid-configuration stays absent.
 	oauthOnlyIssuer, err := f.manager.CreateOAuthIssuer(t.Context(), f.actor, credbound.TrustedRequest{Local: true}, credbound.CreateOAuthIssuerInput{Issuer: "https://auth.example.com/oauth-only"})
 	if err != nil {
 		t.Fatal(err)
@@ -454,5 +498,62 @@ func TestHandlerAdditionalProtocolBranches(t *testing.T) {
 		if response := f.request(method, target, `{}`, "application/json"); response.Code != http.StatusNotFound {
 			t.Fatalf("disabled issuer endpoint %s = %d", target, response.Code)
 		}
+	}
+}
+
+func TestHandlerClientCredentials(t *testing.T) {
+	f := newHandlerFixture(t)
+	client, err := f.manager.PreRegisterOAuthClient(t.Context(), f.actor, credbound.TrustedRequest{Local: true}, f.issuerID, credbound.OAuthClientRegistrationInput{
+		Name: "Service", ApplicationType: credbound.OAuthApplicationWeb, RedirectURIs: []string{"https://svc.example.com/cb"},
+		GrantTypes: []string{"client_credentials"}, Scopes: []string{"documents.read"},
+		ClientCredentialsResources: []string{testResource},
+		TokenEndpointAuthMethod:    credbound.OAuthAuthClientSecretBasic,
+	})
+	if err != nil || client.ClientSecret == "" {
+		t.Fatalf("client = %#v, %v", client, err)
+	}
+	// The client registered client_secret_basic: the same correct secret in
+	// the form body (client_secret_post, which neither the registration nor
+	// the discovery document offers) must be refused.
+	form := url.Values{
+		"grant_type": {"client_credentials"}, "client_id": {client.Client.ClientID}, "client_secret": {client.ClientSecret},
+		"resource": {testResource}, "scope": {"documents.read"},
+	}
+	response := f.request(http.MethodPost, "/tenant/token", form.Encode(), "application/x-www-form-urlencoded")
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("body-borne client_secret = %d %s", response.Code, response.Body.String())
+	}
+	// Presenting Basic and a form secret at once is two authentication
+	// methods and is refused before reaching the core — on both endpoints
+	// that authenticate clients.
+	for _, target := range []string{"/tenant/token", "/tenant/revoke"} {
+		dualRequest := httptest.NewRequest(http.MethodPost, target, strings.NewReader(form.Encode()))
+		dualRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		dualRequest.SetBasicAuth(client.Client.ClientID, client.ClientSecret)
+		response = httptest.NewRecorder()
+		f.handler.ServeHTTP(response, dualRequest)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("dual-method %s = %d %s", target, response.Code, response.Body.String())
+		}
+	}
+	form.Del("client_id")
+	form.Del("client_secret")
+	basicRequest := httptest.NewRequest(http.MethodPost, "/tenant/token", strings.NewReader(form.Encode()))
+	basicRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	basicRequest.SetBasicAuth(client.Client.ClientID, client.ClientSecret)
+	response = httptest.NewRecorder()
+	f.handler.ServeHTTP(response, basicRequest)
+	if response.Code != http.StatusOK {
+		t.Fatalf("client_credentials token = %d %s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["access_token"] == "" || body["token_type"] != "Bearer" || body["scope"] != "documents.read" {
+		t.Fatalf("token body = %#v", body)
+	}
+	if _, ok := body["refresh_token"]; ok {
+		t.Fatal("client_credentials must not return a refresh token")
 	}
 }

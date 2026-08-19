@@ -2,6 +2,8 @@ package credbound
 
 import (
 	"context"
+	"net"
+	"net/netip"
 	"strings"
 )
 
@@ -18,6 +20,24 @@ const (
 // trusted proxy configuration before attaching it.
 func WithRequestMetadata(ctx context.Context, metadata RequestMetadata) context.Context {
 	return context.WithValue(ctx, requestMetadataKey{}, sanitizeRequestMetadata(metadata))
+}
+
+// TrustedRequestFromAddr derives a TrustedRequest from the transport peer
+// address (typically http.Request.RemoteAddr): Local is set only when the
+// peer is a loopback address. Always call it with the actual network peer —
+// never with a value copied from a request parameter, header, or body, which
+// a client controls. Requests arriving through a reverse proxy have the proxy
+// as their peer and are correctly reported as non-local.
+func TrustedRequestFromAddr(remoteAddr string) TrustedRequest {
+	host := remoteAddr
+	if splitHost, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		host = splitHost
+	}
+	address, err := netip.ParseAddr(host)
+	if err != nil {
+		return TrustedRequest{}
+	}
+	return TrustedRequest{Local: address.IsLoopback()}
 }
 
 func requestMetadataFromContext(ctx context.Context) RequestMetadata {

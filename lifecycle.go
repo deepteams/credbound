@@ -8,6 +8,9 @@ import (
 	"strings"
 )
 
+// CreateWorkspace creates a workspace and makes the actor its admin member,
+// atomically with the audit event. It requires a fresh AAL2 step-up from an
+// enabled user.
 func (m *Manager) CreateWorkspace(ctx context.Context, actor Authentication, input CreateWorkspaceInput) (_ Workspace, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "workspace.create", started, err) }()
@@ -20,7 +23,7 @@ func (m *Manager) CreateWorkspace(ctx context.Context, actor Authentication, inp
 	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" || len(name) > 200 {
-		return Workspace{}, fmt.Errorf("%w: workspace name must contain between 1 and 200 characters", ErrInvalidInput)
+		return Workspace{}, &ValidationError{Field: "name", Rule: "length", Message: "workspace name must contain between 1 and 200 characters"}
 	}
 	id, err := m.newID()
 	if err != nil {
@@ -29,7 +32,7 @@ func (m *Manager) CreateWorkspace(ctx context.Context, actor Authentication, inp
 	now := m.now()
 	workspace := Workspace{ID: id, Name: name, RequireMFA: input.RequireMFA, CreatedAt: now, UpdatedAt: now}
 	owner := Membership{WorkspaceID: id, UserID: actor.UserID, Role: RoleAdmin, Status: MembershipActive, ProvisioningSource: ProvisioningSourceLocal, CreatedAt: now, UpdatedAt: now}
-	audit, err := m.newAudit(ctx, actor.UserID, "workspace.create", "workspace", id, id, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "workspace.create", "workspace", id.String(), id, AuditSucceeded, "")
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -49,7 +52,10 @@ func (m *Manager) CreateWorkspace(ctx context.Context, actor Authentication, inp
 	return workspace, nil
 }
 
-func (m *Manager) UpdateWorkspace(ctx context.Context, actor Authentication, workspaceID string, input UpdateWorkspaceInput) (_ Workspace, err error) {
+// UpdateWorkspace renames the workspace and optionally toggles its MFA
+// policy, atomically with the audit event. The actor needs a fresh AAL2
+// step-up and workspace settings write as an active member.
+func (m *Manager) UpdateWorkspace(ctx context.Context, actor Authentication, workspaceID UUID, input UpdateWorkspaceInput) (_ Workspace, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "workspace.update", started, err) }()
 	if err := m.authorizeWorkspaceMutation(ctx, actor, workspaceID, PermissionWorkspaceSettingsWrite, "workspace.update"); err != nil {
@@ -58,7 +64,11 @@ func (m *Manager) UpdateWorkspace(ctx context.Context, actor Authentication, wor
 	return m.updateWorkspace(ctx, actor, workspaceID, input, "workspace.update")
 }
 
-func (m *Manager) AdminUpdateWorkspace(ctx context.Context, actor Authentication, request TrustedRequest, workspaceID string, input UpdateWorkspaceInput) (_ Workspace, err error) {
+// AdminUpdateWorkspace is the instance-administration variant of
+// UpdateWorkspace: it requires admin workspaces write and an admin mutation
+// (fresh AAL2, or a trusted local request) instead of a membership, and is
+// audited like every administrative access.
+func (m *Manager) AdminUpdateWorkspace(ctx context.Context, actor Authentication, request TrustedRequest, workspaceID UUID, input UpdateWorkspaceInput) (_ Workspace, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "admin.workspace.update", started, err) }()
 	if err := m.AuthorizeAdmin(ctx, actor, PermissionWorkspacesWrite); err != nil {
@@ -70,13 +80,13 @@ func (m *Manager) AdminUpdateWorkspace(ctx context.Context, actor Authentication
 	return m.updateWorkspace(ctx, actor, workspaceID, input, "admin.workspace.update")
 }
 
-func (m *Manager) updateWorkspace(ctx context.Context, actor Authentication, workspaceID string, input UpdateWorkspaceInput, operation string) (Workspace, error) {
+func (m *Manager) updateWorkspace(ctx context.Context, actor Authentication, workspaceID UUID, input UpdateWorkspaceInput, operation string) (Workspace, error) {
 	if !validUUIDv7(workspaceID) {
 		return Workspace{}, fmt.Errorf("%w: invalid workspace id", ErrInvalidInput)
 	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" || len(name) > 200 {
-		return Workspace{}, fmt.Errorf("%w: workspace name must contain between 1 and 200 characters", ErrInvalidInput)
+		return Workspace{}, &ValidationError{Field: "name", Rule: "length", Message: "workspace name must contain between 1 and 200 characters"}
 	}
 	previous, err := m.store.WorkspaceByID(ctx, workspaceID)
 	if err != nil {
@@ -88,7 +98,7 @@ func (m *Manager) updateWorkspace(ctx context.Context, actor Authentication, wor
 		workspace.RequireMFA = *input.RequireMFA
 	}
 	workspace.UpdatedAt = m.now()
-	audit, err := m.newAudit(ctx, actor.UserID, operation, "workspace", workspaceID, workspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, operation, "workspace", workspaceID.String(), workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -107,23 +117,37 @@ func (m *Manager) updateWorkspace(ctx context.Context, actor Authentication, wor
 	return workspace, nil
 }
 
-func (m *Manager) DisableWorkspace(ctx context.Context, actor Authentication, workspaceID string) error {
+// DisableWorkspace disables the workspace so every tenant-scoped capability
+// is denied until it is re-enabled; the store cascade also revokes the
+// workspace-bound PAT and OAuth credentials. The actor needs a fresh AAL2
+// step-up and workspace settings write. Disabling an already disabled
+// workspace is a no-op.
+func (m *Manager) DisableWorkspace(ctx context.Context, actor Authentication, workspaceID UUID) error {
 	return m.setWorkspaceDisabled(ctx, actor, TrustedRequest{}, workspaceID, true, false)
 }
 
-func (m *Manager) EnableWorkspace(ctx context.Context, actor Authentication, workspaceID string) error {
+// EnableWorkspace restores a disabled workspace. The actor must still be an
+// active member holding workspace settings write with a fresh AAL2 step-up —
+// the only tenant mutation a disabled workspace accepts.
+func (m *Manager) EnableWorkspace(ctx context.Context, actor Authentication, workspaceID UUID) error {
 	return m.setWorkspaceDisabled(ctx, actor, TrustedRequest{}, workspaceID, false, false)
 }
 
-func (m *Manager) AdminDisableWorkspace(ctx context.Context, actor Authentication, request TrustedRequest, workspaceID string) error {
+// AdminDisableWorkspace is the instance-administration variant of
+// DisableWorkspace: it requires admin workspaces write and an admin mutation
+// (fresh AAL2, or a trusted local request) instead of a membership.
+func (m *Manager) AdminDisableWorkspace(ctx context.Context, actor Authentication, request TrustedRequest, workspaceID UUID) error {
 	return m.setWorkspaceDisabled(ctx, actor, request, workspaceID, true, true)
 }
 
-func (m *Manager) AdminEnableWorkspace(ctx context.Context, actor Authentication, request TrustedRequest, workspaceID string) error {
+// AdminEnableWorkspace is the instance-administration variant of
+// EnableWorkspace: it requires admin workspaces write and an admin mutation
+// (fresh AAL2, or a trusted local request) instead of a membership.
+func (m *Manager) AdminEnableWorkspace(ctx context.Context, actor Authentication, request TrustedRequest, workspaceID UUID) error {
 	return m.setWorkspaceDisabled(ctx, actor, request, workspaceID, false, true)
 }
 
-func (m *Manager) setWorkspaceDisabled(ctx context.Context, actor Authentication, request TrustedRequest, workspaceID string, disabled, administrative bool) (err error) {
+func (m *Manager) setWorkspaceDisabled(ctx context.Context, actor Authentication, request TrustedRequest, workspaceID UUID, disabled, administrative bool) (err error) {
 	operation := "workspace.enable"
 	name := EventWorkspaceEnabled
 	action := "workspace.enable"
@@ -163,7 +187,7 @@ func (m *Manager) setWorkspaceDisabled(ctx context.Context, actor Authentication
 		workspace.DisabledAt = cloneTime(&now)
 	}
 	workspace.UpdatedAt = now
-	audit, err := m.newAudit(ctx, actor.UserID, action, "workspace", workspaceID, workspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, action, "workspace", workspaceID.String(), workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -182,15 +206,25 @@ func (m *Manager) setWorkspaceDisabled(ctx context.Context, actor Authentication
 	return nil
 }
 
-func (m *Manager) DisableUser(ctx context.Context, actor Authentication, request TrustedRequest, userID string) error {
+// DisableUser disables a global account so it can no longer authenticate or
+// authorize anywhere, atomically with the audit event. The actor needs admin
+// users write and an admin mutation (fresh AAL2, or a trusted local
+// request); the store protects the last enabled root administrator. The
+// store cascade revokes the user's credentials and, when the store supports
+// sessions (SessionStore), their server-side sessions in the same
+// transaction; re-enabling never restores them. Disabling an already
+// disabled user is a no-op.
+func (m *Manager) DisableUser(ctx context.Context, actor Authentication, request TrustedRequest, userID UUID) error {
 	return m.setUserDisabled(ctx, actor, request, userID, true)
 }
 
-func (m *Manager) EnableUser(ctx context.Context, actor Authentication, request TrustedRequest, userID string) error {
+// EnableUser re-enables a disabled global account under the same
+// authorization as DisableUser.
+func (m *Manager) EnableUser(ctx context.Context, actor Authentication, request TrustedRequest, userID UUID) error {
 	return m.setUserDisabled(ctx, actor, request, userID, false)
 }
 
-func (m *Manager) setUserDisabled(ctx context.Context, actor Authentication, request TrustedRequest, userID string, disabled bool) (err error) {
+func (m *Manager) setUserDisabled(ctx context.Context, actor Authentication, request TrustedRequest, userID UUID, disabled bool) (err error) {
 	operation := "admin.user.enable"
 	name := EventUserEnabled
 	action := "user.enable"
@@ -215,11 +249,11 @@ func (m *Manager) setUserDisabled(ctx context.Context, actor Authentication, req
 	if user.Disabled == disabled {
 		return nil
 	}
-	audit, err := m.newAudit(ctx, actor.UserID, action, "user", userID, "", AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, action, "user", userID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
-	meta, err := m.newEventMeta(name, operation, actor.UserID, "", audit)
+	meta, err := m.newEventMeta(name, operation, actor.UserID, UUID{}, audit)
 	if err != nil {
 		return err
 	}
@@ -235,11 +269,83 @@ func (m *Manager) setUserDisabled(ctx context.Context, actor Authentication, req
 	return nil
 }
 
-func (m *Manager) AddMembership(ctx context.Context, actor Authentication, workspaceID, userID string, role Role) (Membership, error) {
+// UpdateUser changes the actor's own display name. It requires a recent
+// interactive authentication (any assurance level within the step-up window),
+// mirroring ChangePassword. Updating another account is an administrative
+// mutation, see AdminUpdateUser. It returns the updated user.
+func (m *Manager) UpdateUser(ctx context.Context, actor Authentication, input UpdateUserInput) (user User, err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "auth.user.profile.update", started, err) }()
+	if err := m.requireRecentInteractive(ctx, actor); err != nil {
+		return User{}, err
+	}
+	return m.updateUserProfile(ctx, actor, actor.UserID, input, "user.profile.update")
+}
+
+// AdminUpdateUser changes any account's display name. The actor needs admin
+// users write and an admin mutation (fresh AAL2, or a trusted local
+// request), like every other administrative user lifecycle operation. It
+// returns the updated user.
+func (m *Manager) AdminUpdateUser(ctx context.Context, actor Authentication, request TrustedRequest, userID UUID, input UpdateUserInput) (user User, err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "admin.user.profile.update", started, err) }()
+	if err := m.AuthorizeAdmin(ctx, actor, PermissionUsersWrite); err != nil {
+		return User{}, err
+	}
+	if err := m.requireAdminMutation(ctx, actor, request, "admin.user.profile.update"); err != nil {
+		return User{}, err
+	}
+	return m.updateUserProfile(ctx, actor, userID, input, "admin.user.profile.update")
+}
+
+func (m *Manager) updateUserProfile(ctx context.Context, actor Authentication, userID UUID, input UpdateUserInput, operation string) (User, error) {
+	if !validUUIDv7(userID) {
+		return User{}, fmt.Errorf("%w: invalid user id", ErrInvalidInput)
+	}
+	displayName := strings.TrimSpace(input.DisplayName)
+	if displayName == "" || len(displayName) > 200 {
+		return User{}, &ValidationError{Field: "display_name", Rule: "length", Message: "display name must contain between 1 and 200 characters"}
+	}
+	user, err := m.store.UserByID(ctx, userID)
+	if err != nil {
+		return User{}, err
+	}
+	previousProfile := user.DisplayName
+	user.DisplayName = displayName
+	user.UpdatedAt = m.now()
+	audit, err := m.newAudit(ctx, actor.UserID, operation, "user", userID.String(), UUID{}, AuditSucceeded, "")
+	if err != nil {
+		return User{}, err
+	}
+	meta, err := m.newEventMeta(EventUserProfileUpdated, operation, actor.UserID, UUID{}, audit)
+	if err != nil {
+		return User{}, err
+	}
+	change := UserProfileChange{EventMeta: meta, User: user, PreviousProfile: previousProfile}
+	commit := m.transactionalCommit(audit, operation, func(ctx context.Context, tx Tx, hook TransactionHook) error {
+		return hook.ApplyUserProfileChange(ctx, tx, change)
+	})
+	if err := m.store.UpdateUser(ctx, user, commit); err != nil {
+		return User{}, m.mapStoreError(ctx, operation, err)
+	}
+	m.emitUserProfileChange(ctx, change)
+	return user, nil
+}
+
+// AddMembership adds an existing user to the workspace with the given role,
+// atomically with the audit event. The actor needs a fresh AAL2 step-up plus
+// workspace users write and RBAC write. An existing membership — local or
+// SCIM-managed — fails with ErrConflict.
+func (m *Manager) AddMembership(ctx context.Context, actor Authentication, workspaceID, userID UUID, role Role) (Membership, error) {
 	return m.upsertLocalMembership(ctx, actor, workspaceID, userID, role, MembershipActive, true)
 }
 
-func (m *Manager) SetMembershipStatus(ctx context.Context, actor Authentication, workspaceID, userID string, status MembershipStatus) (Membership, error) {
+// SetMembershipStatus suspends or reactivates a local membership, atomically
+// with the audit event; the store cascade revokes workspace-bound
+// credentials on suspension. The actor needs a fresh AAL2 step-up and
+// workspace users write. SCIM-managed memberships fail with ErrConflict, and
+// the store protects the last active workspace administrator.
+func (m *Manager) SetMembershipStatus(ctx context.Context, actor Authentication, workspaceID, userID UUID, status MembershipStatus) (Membership, error) {
 	if status != MembershipActive && status != MembershipSuspended {
 		return Membership{}, fmt.Errorf("%w: invalid membership status", ErrInvalidInput)
 	}
@@ -255,7 +361,7 @@ func (m *Manager) SetMembershipStatus(ctx context.Context, actor Authentication,
 	return m.upsertLocalMembership(ctx, actor, workspaceID, userID, current.Role, status, false)
 }
 
-func (m *Manager) upsertLocalMembership(ctx context.Context, actor Authentication, workspaceID, userID string, role Role, status MembershipStatus, add bool) (_ Membership, err error) {
+func (m *Manager) upsertLocalMembership(ctx context.Context, actor Authentication, workspaceID, userID UUID, role Role, status MembershipStatus, add bool) (_ Membership, err error) {
 	operation := "membership.status.set"
 	name := EventMembershipStatusChanged
 	if add {
@@ -297,7 +403,7 @@ func (m *Manager) upsertLocalMembership(ctx context.Context, actor Authenticatio
 	if previous != nil {
 		membership.CreatedAt = previous.CreatedAt
 	}
-	audit, err := m.newAudit(ctx, actor.UserID, operation, "membership", userID, workspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, operation, "membership", userID.String(), workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return Membership{}, err
 	}
@@ -316,7 +422,12 @@ func (m *Manager) upsertLocalMembership(ctx context.Context, actor Authenticatio
 	return membership, nil
 }
 
-func (m *Manager) RemoveMembership(ctx context.Context, actor Authentication, workspaceID, userID string) (err error) {
+// RemoveMembership removes a local membership, atomically with the audit
+// event; the store cascade revokes the member's workspace-bound credentials.
+// The actor needs a fresh AAL2 step-up and workspace users write.
+// SCIM-managed memberships fail with ErrConflict, and the store protects the
+// last active workspace administrator.
+func (m *Manager) RemoveMembership(ctx context.Context, actor Authentication, workspaceID, userID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "membership.remove", started, err) }()
 	if err := m.authorizeWorkspaceMutation(ctx, actor, workspaceID, PermissionWorkspaceUsersWrite, "membership.remove"); err != nil {
@@ -329,7 +440,7 @@ func (m *Manager) RemoveMembership(ctx context.Context, actor Authentication, wo
 	if previous.ProvisioningSource != ProvisioningSourceLocal {
 		return ErrConflict
 	}
-	audit, err := m.newAudit(ctx, actor.UserID, "membership.remove", "membership", userID, workspaceID, AuditSucceeded, "")
+	audit, err := m.newAudit(ctx, actor.UserID, "membership.remove", "membership", userID.String(), workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -348,6 +459,69 @@ func (m *Manager) RemoveMembership(ctx context.Context, actor Authentication, wo
 	return nil
 }
 
+// User returns one account by ID. An empty userID means the actor, which
+// requires a recent interactive authentication; reading another user
+// requires admin users read — the same scoping as Emails and Passkeys.
+func (m *Manager) User(ctx context.Context, actor Authentication, userID UUID) (User, error) {
+	if actor.UserID == (UUID{}) {
+		return User{}, ErrUnauthorized
+	}
+	if userID == (UUID{}) {
+		userID = actor.UserID
+	}
+	if userID == actor.UserID {
+		if err := m.requireRecentInteractive(ctx, actor); err != nil {
+			return User{}, err
+		}
+	} else {
+		if !validUUIDv7(userID) {
+			return User{}, fmt.Errorf("%w: invalid user id", ErrInvalidInput)
+		}
+		if err := m.AuthorizeAdmin(ctx, actor, PermissionUsersRead); err != nil {
+			return User{}, err
+		}
+	}
+	return m.store.UserByID(ctx, userID)
+}
+
+// Workspace returns one workspace by ID. The actor needs workspace access in
+// it; admin workspaces read reaches any workspace of the instance.
+func (m *Manager) Workspace(ctx context.Context, actor Authentication, workspaceID UUID) (Workspace, error) {
+	if !validUUIDv7(workspaceID) {
+		return Workspace{}, fmt.Errorf("%w: invalid workspace id", ErrInvalidInput)
+	}
+	if err := m.AuthorizePermission(ctx, actor, workspaceID, PermissionWorkspaceAccess); err != nil {
+		if adminErr := m.AuthorizeAdmin(ctx, actor, PermissionWorkspacesRead); adminErr != nil {
+			return Workspace{}, err
+		}
+	}
+	return m.store.WorkspaceByID(ctx, workspaceID)
+}
+
+// Membership returns one membership by workspace and user. An empty userID
+// means the actor's own membership, which needs workspace access; reading
+// another member requires workspace users read in that workspace.
+func (m *Manager) Membership(ctx context.Context, actor Authentication, workspaceID, userID UUID) (Membership, error) {
+	if !validUUIDv7(workspaceID) {
+		return Membership{}, fmt.Errorf("%w: invalid workspace id", ErrInvalidInput)
+	}
+	if userID == (UUID{}) {
+		userID = actor.UserID
+	}
+	permission := PermissionWorkspaceUsersRead
+	if userID == actor.UserID {
+		permission = PermissionWorkspaceAccess
+	} else if !validUUIDv7(userID) {
+		return Membership{}, fmt.Errorf("%w: invalid user id", ErrInvalidInput)
+	}
+	if err := m.AuthorizePermission(ctx, actor, workspaceID, permission); err != nil {
+		return Membership{}, err
+	}
+	return m.store.Membership(ctx, workspaceID, userID)
+}
+
+// Users streams every global account. It requires admin users read; the
+// authorization itself is audited like every administrative access.
 func (m *Manager) Users(ctx context.Context, actor Authentication, page PageRequest) iter.Seq2[PageEvent[User], error] {
 	if err := m.AuthorizeAdmin(ctx, actor, PermissionUsersRead); err != nil {
 		return errorSeq[PageEvent[User]](err)
@@ -359,6 +533,8 @@ func (m *Manager) Users(ctx context.Context, actor Authentication, page PageRequ
 	return m.store.Users(ctx, page)
 }
 
+// Workspaces streams every workspace of the instance. It requires admin
+// workspaces read.
 func (m *Manager) Workspaces(ctx context.Context, actor Authentication, page PageRequest) iter.Seq2[PageEvent[Workspace], error] {
 	if err := m.AuthorizeAdmin(ctx, actor, PermissionWorkspacesRead); err != nil {
 		return errorSeq[PageEvent[Workspace]](err)
@@ -370,8 +546,10 @@ func (m *Manager) Workspaces(ctx context.Context, actor Authentication, page Pag
 	return m.store.Workspaces(ctx, page)
 }
 
+// UserWorkspaces streams the workspaces the actor belongs to. It only
+// requires an authenticated, enabled actor.
 func (m *Manager) UserWorkspaces(ctx context.Context, actor Authentication, page PageRequest) iter.Seq2[PageEvent[Workspace], error] {
-	if actor.UserID == "" {
+	if actor.UserID == (UUID{}) {
 		return errorSeq[PageEvent[Workspace]](ErrUnauthorized)
 	}
 	user, err := m.store.UserByID(ctx, actor.UserID)
@@ -385,7 +563,9 @@ func (m *Manager) UserWorkspaces(ctx context.Context, actor Authentication, page
 	return m.store.UserWorkspaces(ctx, actor.UserID, page)
 }
 
-func (m *Manager) Memberships(ctx context.Context, actor Authentication, workspaceID string, page PageRequest) iter.Seq2[PageEvent[Membership], error] {
+// Memberships streams the memberships of a workspace. The actor needs
+// workspace users read in that workspace.
+func (m *Manager) Memberships(ctx context.Context, actor Authentication, workspaceID UUID, page PageRequest) iter.Seq2[PageEvent[Membership], error] {
 	if err := m.AuthorizePermission(ctx, actor, workspaceID, PermissionWorkspaceUsersRead); err != nil {
 		return errorSeq[PageEvent[Membership]](err)
 	}
@@ -396,7 +576,55 @@ func (m *Manager) Memberships(ctx context.Context, actor Authentication, workspa
 	return m.store.Memberships(ctx, workspaceID, page)
 }
 
-func (m *Manager) authorizeWorkspaceMutation(ctx context.Context, actor Authentication, workspaceID string, permission WorkspacePermission, operation string) error {
+// WorkspaceMember pairs a workspace membership with the member's account
+// profile. It is the row a workspace administrator's member list renders.
+type WorkspaceMember struct {
+	User       User
+	Membership Membership
+}
+
+// WorkspaceMembers streams the memberships of a workspace joined with each
+// member's account profile (display name, primary email), so a workspace
+// administrator can render a member list without the instance-wide admin
+// users read permission. Like Memberships, it requires workspace users read
+// in that workspace; a membership whose account vanished mid-stream is
+// skipped rather than failing the page.
+func (m *Manager) WorkspaceMembers(ctx context.Context, actor Authentication, workspaceID UUID, page PageRequest) iter.Seq2[PageEvent[WorkspaceMember], error] {
+	if err := m.AuthorizePermission(ctx, actor, workspaceID, PermissionWorkspaceUsersRead); err != nil {
+		return errorSeq[PageEvent[WorkspaceMember]](err)
+	}
+	page, err := normalizePage(page)
+	if err != nil {
+		return errorSeq[PageEvent[WorkspaceMember]](err)
+	}
+	return func(yield func(PageEvent[WorkspaceMember], error) bool) {
+		for event, err := range m.store.Memberships(ctx, workspaceID, page) {
+			if err != nil {
+				yield(PageEvent[WorkspaceMember]{}, err)
+				return
+			}
+			if event.Data == nil {
+				if event.End != nil && !yield(PageEvent[WorkspaceMember]{Type: event.Type, End: event.End}, nil) {
+					return
+				}
+				continue
+			}
+			user, userErr := m.store.UserByID(ctx, event.Data.UserID)
+			if userErr != nil {
+				if errors.Is(userErr, ErrNotFound) {
+					continue
+				}
+				yield(PageEvent[WorkspaceMember]{}, userErr)
+				return
+			}
+			if !yield(ItemEvent(WorkspaceMember{User: user, Membership: *event.Data}), nil) {
+				return
+			}
+		}
+	}
+}
+
+func (m *Manager) authorizeWorkspaceMutation(ctx context.Context, actor Authentication, workspaceID UUID, permission WorkspacePermission, operation string) error {
 	if err := m.requireStepUp(ctx, actor, operation); err != nil {
 		return err
 	}
@@ -407,7 +635,7 @@ func (m *Manager) authorizeWorkspaceMutation(ctx context.Context, actor Authenti
 	if err != nil || user.Disabled {
 		return ErrForbidden
 	}
-	if actor.WorkspaceID != "" && actor.WorkspaceID != workspaceID {
+	if actor.WorkspaceID != (UUID{}) && actor.WorkspaceID != workspaceID {
 		return ErrForbidden
 	}
 	workspace, err := m.store.WorkspaceByID(ctx, workspaceID)
@@ -437,11 +665,16 @@ func (m *Manager) authorizeWorkspaceMutation(ctx context.Context, actor Authenti
 }
 
 func (m *Manager) emitWorkspaceChange(ctx context.Context, name EventName, change WorkspaceChange) {
-	event := WorkspaceChangedEvent{EventMeta: change.EventMeta, Workspace: change.Workspace, Previous: change.Previous}
+	event := WorkspaceChangedEvent(change)
 	m.events.emit(ctx, name, func(listener EventListener) error { return listener.OnWorkspaceChanged(ctx, event) })
 }
 
+func (m *Manager) emitUserProfileChange(ctx context.Context, change UserProfileChange) {
+	event := UserProfileUpdatedEvent{EventMeta: change.EventMeta, UserID: change.User.ID, DisplayName: change.User.DisplayName, PreviousProfile: change.PreviousProfile}
+	m.events.emit(ctx, EventUserProfileUpdated, func(listener EventListener) error { return listener.OnUserProfileUpdated(ctx, event) })
+}
+
 func (m *Manager) emitMembershipChange(ctx context.Context, name EventName, change MembershipChange) {
-	event := MembershipChangedEvent{EventMeta: change.EventMeta, Membership: change.Membership, Previous: change.Previous, Removed: change.Removed}
+	event := MembershipChangedEvent(change)
 	m.events.emit(ctx, name, func(listener EventListener) error { return listener.OnMembershipChanged(ctx, event) })
 }

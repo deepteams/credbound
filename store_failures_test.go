@@ -30,7 +30,7 @@ func (s *oauthFaultStore) failure(name string) error {
 	return nil
 }
 
-func (s *oauthFaultStore) UserByID(ctx context.Context, id string) (credbound.User, error) {
+func (s *oauthFaultStore) UserByID(ctx context.Context, id credbound.UUID) (credbound.User, error) {
 	if err := s.failure("user.lookup"); err != nil {
 		return credbound.User{}, err
 	}
@@ -51,14 +51,14 @@ func (s *oauthFaultStore) UpdateWorkspace(ctx context.Context, workspace credbou
 	return s.Store.UpdateWorkspace(ctx, workspace, commit)
 }
 
-func (s *oauthFaultStore) SetWorkspaceDisabled(ctx context.Context, id string, disabled bool, at time.Time, commit credbound.Commit) error {
+func (s *oauthFaultStore) SetWorkspaceDisabled(ctx context.Context, id credbound.UUID, disabled bool, at time.Time, commit credbound.Commit) error {
 	if err := s.failure("workspace.disable"); err != nil {
 		return err
 	}
 	return s.Store.SetWorkspaceDisabled(ctx, id, disabled, at, commit)
 }
 
-func (s *oauthFaultStore) SetUserDisabled(ctx context.Context, id string, disabled bool, at time.Time, commit credbound.Commit) error {
+func (s *oauthFaultStore) SetUserDisabled(ctx context.Context, id credbound.UUID, disabled bool, at time.Time, commit credbound.Commit) error {
 	if err := s.failure("user.disable"); err != nil {
 		return err
 	}
@@ -72,7 +72,7 @@ func (s *oauthFaultStore) UpsertMembership(ctx context.Context, membership credb
 	return s.Store.UpsertMembership(ctx, membership, commit)
 }
 
-func (s *oauthFaultStore) RemoveMembership(ctx context.Context, workspaceID, userID string, at time.Time, commit credbound.Commit) error {
+func (s *oauthFaultStore) RemoveMembership(ctx context.Context, workspaceID, userID credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := s.failure("membership.remove"); err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func (s *oauthFaultStore) UpdateOAuthIssuer(ctx context.Context, issuer credboun
 	return s.Store.UpdateOAuthIssuer(ctx, issuer, commit)
 }
 
-func (s *oauthFaultStore) OAuthIssuerByID(ctx context.Context, id string) (credbound.OAuthIssuer, error) {
+func (s *oauthFaultStore) OAuthIssuerByID(ctx context.Context, id credbound.UUID) (credbound.OAuthIssuer, error) {
 	if err := s.failure("issuer.lookup"); err != nil {
 		return credbound.OAuthIssuer{}, err
 	}
@@ -107,7 +107,7 @@ func (s *oauthFaultStore) OAuthIssuerByURL(ctx context.Context, issuer string) (
 	return s.Store.OAuthIssuerByURL(ctx, issuer)
 }
 
-func (s *oauthFaultStore) SetOAuthIssuerDisabled(ctx context.Context, id string, disabled bool, at time.Time, commit credbound.Commit) error {
+func (s *oauthFaultStore) SetOAuthIssuerDisabled(ctx context.Context, id credbound.UUID, disabled bool, at time.Time, commit credbound.Commit) error {
 	if err := s.failure("issuer.disable"); err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func (s *oauthFaultStore) CreateOAuthProtectedResource(ctx context.Context, reso
 	return s.Store.CreateOAuthProtectedResource(ctx, resource, commit)
 }
 
-func (s *oauthFaultStore) OAuthProtectedResourceByID(ctx context.Context, id string) (credbound.OAuthProtectedResource, error) {
+func (s *oauthFaultStore) OAuthProtectedResourceByID(ctx context.Context, id credbound.UUID) (credbound.OAuthProtectedResource, error) {
 	if err := s.failure("resource.lookup"); err != nil {
 		return credbound.OAuthProtectedResource{}, err
 	}
@@ -135,35 +135,35 @@ func (s *oauthFaultStore) OAuthProtectedResourceByURI(ctx context.Context, resou
 	return s.Store.OAuthProtectedResourceByURI(ctx, resource)
 }
 
-func (s *oauthFaultStore) SetOAuthProtectedResourceDisabled(ctx context.Context, id string, disabled bool, at time.Time, commit credbound.Commit) error {
+func (s *oauthFaultStore) SetOAuthProtectedResourceDisabled(ctx context.Context, id credbound.UUID, disabled bool, at time.Time, commit credbound.Commit) error {
 	if err := s.failure("resource.disable"); err != nil {
 		return err
 	}
 	return s.Store.SetOAuthProtectedResourceDisabled(ctx, id, disabled, at, commit)
 }
 
-func (s *oauthFaultStore) CreateOAuthClient(ctx context.Context, client credbound.OAuthClient, initialID string, at time.Time, commit credbound.Commit) error {
+func (s *oauthFaultStore) CreateOAuthClient(ctx context.Context, client credbound.OAuthClient, initialID credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := s.failure("client.create"); err != nil {
 		return err
 	}
 	return s.Store.CreateOAuthClient(ctx, client, initialID, at, commit)
 }
 
-func (s *oauthFaultStore) OAuthClientByID(ctx context.Context, id string) (credbound.OAuthClient, error) {
+func (s *oauthFaultStore) OAuthClientByID(ctx context.Context, id credbound.UUID) (credbound.OAuthClient, error) {
 	if err := s.failure("client.lookup"); err != nil {
 		return credbound.OAuthClient{}, err
 	}
 	return s.Store.OAuthClientByID(ctx, id)
 }
 
-func (s *oauthFaultStore) OAuthClientByClientID(ctx context.Context, issuerID, clientID string) (credbound.OAuthClient, error) {
+func (s *oauthFaultStore) OAuthClientByClientID(ctx context.Context, issuerID credbound.UUID, clientID string) (credbound.OAuthClient, error) {
 	if err := s.failure("client.key"); err != nil {
 		return credbound.OAuthClient{}, err
 	}
 	return s.Store.OAuthClientByClientID(ctx, issuerID, clientID)
 }
 
-func (s *oauthFaultStore) SetOAuthClientDisabled(ctx context.Context, id string, disabled bool, at time.Time, commit credbound.Commit) error {
+func (s *oauthFaultStore) SetOAuthClientDisabled(ctx context.Context, id credbound.UUID, disabled bool, at time.Time, commit credbound.Commit) error {
 	if err := s.failure("client.disable"); err != nil {
 		return err
 	}
@@ -177,7 +177,7 @@ func (s *oauthFaultStore) CreateOAuthInitialAccessToken(ctx context.Context, tok
 	return s.Store.CreateOAuthInitialAccessToken(ctx, token, commit)
 }
 
-func (s *oauthFaultStore) RevokeOAuthInitialAccessToken(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
+func (s *oauthFaultStore) RevokeOAuthInitialAccessToken(ctx context.Context, id credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := s.failure("initial.revoke"); err != nil {
 		return err
 	}
@@ -191,14 +191,14 @@ func (s *oauthFaultStore) CreateOAuthGrantAndCode(ctx context.Context, grant cre
 	return s.Store.CreateOAuthGrantAndCode(ctx, grant, code, commit)
 }
 
-func (s *oauthFaultStore) OAuthGrant(ctx context.Context, id string) (credbound.OAuthGrant, error) {
+func (s *oauthFaultStore) OAuthGrant(ctx context.Context, id credbound.UUID) (credbound.OAuthGrant, error) {
 	if err := s.failure("grant.lookup"); err != nil {
 		return credbound.OAuthGrant{}, err
 	}
 	return s.Store.OAuthGrant(ctx, id)
 }
 
-func (s *oauthFaultStore) RevokeOAuthGrant(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
+func (s *oauthFaultStore) RevokeOAuthGrant(ctx context.Context, id credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := s.failure("grant.revoke"); err != nil {
 		return err
 	}
@@ -212,7 +212,7 @@ func (s *oauthFaultStore) OAuthAuthorizationCodeByPrefix(ctx context.Context, pr
 	return s.Store.OAuthAuthorizationCodeByPrefix(ctx, prefix)
 }
 
-func (s *oauthFaultStore) ConsumeOAuthAuthorizationCode(ctx context.Context, id string, at time.Time, access credbound.OAuthAccessToken, refresh *credbound.OAuthRefreshToken, commit credbound.Commit) error {
+func (s *oauthFaultStore) ConsumeOAuthAuthorizationCode(ctx context.Context, id credbound.UUID, at time.Time, access credbound.OAuthAccessToken, refresh *credbound.OAuthRefreshToken, commit credbound.Commit) error {
 	if err := s.failure("code.consume"); err != nil {
 		return err
 	}
@@ -233,21 +233,21 @@ func (s *oauthFaultStore) OAuthRefreshTokenByPrefix(ctx context.Context, prefix 
 	return s.Store.OAuthRefreshTokenByPrefix(ctx, prefix)
 }
 
-func (s *oauthFaultStore) RotateOAuthRefreshToken(ctx context.Context, id string, at time.Time, access credbound.OAuthAccessToken, refresh credbound.OAuthRefreshToken, commit credbound.Commit) error {
+func (s *oauthFaultStore) RotateOAuthRefreshToken(ctx context.Context, id credbound.UUID, at time.Time, access credbound.OAuthAccessToken, refresh credbound.OAuthRefreshToken, commit credbound.Commit) error {
 	if err := s.failure("refresh.rotate"); err != nil {
 		return err
 	}
 	return s.Store.RotateOAuthRefreshToken(ctx, id, at, access, refresh, commit)
 }
 
-func (s *oauthFaultStore) RevokeOAuthAccessToken(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
+func (s *oauthFaultStore) RevokeOAuthAccessToken(ctx context.Context, id credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := s.failure("access.revoke"); err != nil {
 		return err
 	}
 	return s.Store.RevokeOAuthAccessToken(ctx, id, at, commit)
 }
 
-func (s *oauthFaultStore) RevokeOAuthRefreshFamily(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
+func (s *oauthFaultStore) RevokeOAuthRefreshFamily(ctx context.Context, id credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := s.failure("family.revoke"); err != nil {
 		return err
 	}
@@ -380,7 +380,7 @@ func TestManagersPropagateStoreFailures(t *testing.T) {
 		return err
 	})
 	assertMapped("issuer.url", credbound.ErrNotSupported, func() error {
-		_, err := manager.OAuthUserInfo(ctx, issuer.Issuer, "bad")
+		_, err := manager.OAuthUserInfo(ctx, issuer.Issuer, "00000000-0000-4000-8000-000000000000")
 		return err
 	})
 	assertFailure("initial.create", func() error {
@@ -405,7 +405,7 @@ func TestManagersPropagateStoreFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	grants := collectLifecyclePage(t, manager.OAuthGrants(ctx, actor, "", credbound.PageRequest{}))
+	grants := collectLifecyclePage(t, manager.OAuthGrants(ctx, actor, credbound.UUID{}, credbound.PageRequest{}))
 	if len(grants) != 1 || result.Code == "" {
 		t.Fatalf("grant setup = %#v, %#v", grants, result)
 	}

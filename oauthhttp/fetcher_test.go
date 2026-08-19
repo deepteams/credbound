@@ -28,6 +28,10 @@ func metadataResponse(status int, contentType, cacheControl, body string) *http.
 	}
 }
 
+// TestMetadataFetcherDocumentValidation pins the secure-CIMD fetch rules of
+// OAUTH-004: redirect responses, wrong media types, oversized bodies, and
+// documents whose client_id does not exactly match the fetched URL are all
+// refused.
 func TestMetadataFetcherDocumentValidation(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	clientID := "https://client.example.com/metadata.json"
@@ -82,6 +86,9 @@ func TestMetadataFetcherDocumentValidation(t *testing.T) {
 	}
 }
 
+// TestMetadataFetcherPolicyHelpers pins the SSRF and DNS-rebinding guards of
+// OAUTH-004: the fetcher dials only public unicast addresses, so loopback,
+// private, link-local, and documentation ranges never serve client metadata.
 func TestMetadataFetcherPolicyHelpers(t *testing.T) {
 	if _, err := NewMetadataFetcher(time.Second, 257); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("concurrency = %v", err)

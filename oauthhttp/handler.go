@@ -6,27 +6,52 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/deepteams/credbound"
 )
 
 const maxProtocolBody = 64 << 10
 
+// HandlerConfig wires a Handler to one issuer and to the host's session and
+// consent machinery.
 type HandlerConfig struct {
-	Issuer         string
-	Resource       string
-	Authenticate   func(*http.Request) (credbound.Authentication, error)
+	// Issuer is the authorization server's canonical https:// URL, without
+	// trailing slash, query, fragment or userinfo. Required; endpoint
+	// paths are derived from it.
+	Issuer string
+	// Resource optionally enables the protected-resource metadata
+	// endpoint for this https:// resource URL.
+	Resource string
+	// Authenticate resolves the host's own browser session into the
+	// server-side Authentication acting on /authorize. It must come from
+	// the host session — never from client-supplied fields. Nil disables
+	// the authorization endpoint.
+	Authenticate func(*http.Request) (credbound.Authentication, error)
+	// PresentConsent renders the consent (or auto-approval) UI for a
+	// validated authorization request; the host later completes it with
+	// Manager.CompleteOAuthAuthorization. Nil disables the authorization
+	// endpoint.
 	PresentConsent func(http.ResponseWriter, *http.Request, credbound.OAuthConsent)
 }
 
+// Handler serves the OAuth 2.1/OIDC protocol endpoints for one issuer:
+// discovery, protected-resource metadata, JWKS, authorize, token, revoke,
+// dynamic client registration and userinfo. Mount it on the host mux; TLS,
+// sessions and rate limiting remain the host's responsibility.
 type Handler struct {
 	manager *credbound.Manager
 	config  HandlerConfig
 }
 
+// New validates config and returns a Handler for the given Manager. The
+// manager is required, Issuer must be a canonical https:// URL, and
+// Resource, when set, must be one too.
 func New(manager *credbound.Manager, config HandlerConfig) (*Handler, error) {
 	if manager == nil || !validHandlerURL(config.Issuer, true) || config.Resource != "" && !validHandlerURL(config.Resource, false) {
 		return nil, fmt.Errorf("%w: OAuth manager and issuer are required", credbound.ErrInvalidInput)
@@ -45,6 +70,8 @@ func validHandlerURL(raw string, issuer bool) bool {
 	return !issuer || !strings.HasSuffix(raw, "/")
 }
 
+// ServeHTTP routes the well-known discovery documents and the protocol
+// endpoints beneath the issuer path; every other path answers 404.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	issuerPath := endpointPath(h.config.Issuer)
@@ -145,10 +172,16 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthorizationError(w, redirectURI, state, "login_required", "interactive authentication is required")
 		return
 	}
+	maxAge, ok := parseMaxAge(query.Get("max_age"))
+	if !ok {
+		h.writeAuthorizationError(w, redirectURI, state, "invalid_request", "max_age must be a non-negative number of seconds")
+		return
+	}
 	consent, err := h.manager.BeginOAuthAuthorization(r.Context(), actor, credbound.BeginOAuthAuthorizationInput{
 		Issuer: h.config.Issuer, ClientID: query.Get("client_id"), RedirectURI: query.Get("redirect_uri"),
 		Resource: query.Get("resource"), Scopes: strings.Fields(query.Get("scope")), State: query.Get("state"),
 		CodeChallenge: query.Get("code_challenge"), CodeChallengeMethod: query.Get("code_challenge_method"), Nonce: query.Get("nonce"),
+		MaxAge: maxAge,
 	})
 	if err != nil {
 		code, description := authorizationError(err)
@@ -212,21 +245,31 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, err)
 		return
 	}
-	clientID, secret := clientCredentials(r, form)
+	clientID, secret, secretInBody, err := clientCredentials(r, form)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
 	grantType := form.Get("grant_type")
 	var result credbound.OAuthTokenResponse
 	switch grantType {
 	case "authorization_code":
 		result, err = h.manager.ExchangeOAuthAuthorizationCode(r.Context(), credbound.ExchangeOAuthAuthorizationCodeInput{
-			Issuer: h.config.Issuer, ClientID: clientID, ClientSecret: secret, ClientAssertion: form.Get("client_assertion"),
+			Issuer: h.config.Issuer, ClientID: clientID, ClientSecret: secret, ClientSecretInBody: secretInBody, ClientAssertion: form.Get("client_assertion"),
 			ClientAssertionType: form.Get("client_assertion_type"),
 			Code:                form.Get("code"), RedirectURI: form.Get("redirect_uri"), CodeVerifier: form.Get("code_verifier"), Resource: form.Get("resource"),
 		})
 	case "refresh_token":
 		result, err = h.manager.RefreshOAuthToken(r.Context(), credbound.RefreshOAuthTokenInput{
-			Issuer: h.config.Issuer, ClientID: clientID, ClientSecret: secret, ClientAssertion: form.Get("client_assertion"),
+			Issuer: h.config.Issuer, ClientID: clientID, ClientSecret: secret, ClientSecretInBody: secretInBody, ClientAssertion: form.Get("client_assertion"),
 			ClientAssertionType: form.Get("client_assertion_type"),
 			RefreshToken:        form.Get("refresh_token"), Resource: form.Get("resource"), Scopes: strings.Fields(form.Get("scope")),
+		})
+	case "client_credentials":
+		result, err = h.manager.IssueOAuthClientCredentials(r.Context(), credbound.OAuthClientCredentialsInput{
+			Issuer: h.config.Issuer, ClientID: clientID, ClientSecret: secret, ClientSecretInBody: secretInBody, ClientAssertion: form.Get("client_assertion"),
+			ClientAssertionType: form.Get("client_assertion_type"),
+			Resource:            form.Get("resource"), Scopes: strings.Fields(form.Get("scope")),
 		})
 	default:
 		h.writeOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "unsupported grant_type")
@@ -251,9 +294,13 @@ func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, err)
 		return
 	}
-	clientID, secret := clientCredentials(r, form)
+	clientID, secret, secretInBody, err := clientCredentials(r, form)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
 	err = h.manager.RevokeOAuthToken(r.Context(), credbound.RevokeOAuthTokenInput{
-		Issuer: h.config.Issuer, ClientID: clientID, ClientSecret: secret,
+		Issuer: h.config.Issuer, ClientID: clientID, ClientSecret: secret, ClientSecretInBody: secretInBody,
 		ClientAssertion: form.Get("client_assertion"), ClientAssertionType: form.Get("client_assertion_type"), Token: form.Get("token"),
 	})
 	if err != nil {
@@ -324,6 +371,17 @@ func (h *Handler) userInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, info)
 }
 
+// Protect wraps next with bearer-token validation at the resource boundary.
+// resource is the canonical protected-resource identifier registered with the
+// manager, requiredScope the minimum scope for this route, and metadataURL the
+// absolute URL of the resource's protected-resource metadata document echoed
+// in WWW-Authenticate challenges. Mount it per route:
+//
+//	mux.Handle("/mcp", oauthhttp.Protect(manager,
+//		"https://api.example.com/mcp", // resource
+//		"mcp.read",                    // requiredScope
+//		"https://api.example.com/.well-known/oauth-protected-resource", // metadataURL
+//		mcpHandler))
 func Protect(manager *credbound.Manager, resource, requiredScope, metadataURL string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authentication, err := manager.AuthenticateOAuthAccessToken(r.Context(), resource, bearerToken(r))
@@ -343,10 +401,17 @@ func Protect(manager *credbound.Manager, resource, requiredScope, metadataURL st
 
 type authenticationKey struct{}
 
+// WithAuthentication returns a context carrying a verified OAuth
+// authentication, as installed by Protect for its wrapped handler. Only
+// attach values produced by Credbound's token authentication — downstream
+// authorization decisions trust them.
 func WithAuthentication(ctx context.Context, authentication credbound.OAuthAuthentication) context.Context {
 	return context.WithValue(ctx, authenticationKey{}, authentication)
 }
 
+// AuthenticationFromContext extracts the verified OAuth authentication that
+// Protect attached to the request, reporting false when the request did not
+// pass through Protect.
 func AuthenticationFromContext(r *http.Request) (credbound.OAuthAuthentication, bool) {
 	value, ok := r.Context().Value(authenticationKey{}).(credbound.OAuthAuthentication)
 	return value, ok
@@ -373,12 +438,22 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, destination any) error {
 	return nil
 }
 
-func clientCredentials(r *http.Request, form url.Values) (string, string) {
-	clientID, secret, ok := r.BasicAuth()
-	if ok {
-		return clientID, secret
+// clientCredentials extracts the client authentication a token-endpoint
+// request carries and reports which transport delivered the secret, so the
+// core can hold the client to its registered token_endpoint_auth_method — a
+// client_secret form field is not client_secret_basic. A request presenting
+// both an Authorization header and a form secret uses two authentication
+// methods at once, which RFC 6749 §2.3 forbids, and is refused outright.
+func clientCredentials(r *http.Request, form url.Values) (clientID, secret string, secretInBody bool, err error) {
+	basicID, basicSecret, ok := r.BasicAuth()
+	if !ok {
+		secret = form.Get("client_secret")
+		return form.Get("client_id"), secret, secret != "", nil
 	}
-	return form.Get("client_id"), form.Get("client_secret")
+	if form.Get("client_secret") != "" {
+		return "", "", false, fmt.Errorf("%w: multiple client authentication methods", credbound.ErrInvalidCredentials)
+	}
+	return basicID, basicSecret, false, nil
 }
 
 func bearerToken(r *http.Request) string {
@@ -389,21 +464,68 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimSpace(token)
 }
 
+// parseMaxAge reads the OIDC max_age request parameter, a non-negative number
+// of seconds. Absent is (0, true) — no constraint. max_age=0 maps to the
+// smallest positive duration so any prior authentication is stale, forcing
+// re-authentication as the spec requires. A malformed, negative, or
+// unrepresentable value is (0, false).
+func parseMaxAge(raw string) (time.Duration, bool) {
+	if raw == "" {
+		return 0, true
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds < 0 {
+		return 0, false
+	}
+	if seconds == 0 {
+		return time.Nanosecond, true
+	}
+	// Beyond roughly 292 years the nanosecond duration overflows into a
+	// negative value, which the authorization path reads as "no freshness
+	// constraint" — the exact opposite of what the client asked for. Such a
+	// value is refused rather than silently dropped.
+	if int64(seconds) > int64(math.MaxInt64/int64(time.Second)) {
+		return 0, false
+	}
+	return time.Duration(seconds) * time.Second, true
+}
+
 func bearerChallenge(metadataURL, scope, problem string) string {
 	parts := []string{}
 	if metadataURL != "" {
-		parts = append(parts, `resource_metadata="`+strings.ReplaceAll(metadataURL, `"`, ``)+`"`)
+		parts = append(parts, `resource_metadata=`+quoteAuthParam(metadataURL))
 	}
 	if scope != "" {
-		parts = append(parts, `scope="`+strings.ReplaceAll(scope, `"`, ``)+`"`)
+		parts = append(parts, `scope=`+quoteAuthParam(scope))
 	}
 	if problem != "" {
-		parts = append(parts, `error="`+problem+`"`)
+		parts = append(parts, `error=`+quoteAuthParam(problem))
 	}
 	if len(parts) == 0 {
 		return "Bearer"
 	}
 	return "Bearer " + strings.Join(parts, ", ")
+}
+
+// quoteAuthParam renders value as an RFC 9110 quoted-string for a
+// WWW-Authenticate challenge: double-quote and backslash are backslash-escaped
+// so a value carrying either (a resource_metadata URL with query parameters,
+// say) stays a single well-formed parameter instead of being silently mangled.
+// Control characters are dropped so nothing can break the header.
+func quoteAuthParam(value string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			continue
+		}
+		if r == '"' || r == '\\' {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, err error) {

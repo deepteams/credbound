@@ -10,6 +10,8 @@ import (
 	"github.com/deepteams/credbound"
 )
 
+// CreateOAuthIssuer stores an authorization server issuer; a duplicate ID or
+// URL reports credbound.ErrConflict.
 func (s *Store) CreateOAuthIssuer(ctx context.Context, issuer credbound.OAuthIssuer, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -31,6 +33,7 @@ func (s *Store) CreateOAuthIssuer(ctx context.Context, issuer credbound.OAuthIss
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// UpdateOAuthIssuer persists the issuer's mutable attributes.
 func (s *Store) UpdateOAuthIssuer(ctx context.Context, issuer credbound.OAuthIssuer, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -49,7 +52,8 @@ func (s *Store) UpdateOAuthIssuer(ctx context.Context, issuer credbound.OAuthIss
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
-func (s *Store) SetOAuthIssuerDisabled(ctx context.Context, issuerID string, disabled bool, at time.Time, commit credbound.Commit) error {
+// SetOAuthIssuerDisabled enables or disables the issuer.
+func (s *Store) SetOAuthIssuerDisabled(ctx context.Context, issuerID credbound.UUID, disabled bool, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -79,7 +83,8 @@ func (s *Store) SetOAuthIssuerDisabled(ctx context.Context, issuerID string, dis
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
-func (s *Store) OAuthIssuerByID(ctx context.Context, id string) (credbound.OAuthIssuer, error) {
+// OAuthIssuerByID returns the issuer with the given ID.
+func (s *Store) OAuthIssuerByID(ctx context.Context, id credbound.UUID) (credbound.OAuthIssuer, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.OAuthIssuer{}, err
 	}
@@ -92,6 +97,7 @@ func (s *Store) OAuthIssuerByID(ctx context.Context, id string) (credbound.OAuth
 	return cloneOAuthIssuer(value), nil
 }
 
+// OAuthIssuerByURL resolves an issuer by its canonical URL.
 func (s *Store) OAuthIssuerByURL(ctx context.Context, raw string) (credbound.OAuthIssuer, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.OAuthIssuer{}, err
@@ -105,6 +111,7 @@ func (s *Store) OAuthIssuerByURL(ctx context.Context, raw string) (credbound.OAu
 	return cloneOAuthIssuer(s.oauthIssuers[id]), nil
 }
 
+// OAuthIssuers streams all issuers, newest first, as one cursor page.
 func (s *Store) OAuthIssuers(ctx context.Context, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthIssuer], error] {
 	return func(yield func(credbound.PageEvent[credbound.OAuthIssuer], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
@@ -127,10 +134,12 @@ func (s *Store) OAuthIssuers(ctx context.Context, page credbound.PageRequest) it
 		sort.Slice(values, func(i, j int) bool {
 			return newer(values[i].CreatedAt, values[i].ID, values[j].CreatedAt, values[j].ID)
 		})
-		yieldMemoryPage(values, page.Limit, func(value credbound.OAuthIssuer) (time.Time, string) { return value.CreatedAt, value.ID }, yield)
+		yieldMemoryPage(values, page.Limit, func(value credbound.OAuthIssuer) (time.Time, credbound.UUID) { return value.CreatedAt, value.ID }, yield)
 	}
 }
 
+// CreateOAuthProtectedResource stores a protected resource; a duplicate ID
+// or URI reports credbound.ErrConflict.
 func (s *Store) CreateOAuthProtectedResource(ctx context.Context, resource credbound.OAuthProtectedResource, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -158,7 +167,8 @@ func (s *Store) CreateOAuthProtectedResource(ctx context.Context, resource credb
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
-func (s *Store) SetOAuthProtectedResourceDisabled(ctx context.Context, resourceID string, disabled bool, at time.Time, commit credbound.Commit) error {
+// SetOAuthProtectedResourceDisabled enables or disables the resource.
+func (s *Store) SetOAuthProtectedResourceDisabled(ctx context.Context, resourceID credbound.UUID, disabled bool, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -188,7 +198,8 @@ func (s *Store) SetOAuthProtectedResourceDisabled(ctx context.Context, resourceI
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
-func (s *Store) OAuthProtectedResourceByID(ctx context.Context, id string) (credbound.OAuthProtectedResource, error) {
+// OAuthProtectedResourceByID returns the resource with the given ID.
+func (s *Store) OAuthProtectedResourceByID(ctx context.Context, id credbound.UUID) (credbound.OAuthProtectedResource, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.OAuthProtectedResource{}, err
 	}
@@ -201,6 +212,7 @@ func (s *Store) OAuthProtectedResourceByID(ctx context.Context, id string) (cred
 	return cloneOAuthResource(value), nil
 }
 
+// OAuthProtectedResourceByURI resolves a resource by its canonical URI.
 func (s *Store) OAuthProtectedResourceByURI(ctx context.Context, uri string) (credbound.OAuthProtectedResource, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.OAuthProtectedResource{}, err
@@ -214,7 +226,9 @@ func (s *Store) OAuthProtectedResourceByURI(ctx context.Context, uri string) (cr
 	return cloneOAuthResource(s.oauthResources[id]), nil
 }
 
-func (s *Store) OAuthProtectedResources(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthProtectedResource], error] {
+// OAuthProtectedResources streams resources, optionally filtered by
+// workspace, newest first, as one cursor page.
+func (s *Store) OAuthProtectedResources(ctx context.Context, workspaceID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthProtectedResource], error] {
 	return func(yield func(credbound.PageEvent[credbound.OAuthProtectedResource], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
 		if err != nil {
@@ -236,11 +250,16 @@ func (s *Store) OAuthProtectedResources(ctx context.Context, workspaceID string,
 		sort.Slice(values, func(i, j int) bool {
 			return newer(values[i].CreatedAt, values[i].ID, values[j].CreatedAt, values[j].ID)
 		})
-		yieldMemoryPage(values, page.Limit, func(value credbound.OAuthProtectedResource) (time.Time, string) { return value.CreatedAt, value.ID }, yield)
+		yieldMemoryPage(values, page.Limit, func(value credbound.OAuthProtectedResource) (time.Time, credbound.UUID) {
+			return value.CreatedAt, value.ID
+		}, yield)
 	}
 }
 
-func (s *Store) CreateOAuthClient(ctx context.Context, client credbound.OAuthClient, initialAccessTokenID string, usedAt time.Time, commit credbound.Commit) error {
+// CreateOAuthClient stores a dynamically registered client, consuming a use
+// of the initial access token in the same commit when one gated the
+// registration.
+func (s *Store) CreateOAuthClient(ctx context.Context, client credbound.OAuthClient, initialAccessTokenID credbound.UUID, usedAt time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -269,7 +288,7 @@ func (s *Store) CreateOAuthClient(ctx context.Context, client credbound.OAuthCli
 		return credbound.ErrConflict
 	}
 	var initial credbound.OAuthInitialAccessToken
-	if initialAccessTokenID != "" {
+	if initialAccessTokenID != (credbound.UUID{}) {
 		var ok bool
 		initial, ok = s.oauthInitialTokens[initialAccessTokenID]
 		if !ok || initial.IssuerID != client.IssuerID {
@@ -285,13 +304,15 @@ func (s *Store) CreateOAuthClient(ctx context.Context, client credbound.OAuthCli
 	}
 	s.oauthClients[client.ID] = cloneOAuthClient(client)
 	s.oauthClientKeys[key] = client.ID
-	if initialAccessTokenID != "" {
+	if initialAccessTokenID != (credbound.UUID{}) {
 		initial.RegistrationCount++
 		s.oauthInitialTokens[initialAccessTokenID] = cloneOAuthInitialToken(initial)
 	}
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// UpsertOAuthCIMDClient inserts or refreshes a client registered through a
+// Client Identifier Metadata Document.
 func (s *Store) UpsertOAuthCIMDClient(ctx context.Context, client credbound.OAuthClient, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -314,13 +335,43 @@ func (s *Store) UpsertOAuthCIMDClient(ctx context.Context, client credbound.OAut
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
-func (s *Store) SetOAuthClientDisabled(ctx context.Context, clientID string, disabled bool, at time.Time, commit credbound.Commit) error {
+// SetOAuthClientDisabled enables or disables the client.
+// RotateOAuthClientCredentials replaces the client's secret digest and/or
+// inline JWKS (with its recomputed metadata hash) after an administrative
+// credential rotation.
+func (s *Store) RotateOAuthClientCredentials(ctx context.Context, clientRecordID credbound.UUID, secretDigest, jwks, metadataHash []byte, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	client, ok := s.oauthClients[clientID]
+	client, ok := s.oauthClients[clientRecordID]
+	if !ok {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	if secretDigest != nil {
+		client.SecretDigest = slices.Clone(secretDigest)
+	}
+	if jwks != nil {
+		client.JWKS = slices.Clone(jwks)
+		client.MetadataHash = slices.Clone(metadataHash)
+	}
+	client.UpdatedAt = at
+	s.oauthClients[clientRecordID] = cloneOAuthClient(client)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+func (s *Store) SetOAuthClientDisabled(ctx context.Context, clientRecordID credbound.UUID, disabled bool, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	client, ok := s.oauthClients[clientRecordID]
 	if !ok {
 		return credbound.ErrNotFound
 	}
@@ -333,10 +384,10 @@ func (s *Store) SetOAuthClientDisabled(ctx context.Context, clientID string, dis
 		client.DisabledAt = cloneTime(&at)
 	}
 	client.UpdatedAt = at
-	s.oauthClients[clientID] = cloneOAuthClient(client)
+	s.oauthClients[clientRecordID] = cloneOAuthClient(client)
 	if disabled {
 		for id, grant := range s.oauthGrants {
-			if grant.ClientRecordID == clientID {
+			if grant.ClientRecordID == clientRecordID {
 				s.revokeOAuthGrantLocked(id, at)
 			}
 		}
@@ -344,7 +395,8 @@ func (s *Store) SetOAuthClientDisabled(ctx context.Context, clientID string, dis
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
-func (s *Store) OAuthClientByID(ctx context.Context, id string) (credbound.OAuthClient, error) {
+// OAuthClientByID returns the client with the given record ID.
+func (s *Store) OAuthClientByID(ctx context.Context, id credbound.UUID) (credbound.OAuthClient, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.OAuthClient{}, err
 	}
@@ -357,7 +409,8 @@ func (s *Store) OAuthClientByID(ctx context.Context, id string) (credbound.OAuth
 	return cloneOAuthClient(value), nil
 }
 
-func (s *Store) OAuthClientByClientID(ctx context.Context, issuerID, clientID string) (credbound.OAuthClient, error) {
+// OAuthClientByClientID resolves the issuer's client by its OAuth client_id.
+func (s *Store) OAuthClientByClientID(ctx context.Context, issuerID credbound.UUID, clientID string) (credbound.OAuthClient, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.OAuthClient{}, err
 	}
@@ -370,7 +423,9 @@ func (s *Store) OAuthClientByClientID(ctx context.Context, issuerID, clientID st
 	return cloneOAuthClient(s.oauthClients[id]), nil
 }
 
-func (s *Store) OAuthClients(ctx context.Context, issuerID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthClient], error] {
+// OAuthClients streams the issuer's clients, newest first, as one cursor
+// page.
+func (s *Store) OAuthClients(ctx context.Context, issuerID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthClient], error] {
 	return func(yield func(credbound.PageEvent[credbound.OAuthClient], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
 		if err != nil {
@@ -395,10 +450,12 @@ func (s *Store) OAuthClients(ctx context.Context, issuerID string, page credboun
 		for index := range values {
 			values[index].SecretDigest = nil
 		}
-		yieldMemoryPage(values, page.Limit, func(value credbound.OAuthClient) (time.Time, string) { return value.CreatedAt, value.ID }, yield)
+		yieldMemoryPage(values, page.Limit, func(value credbound.OAuthClient) (time.Time, credbound.UUID) { return value.CreatedAt, value.ID }, yield)
 	}
 }
 
+// CreateOAuthInitialAccessToken stores an initial access token for gated
+// dynamic client registration.
 func (s *Store) CreateOAuthInitialAccessToken(ctx context.Context, token credbound.OAuthInitialAccessToken, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -423,6 +480,8 @@ func (s *Store) CreateOAuthInitialAccessToken(ctx context.Context, token credbou
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// OAuthInitialAccessTokenByPrefix returns the token record addressed by its
+// lookup prefix.
 func (s *Store) OAuthInitialAccessTokenByPrefix(ctx context.Context, prefix string) (credbound.OAuthInitialAccessToken, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.OAuthInitialAccessToken{}, err
@@ -436,7 +495,37 @@ func (s *Store) OAuthInitialAccessTokenByPrefix(ctx context.Context, prefix stri
 	return cloneOAuthInitialToken(s.oauthInitialTokens[id]), nil
 }
 
-func (s *Store) RevokeOAuthInitialAccessToken(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
+// OAuthInitialAccessTokens streams the issuer's DCR bootstrap credentials,
+// oldest first, revoked ones included and digests omitted.
+func (s *Store) OAuthInitialAccessTokens(ctx context.Context, issuerID credbound.UUID) iter.Seq2[credbound.OAuthInitialAccessToken, error] {
+	return func(yield func(credbound.OAuthInitialAccessToken, error) bool) {
+		if err := ctx.Err(); err != nil {
+			yield(credbound.OAuthInitialAccessToken{}, err)
+			return
+		}
+		s.mu.RLock()
+		values := make([]credbound.OAuthInitialAccessToken, 0)
+		for _, token := range s.oauthInitialTokens {
+			if token.IssuerID == issuerID {
+				value := cloneOAuthInitialToken(token)
+				value.Digest = nil
+				values = append(values, value)
+			}
+		}
+		s.mu.RUnlock()
+		sort.Slice(values, func(i, j int) bool {
+			return newer(values[j].CreatedAt, values[j].ID, values[i].CreatedAt, values[i].ID)
+		})
+		for _, value := range values {
+			if !yield(value, nil) {
+				return
+			}
+		}
+	}
+}
+
+// RevokeOAuthInitialAccessToken marks the token revoked.
+func (s *Store) RevokeOAuthInitialAccessToken(ctx context.Context, id credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -455,6 +544,8 @@ func (s *Store) RevokeOAuthInitialAccessToken(ctx context.Context, id string, at
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// CreateOAuthGrantAndCode atomically stores a user grant with its single-use
+// authorization code.
 func (s *Store) CreateOAuthGrantAndCode(ctx context.Context, grant credbound.OAuthGrant, code credbound.OAuthAuthorizationCode, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -486,7 +577,8 @@ func (s *Store) CreateOAuthGrantAndCode(ctx context.Context, grant credbound.OAu
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
-func (s *Store) OAuthGrant(ctx context.Context, id string) (credbound.OAuthGrant, error) {
+// OAuthGrant returns the grant with the given ID.
+func (s *Store) OAuthGrant(ctx context.Context, id credbound.UUID) (credbound.OAuthGrant, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.OAuthGrant{}, err
 	}
@@ -499,7 +591,9 @@ func (s *Store) OAuthGrant(ctx context.Context, id string) (credbound.OAuthGrant
 	return cloneOAuthGrant(value), nil
 }
 
-func (s *Store) RevokeOAuthGrant(ctx context.Context, grantID string, at time.Time, commit credbound.Commit) error {
+// RevokeOAuthGrant revokes the grant together with its outstanding access
+// and refresh tokens.
+func (s *Store) RevokeOAuthGrant(ctx context.Context, grantID credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -516,7 +610,9 @@ func (s *Store) RevokeOAuthGrant(ctx context.Context, grantID string, at time.Ti
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
-func (s *Store) OAuthGrants(ctx context.Context, userID, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthGrant], error] {
+// OAuthGrants streams grants, optionally filtered by user and workspace,
+// newest first, as one cursor page.
+func (s *Store) OAuthGrants(ctx context.Context, userID, workspaceID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthGrant], error] {
 	return func(yield func(credbound.PageEvent[credbound.OAuthGrant], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
 		if err != nil {
@@ -530,7 +626,7 @@ func (s *Store) OAuthGrants(ctx context.Context, userID, workspaceID string, pag
 		s.mu.RLock()
 		values := make([]credbound.OAuthGrant, 0)
 		for _, value := range s.oauthGrants {
-			if (userID == "" || value.UserID == userID) && (workspaceID == "" || value.WorkspaceID == workspaceID) && afterCursor(value.CreatedAt, value.ID, cursor) {
+			if (userID == (credbound.UUID{}) || value.UserID == userID) && (workspaceID == (credbound.UUID{}) || value.WorkspaceID == workspaceID) && afterCursor(value.CreatedAt, value.ID, cursor) {
 				values = append(values, cloneOAuthGrant(value))
 			}
 		}
@@ -538,11 +634,11 @@ func (s *Store) OAuthGrants(ctx context.Context, userID, workspaceID string, pag
 		sort.Slice(values, func(i, j int) bool {
 			return newer(values[i].CreatedAt, values[i].ID, values[j].CreatedAt, values[j].ID)
 		})
-		yieldMemoryPage(values, page.Limit, func(value credbound.OAuthGrant) (time.Time, string) { return value.CreatedAt, value.ID }, yield)
+		yieldMemoryPage(values, page.Limit, func(value credbound.OAuthGrant) (time.Time, credbound.UUID) { return value.CreatedAt, value.ID }, yield)
 	}
 }
 
-func (s *Store) revokeOAuthGrantLocked(grantID string, at time.Time) {
+func (s *Store) revokeOAuthGrantLocked(grantID credbound.UUID, at time.Time) {
 	grant, ok := s.oauthGrants[grantID]
 	if !ok {
 		return
@@ -564,6 +660,8 @@ func (s *Store) revokeOAuthGrantLocked(grantID string, at time.Time) {
 	}
 }
 
+// OAuthAuthorizationCodeByPrefix returns the authorization code record
+// addressed by its lookup prefix.
 func (s *Store) OAuthAuthorizationCodeByPrefix(ctx context.Context, prefix string) (credbound.OAuthAuthorizationCode, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.OAuthAuthorizationCode{}, err
@@ -577,7 +675,10 @@ func (s *Store) OAuthAuthorizationCodeByPrefix(ctx context.Context, prefix strin
 	return cloneOAuthCode(s.oauthCodes[id]), nil
 }
 
-func (s *Store) ConsumeOAuthAuthorizationCode(ctx context.Context, codeID string, usedAt time.Time, access credbound.OAuthAccessToken, refresh *credbound.OAuthRefreshToken, commit credbound.Commit) error {
+// ConsumeOAuthAuthorizationCode atomically marks the single-use code
+// consumed and stores the access and optional refresh token it was exchanged
+// for.
+func (s *Store) ConsumeOAuthAuthorizationCode(ctx context.Context, codeID credbound.UUID, usedAt time.Time, access credbound.OAuthAccessToken, refresh *credbound.OAuthRefreshToken, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -613,6 +714,8 @@ func (s *Store) ConsumeOAuthAuthorizationCode(ctx context.Context, codeID string
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
+// OAuthAccessTokenByPrefix returns the access token record addressed by its
+// lookup prefix.
 func (s *Store) OAuthAccessTokenByPrefix(ctx context.Context, prefix string) (credbound.OAuthAccessToken, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.OAuthAccessToken{}, err
@@ -626,6 +729,70 @@ func (s *Store) OAuthAccessTokenByPrefix(ctx context.Context, prefix string) (cr
 	return cloneOAuthAccessToken(s.oauthAccessTokens[id]), nil
 }
 
+func cloneOAuthClientAccessToken(v credbound.OAuthClientAccessToken) credbound.OAuthClientAccessToken {
+	v.Digest = slices.Clone(v.Digest)
+	v.Scopes = slices.Clone(v.Scopes)
+	v.RevokedAt = cloneTime(v.RevokedAt)
+	return v
+}
+
+// CreateOAuthClientAccessToken stores a client-credentials access token.
+func (s *Store) CreateOAuthClientAccessToken(ctx context.Context, value credbound.OAuthClientAccessToken, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.oauthClientTokenKeys[value.Prefix]; ok {
+		return credbound.ErrConflict
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	s.oauthClientTokens[value.ID] = cloneOAuthClientAccessToken(value)
+	s.oauthClientTokenKeys[value.Prefix] = value.ID
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+// OAuthClientAccessTokenByPrefix returns the client-credentials access token
+// addressed by its lookup prefix.
+func (s *Store) OAuthClientAccessTokenByPrefix(ctx context.Context, prefix string) (credbound.OAuthClientAccessToken, error) {
+	if err := ctx.Err(); err != nil {
+		return credbound.OAuthClientAccessToken{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id, ok := s.oauthClientTokenKeys[prefix]
+	if !ok {
+		return credbound.OAuthClientAccessToken{}, credbound.ErrNotFound
+	}
+	return cloneOAuthClientAccessToken(s.oauthClientTokens[id]), nil
+}
+
+// RevokeOAuthClientAccessToken marks the client-credentials access token
+// revoked.
+func (s *Store) RevokeOAuthClientAccessToken(ctx context.Context, id credbound.UUID, at time.Time, commit credbound.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	token, ok := s.oauthClientTokens[id]
+	if !ok {
+		return credbound.ErrNotFound
+	}
+	previous, err := s.prepareCommitLocked(commit)
+	if err != nil {
+		return err
+	}
+	token.RevokedAt = &at
+	s.oauthClientTokens[id] = cloneOAuthClientAccessToken(token)
+	return s.finishCommitLocked(ctx, commit, previous)
+}
+
+// OAuthRefreshTokenByPrefix returns the refresh token record addressed by
+// its lookup prefix.
 func (s *Store) OAuthRefreshTokenByPrefix(ctx context.Context, prefix string) (credbound.OAuthRefreshToken, error) {
 	if err := ctx.Err(); err != nil {
 		return credbound.OAuthRefreshToken{}, err
@@ -639,7 +806,9 @@ func (s *Store) OAuthRefreshTokenByPrefix(ctx context.Context, prefix string) (c
 	return cloneOAuthRefreshToken(s.oauthRefreshTokens[id]), nil
 }
 
-func (s *Store) RotateOAuthRefreshToken(ctx context.Context, previousID string, usedAt time.Time, access credbound.OAuthAccessToken, refresh credbound.OAuthRefreshToken, commit credbound.Commit) error {
+// RotateOAuthRefreshToken atomically retires the used refresh token and
+// stores its successor pair, keeping the family linked for reuse detection.
+func (s *Store) RotateOAuthRefreshToken(ctx context.Context, previousID credbound.UUID, usedAt time.Time, access credbound.OAuthAccessToken, refresh credbound.OAuthRefreshToken, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -675,7 +844,8 @@ func (s *Store) RotateOAuthRefreshToken(ctx context.Context, previousID string, 
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
-func (s *Store) RevokeOAuthAccessToken(ctx context.Context, id string, at time.Time, commit credbound.Commit) error {
+// RevokeOAuthAccessToken marks the access token revoked.
+func (s *Store) RevokeOAuthAccessToken(ctx context.Context, id credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -696,20 +866,23 @@ func (s *Store) RevokeOAuthAccessToken(ctx context.Context, id string, at time.T
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
-func (s *Store) RevokeOAuthRefreshFamily(ctx context.Context, familyID string, at time.Time, commit credbound.Commit) error {
+// RevokeOAuthRefreshFamily revokes every token in the refresh-token family
+// and the access tokens of the grants the family descends from, the
+// fail-safe response to detected refresh token reuse: the thief's already-
+// minted access token must die with the family, not survive until expiry.
+func (s *Store) RevokeOAuthRefreshFamily(ctx context.Context, familyID credbound.UUID, at time.Time, commit credbound.Commit) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	found := false
+	grants := make(map[string]bool)
 	for _, token := range s.oauthRefreshTokens {
 		if token.FamilyID == familyID {
-			found = true
-			break
+			grants[token.GrantID.String()] = true
 		}
 	}
-	if !found {
+	if len(grants) == 0 {
 		return credbound.ErrNotFound
 	}
 	previous, err := s.prepareCommitLocked(commit)
@@ -722,10 +895,21 @@ func (s *Store) RevokeOAuthRefreshFamily(ctx context.Context, familyID string, a
 			s.oauthRefreshTokens[id] = token
 		}
 	}
+	for id, token := range s.oauthAccessTokens {
+		if grants[token.GrantID.String()] && token.RevokedAt == nil {
+			token.RevokedAt = cloneTime(&at)
+			s.oauthAccessTokens[id] = token
+		}
+	}
 	return s.finishCommitLocked(ctx, commit, previous)
 }
 
-func oauthClientKey(issuerID, clientID string) string { return issuerID + "\x00" + clientID }
+// oauthClientKey indexes a client by its protocol client_id under an issuer.
+// That identifier is text, not a record identifier: for a CIMD client it is a
+// Client Identifier URL.
+func oauthClientKey(issuerID credbound.UUID, clientID string) string {
+	return issuerID.String() + "\x00" + clientID
+}
 
 func cloneOAuthIssuer(v credbound.OAuthIssuer) credbound.OAuthIssuer {
 	v.CIMDAllowedOrigins = slices.Clone(v.CIMDAllowedOrigins)
@@ -745,6 +929,7 @@ func cloneOAuthClient(v credbound.OAuthClient) credbound.OAuthClient {
 	v.GrantTypes = slices.Clone(v.GrantTypes)
 	v.ResponseTypes = slices.Clone(v.ResponseTypes)
 	v.Scopes = slices.Clone(v.Scopes)
+	v.ClientCredentialsResources = slices.Clone(v.ClientCredentialsResources)
 	v.JWKS = slices.Clone(v.JWKS)
 	v.SecretDigest = slices.Clone(v.SecretDigest)
 	v.MetadataHash = slices.Clone(v.MetadataHash)

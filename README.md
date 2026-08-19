@@ -10,19 +10,38 @@ and open to everyone. It centralizes security invariants that would otherwise
 be reimplemented in every project:
 
 - local password authentication;
-- WebAuthn passkeys;
+- WebAuthn passkeys, including usernameless sign-in over discoverable
+  credentials;
 - TOTP second factor and recovery codes;
-- password reset and magic-link sign-in through single-use, expiring
-  email-proof tokens with enumeration-resistant initiation;
+- password reset, magic-link, and email OTP sign-in through single-use,
+  expiring email proofs with enumeration-resistant initiation;
+- an optional password policy port for breached-password (HIBP) vetting;
 - built-in account lockout after consecutive password or TOTP failures;
-- multiple verified email addresses per user, with one primary address;
+- multiple verified email addresses per user, with one primary address, plus an
+  updatable display name (self-service with a recent sign-in, any account by an
+  instance administrator);
 - transactional tracking of the latest authentication (`last_seen_at`);
 - optional SSO per SaaS application (Google, GitHub, Microsoft, OIDC, and SAML);
 - freshness checks for step-up operations;
-- Personal Access Tokens (PATs) displayed only once;
+- Personal Access Tokens (PATs) displayed only once, whose scopes are
+  enforced ceilings on workspace permissions, not labels;
 - workspace isolation and extensible RBAC (`admin`, `member`, and application roles);
 - workspace invitations whose invitee chooses their own password, and an
   optional per-workspace MFA requirement;
+- optional self-service signup that atomically creates the user, their
+  workspace, and their admin membership, with enumeration-resistant handling
+  of already-registered addresses;
+- optional server-side sessions behind single-display `cbs_` tokens, with
+  device listings, an absolute TTL and an optional idle timeout, and a
+  session-revocation cascade on reset, password change, disable, and
+  credential revocation;
+- an optional per-address cooldown on the unauthenticated email-issuing flows
+  (reset, magic-link, email OTP, verification resend) to blunt mail bombing;
+- optional verified workspace email domains (DNS-challenge capture) with
+  per-domain SSO enforcement and just-in-time provisioning of passwordless
+  members from a trusted SSO provider — a claim left unverified past
+  `Config.DomainClaimTTL` loses its name reservation, so a squatter cannot
+  permanently deny the domain's real owner;
 - atomic revocation of every PAT and OAuth grant of a user;
 - optional SCIM 2.0 provisioning per workspace (`Users`, `Groups`, `.search`);
 - optional OAuth 2.0/OIDC authorization-server capabilities for remote MCP
@@ -43,8 +62,8 @@ The project follows a _Specs First_ approach. The product contract is defined in
 
 ## Status
 
-The core, in-memory store, SQLite store, PostgreSQL store and migrations, and
-security adapters are implemented. Version `v0` may still introduce breaking
+The core, in-memory store, PostgreSQL store and migrations, and security
+adapters are implemented. Version `v0` may still introduce breaking
 changes before the first stable release. CI applies the PostgreSQL migrations
 into the dedicated `credbound` schema and exercises lifecycle, OAuth, pagination, transactional
 hooks, and append-only audit behavior against a real PostgreSQL service.
@@ -58,10 +77,20 @@ hooks, and append-only audit behavior against a real PostgreSQL service.
   verified.
 - An SSO identity is explicitly linked by `issuer` and `subject`; the IdP email
   address never triggers an automatic account merge.
-- A PAT can never satisfy an interactive step-up request.
+- SSO and WebAuthn ceremony continuations are single use: the success commit
+  consumes them, so a captured browser response can never be replayed —
+  passkey signature counters alone cannot guarantee that, since many
+  authenticators legitimately report a constant zero.
+- A PAT can never satisfy an interactive step-up request. Be aware that a
+  workspace-unbound PAT holding the `*` scope is an instance credential: when
+  its owner is an instance administrator it can perform the administration
+  *reads* (listing every user and workspace, reading the instance audit log),
+  though never the mutations, which stay interactive-only. Mint `*` PATs for
+  automation deliberately.
 - Completing a password reset atomically revokes the account's PATs and OAuth
   grants and clears its lockout; a locked account still performs the same
-  password derivation and never confirms whether an address exists.
+  password derivation and answers with the same public error as a wrong
+  password, so it never confirms whether an address exists.
 - Every audit event is hash-chained to its predecessor inside the commit
   transaction; tampering is detectable with `VerifyAuditChain`.
 - Access to application resources must always provide a `workspace_id`.
@@ -70,15 +99,69 @@ hooks, and append-only audit behavior against a real PostgreSQL service.
 
 ## Integration
 
+Credbound requires Go 1.26 or newer (it relies on the standard library's
+`crypto/hkdf`).
+
 Credbound is a library, not a server. The host service remains responsible for
 cookies, CSRF, rate limiting, its TLS/H2/H3 reverse proxy, and its UI. WebAuthn
 ceremonies remain transport-agnostic: the JSON produced by the library is sent
 to the browser, whose response is then passed back to the library.
 
+For host-side rate limiting beyond the built-in per-account lockout and
+per-address email cooldown, the authentication events carry the
+`RequestMetadata` (client IP and user agent) the host supplied — listen for
+`AuthenticationFailureEvent` and `UserLockedEvent` to feed an IP-level
+throttle at the edge.
+
+### Sessions and the `Authentication` capability
+
+Every successful sign-in (`AuthenticatePassword`, `CompleteEmailAuthentication`,
+`CompleteEmailOTP`, `FinishPasskeyAuthentication`, `FinishSSO`, `VerifyTOTP`)
+returns an `Authentication` value. It is a **security capability, not a lookup
+result**: `Level`, `Method`, and `AuthenticatedAt` directly drive step-up
+checks and per-workspace MFA enforcement. The host owns sessions and must:
+
+- store the `Authentication` server-side (or in a tamper-proof, signed and
+  encrypted cookie) and reconstruct it verbatim on each request;
+- never rebuild one from client-supplied fields and never upgrade `Level`
+  itself — only `VerifyTOTP`, a passkey, or SSO reauthentication may
+  produce AAL2;
+- treat `SecondFactorRequired: true` as a *pending* session: send the user
+  to `VerifyTOTP` and store the AAL2 `Authentication` that it returns —
+  `Authorize` and `AuthorizePermission` reject a pending context with
+  `ErrStepUpRequired` as a backstop, but keeping it out of the host's own
+  authorized paths remains the host's job;
+- terminate its own sessions for a user when `CompletePasswordReset`,
+  `ChangePassword`, `DisableUser`, or `RevokeUserCredentials` fires — the
+  library revokes PATs and OAuth grants but cannot see host sessions.
+
+`RequireStepUp` accepts only interactive AAL2 authentications newer than
+`Config.StepUpMaxAge`; a PAT can never satisfy it.
+
+Hosts that would rather not manage session persistence themselves can use the
+optional server-side session module (`CreateSession`, `AuthenticateSession`,
+`Sessions`, `RevokeSession`, `RevokeUserSessions`), available when the store
+implements `SessionStore` — both bundled stores, in-memory and PostgreSQL,
+do. It persists the `Authentication` snapshot behind a
+single-display `cbs_` token (digest-only at rest, absolute
+`Config.SessionTTL` expiry plus an optional `Config.SessionIdleTimeout`),
+lists a user's devices, and extends the revocation cascade of
+`CompletePasswordReset`, `ChangePassword`, `DisableUser`, and
+`RevokeUserCredentials` to those sessions within the same transaction. The
+token's transport — cookies, CSRF, TLS — remains host-owned.
+
 ### Minimal setup
 
 ```go
-store, err := sqlite.New(database)
+import (
+    "github.com/deepteams/credbound"
+    "github.com/deepteams/credbound/password"
+    "github.com/deepteams/credbound/sqlstore/postgresql" // driver: jackc/pgx/v5
+    "github.com/deepteams/credbound/totpadapter"
+    "github.com/deepteams/credbound/webauthnadapter"
+)
+
+store, err := postgresql.New(database, pool)
 if err != nil {
     return err
 }
@@ -106,8 +189,8 @@ if err != nil {
 auth, err := credbound.New(credbound.Config{
     Store:          store,
     Passwords:      passwords,
-    TOTP:           totpProvider,
-    Passkeys:       passkeys,
+    TOTP:           totpProvider,  // optional second factor
+    Passkeys:       passkeys,      // optional AAL2 first factor
     SecretKey:      encryptionKey, // exactly 32 bytes
     PATPepper:      patPepper,     // at least 32 bytes
     RecoveryPepper: recoveryPepper,// at least 32 bytes
@@ -125,9 +208,24 @@ auth, err := credbound.New(credbound.Config{
 })
 ```
 
-Each SSO provider has a UUIDv7 configuration identifier. The host service
-implements the `SSOProvider` port for the IdPs it enables and remains responsible
-for network exchanges, client secrets, and cryptographic callback validation.
+The snippet assumes the embedded migrations have already been applied to
+`database` (see `migrations.PostgreSQL()` below).
+For a first experiment, `memory.New()` (package
+`github.com/deepteams/credbound/memory`) is a full-featured store that needs
+no database or migrations at all.
+Only `Store`, `Passwords`, and the three secrets are required: the `TOTP` and
+`Passkeys` providers are optional, and their flows return `ErrNotSupported`
+until the host wires them. A complete, runnable integration — PostgreSQL,
+migration application, first-run bootstrap, and a cookie-session HTTP layer
+following the sessions contract above — lives in
+[`examples/minimal`](examples/minimal/main.go).
+
+Each SSO provider has a UUIDv7 configuration identifier. The bundled
+`ssoadapter` (any spec-compliant OIDC issuer, including Google and Microsoft
+Entra ID), `githubadapter` (GitHub's OAuth 2.0 + REST flow), and `samladapter`
+(SAML 2.0) packages implement the `SSOProvider` port; the host service may
+also implement it for other IdPs and then remains responsible for network
+exchanges, client secrets, and cryptographic callback validation.
 Credbound handles sealed continuations, explicit linking, AAL2, step-up with
 forced IdP reauthentication, persistence, and auditing.
 
@@ -140,7 +238,7 @@ roles or permissions.
 
 ### Optional SCIM provisioning
 
-The in-memory, SQLite, and PostgreSQL stores implement `SCIMStore`. A SaaS
+The in-memory and PostgreSQL stores implement `SCIMStore`. A SaaS
 application offering SCIM creates a workspace configuration, returns the raw
 credential to the directory once, and then mounts the adapter:
 
@@ -166,6 +264,12 @@ discovery, authorization, token, revocation, registration, UserInfo, and JWKS
 routes when mounted by the host. `oauthhttp.Protect` validates a bearer token
 again at the resource boundary before calling an MCP handler.
 
+Machine-to-machine access uses the `client_credentials` grant, deliberately
+narrow: only an administratively pre-registered confidential client may hold
+it, registration requires both a scope list and an explicit allowlist of the
+resource URIs the client may target, and its tokens are individually
+revocable through the revocation endpoint.
+
 Use `oauthclientadapter.JWTAssertionVerifier` for hardened `private_key_jwt`
 verification and `oauthhttp.MetadataFetcher` for CIMD loading. The latter
 blocks special/private destinations, redirects, oversized documents, and
@@ -180,7 +284,7 @@ commercial policy.
 A `TransactionHook` extends the Credbound transaction before its audit record
 and commit. This is the intended extension point for atomically creating a
 freemium credit ledger, quota, or outbox row in the host-service database.
-SQLite and PostgreSQL provide a typed `TxFrom`; the handle is valid only during
+The PostgreSQL store provides a typed `TxFrom`; the handle is valid only during
 the callback. Any hook error or panic cancels the entire mutation.
 
 An `EventListener` then receives the committed fact, such as `user.created` or
@@ -199,16 +303,45 @@ To add a business fact to the audit log, the service calls `RecordAudit` with an
 `AuditInput`. Credbound always constructs the UUIDv7 identifier, actor, and
 timestamp.
 
-Embedded Goose migrations are available through `migrations.SQLite()` and
+Embedded Goose migrations are available through
 `migrations.PostgreSQL()`. Versions are timestamps so they interleave with the
-host service's own migrations, and on PostgreSQL every table lives in the
-dedicated `credbound` schema. The first `Bootstrap` call atomically creates the
+host service's own migrations, and every table lives in the dedicated
+`credbound` schema. Hosts without a migration tool call
+`migrations.ApplyPostgreSQL(ctx, db)`
+instead — idempotent, one transaction per migration; pick goose or the
+helpers for a given database, never both. The first `Bootstrap` call atomically creates the
 first user, their workspace, their `admin` membership, and their instance-level
 `root` role.
 
 Operational guidance is in [`specs/OPERATIONS.md`](specs/OPERATIONS.md), the
 release process in [`specs/RELEASING.md`](specs/RELEASING.md), and vulnerability
 reporting in [`SECURITY.md`](SECURITY.md).
+
+### Testing your integration
+
+The [`credboundtest`](credboundtest) package builds a fully wired `Manager` for
+host-service tests: in-memory store, fast fake password hasher, deterministic
+clock and randomness, and TOTP/passkey fakes whose ceremonies succeed with
+fixed inputs. `DiscoverablePasskeys` replaces the passkey fake when the test
+covers usernameless sign-in, and `WithStore` points the manager at a
+migration-applied PostgreSQL store when persistence itself is under
+test. Nothing in it is safe for production.
+
+```go
+func TestSignIn(t *testing.T) {
+    clock := credboundtest.NewClock(credboundtest.DefaultStartTime)
+    manager := credboundtest.NewManager(t, credboundtest.WithClock(clock))
+    authn, workspace := credboundtest.Bootstrap(t, manager)
+
+    issued, err := manager.CreatePAT(context.Background(),
+        credboundtest.AAL2(authn.UserID, clock.Now()), // test-only step-up
+        credbound.CreatePATInput{Name: "ci", WorkspaceID: workspace.ID, Scopes: []string{"read"}})
+    if err != nil {
+        t.Fatal(err)
+    }
+    _ = issued.Token // raw token, returned exactly once
+}
+```
 
 ## Verification
 
@@ -218,8 +351,9 @@ make coverage
 make verify
 ```
 
-`make coverage` enforces consolidated coverage strictly above 90% for maintained
-code. Generated sqlc code and the generated PostgreSQL store are excluded from
+`make coverage` enforces consolidated coverage of at least 89.5% for maintained
+code — the floor the suite sustains, tracked in `scripts/coverage.sh`.
+Generated sqlc code and the generated PostgreSQL store are excluded from
 this measurement; their reproducibility is checked by `make generate`.
 
 ## Contributing

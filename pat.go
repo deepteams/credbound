@@ -2,7 +2,6 @@ package credbound
 
 import (
 	"context"
-	"crypto/hmac"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -11,6 +10,35 @@ import (
 	"strings"
 )
 
+// defaultPATPrefix is the marker a PAT carries when Config.PATPrefix is unset.
+const defaultPATPrefix = "cbp"
+
+// validTokenMarker reports whether a value can serve as the leading marker of
+// a token. The parsers split on "_", so a marker may not contain one; case is
+// excluded because a marker is compared verbatim, and accepting several
+// spellings of one deployment's tokens is exactly what the token parsers
+// refuse.
+func validTokenMarker(marker string) bool {
+	if len(marker) == 0 || len(marker) > 16 {
+		return false
+	}
+	for _, char := range marker {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// CreatePAT issues a personal access token with at least 256 bits of entropy
+// and returns the raw token exactly once; only its HMAC digest is persisted,
+// atomically with the audit event. It requires a fresh AAL2 step-up, and
+// binding the token to a workspace additionally requires access to that
+// workspace. Each scope is either the "*" wildcard or a workspace
+// permission string: AuthorizePermission denies a scoped authentication any
+// permission outside its scopes, and the coarse role-based Authorize
+// requires the wildcard, so the scopes chosen here are the ceiling of what
+// the token can ever do.
 func (m *Manager) CreatePAT(ctx context.Context, actor Authentication, input CreatePATInput) (_ IssuedPAT, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.pat.create", started, err) }()
@@ -19,12 +47,12 @@ func (m *Manager) CreatePAT(ctx context.Context, actor Authentication, input Cre
 	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" || len(name) > 100 {
-		return IssuedPAT{}, fmt.Errorf("%w: PAT name is required and limited to 100 characters", ErrInvalidInput)
+		return IssuedPAT{}, &ValidationError{Field: "name", Rule: "length", Message: "PAT name is required and limited to 100 characters"}
 	}
 	if input.ExpiresAt != nil && !input.ExpiresAt.After(m.now()) {
-		return IssuedPAT{}, fmt.Errorf("%w: PAT expiration must be in the future", ErrInvalidInput)
+		return IssuedPAT{}, &ValidationError{Field: "expires_at", Rule: "past", Message: "PAT expiration must be in the future"}
 	}
-	if input.WorkspaceID != "" {
+	if input.WorkspaceID != (UUID{}) {
 		if err := m.AuthorizePermission(ctx, actor, input.WorkspaceID, PermissionWorkspaceAccess); err != nil {
 			return IssuedPAT{}, err
 		}
@@ -42,7 +70,7 @@ func (m *Manager) CreatePAT(ctx context.Context, actor Authentication, input Cre
 		return IssuedPAT{}, err
 	}
 	prefix := hex.EncodeToString(prefixBytes)
-	raw := "cbp_" + prefix + "_" + base64.RawURLEncoding.EncodeToString(secret)
+	raw := m.patPrefix + "_" + prefix + "_" + base64.RawURLEncoding.EncodeToString(secret)
 	id, err := m.newID()
 	if err != nil {
 		return IssuedPAT{}, err
@@ -53,7 +81,7 @@ func (m *Manager) CreatePAT(ctx context.Context, actor Authentication, input Cre
 		Digest: digest(m.patPepper, raw), WorkspaceID: input.WorkspaceID,
 		Scopes: scopes, CreatedAt: now, ExpiresAt: cloneTime(input.ExpiresAt),
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "pat.create", "pat", id, input.WorkspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "pat.create", "pat", id.String(), input.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return IssuedPAT{}, err
 	}
@@ -80,29 +108,36 @@ func (m *Manager) CreatePAT(ctx context.Context, actor Authentication, input Cre
 	return IssuedPAT{PAT: pat, Token: raw}, nil
 }
 
+// AuthenticatePAT validates a raw PAT, whose marker is Config.PATPrefix, in
+// constant time against its
+// stored digest and returns a non-interactive AAL1 authentication carrying
+// the PAT's workspace binding and scopes; last_used_at is updated atomically
+// with the audit event. Malformed, unknown, expired and revoked tokens, as
+// well as tokens of disabled users or workspaces, all fail with
+// ErrInvalidCredentials. The result never satisfies step-up checks.
 func (m *Manager) AuthenticatePAT(ctx context.Context, raw string) (_ Authentication, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.pat.authenticate", started, err) }()
-	prefix, validShape := parsePAT(raw)
+	prefix, validShape := parsePAT(m.patPrefix, raw)
 	var pat PAT
 	if validShape {
 		pat, err = m.store.PATByPrefix(ctx, prefix)
 	}
-	valid := validShape && err == nil && hmac.Equal(pat.Digest, digest(m.patPepper, raw))
+	valid := validShape && err == nil && matchDigestRing(pat.Digest, m.readPATPeppers, raw)
 	now := m.now()
 	if valid && (pat.RevokedAt != nil || (pat.ExpiresAt != nil && !now.Before(*pat.ExpiresAt))) {
 		valid = false
 	}
 	if !valid {
-		actor := ""
-		if pat.ID != "" {
+		actor := UUID{}
+		if pat.ID != (UUID{}) {
 			actor = pat.UserID
 		}
 		audit, auditErr := m.recordAuthenticationAudit(ctx, actor, "auth.pat", AuditFailed, "invalid_credentials")
 		if auditErr != nil {
 			return Authentication{}, auditErr
 		}
-		if meta, metaErr := m.newEventMeta(EventPATRejected, "auth.pat.authenticate", actor, "", audit); metaErr == nil {
+		if meta, metaErr := m.newEventMeta(EventPATRejected, "auth.pat.authenticate", actor, UUID{}, audit); metaErr == nil {
 			rejected := PATRejectedEvent{EventMeta: meta, Reason: "invalid_credentials"}
 			m.events.emit(ctx, EventPATRejected, func(listener EventListener) error { return listener.OnPATRejected(ctx, rejected) })
 		}
@@ -122,13 +157,13 @@ func (m *Manager) AuthenticatePAT(ctx context.Context, raw string) (_ Authentica
 		m.emitAuthenticationFailed(ctx, "auth.pat.authenticate", audit, MethodPAT, pat.UserID, "invalid_credentials")
 		return Authentication{}, ErrInvalidCredentials
 	}
-	if pat.WorkspaceID != "" {
+	if pat.WorkspaceID != (UUID{}) {
 		workspaceActor := Authentication{UserID: pat.UserID, WorkspaceID: pat.WorkspaceID}
 		if err := m.AuthorizePermission(ctx, workspaceActor, pat.WorkspaceID, PermissionWorkspaceAccess); err != nil {
 			return Authentication{}, ErrInvalidCredentials
 		}
 	}
-	event, err := m.newAudit(ctx, pat.UserID, "auth.pat", "pat", pat.ID, pat.WorkspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, pat.UserID, "auth.pat", "pat", pat.ID.String(), pat.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, err
 	}
@@ -147,20 +182,23 @@ func (m *Manager) AuthenticatePAT(ctx context.Context, raw string) (_ Authentica
 	return authentication, nil
 }
 
-func (m *Manager) RevokePAT(ctx context.Context, actor Authentication, patID string) (err error) {
+// RevokePAT revokes one of the actor's own tokens, atomically with the audit
+// event. It requires a fresh AAL2 step-up; a token belonging to another user
+// is reported as ErrNotFound by the store.
+func (m *Manager) RevokePAT(ctx context.Context, actor Authentication, patID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.pat.revoke", started, err) }()
 	if err := m.requireStepUp(ctx, actor, "auth.pat.revoke"); err != nil {
 		return err
 	}
-	if patID == "" {
+	if patID == (UUID{}) {
 		return fmt.Errorf("%w: PAT id is required", ErrInvalidInput)
 	}
-	event, err := m.newAudit(ctx, actor.UserID, "pat.revoke", "pat", patID, "", AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "pat.revoke", "pat", patID.String(), UUID{}, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
-	meta, err := m.newEventMeta(EventPATRevoked, "auth.pat.revoke", actor.UserID, "", event)
+	meta, err := m.newEventMeta(EventPATRevoked, "auth.pat.revoke", actor.UserID, UUID{}, event)
 	if err != nil {
 		return err
 	}
@@ -176,20 +214,39 @@ func (m *Manager) RevokePAT(ctx context.Context, actor Authentication, patID str
 	return nil
 }
 
-func (m *Manager) PATs(ctx context.Context, actor Authentication, page PageRequest) iter.Seq2[PageEvent[PAT], error] {
-	if err := m.requireRecentInteractive(ctx, actor); err != nil {
+// PATs streams a user's tokens — metadata, prefix and timestamps, never the
+// secret. An empty userID means the actor, which requires a recent
+// interactive authentication; reading another user requires admin users
+// read — the same scoping as Sessions, Emails and Passkeys.
+func (m *Manager) PATs(ctx context.Context, actor Authentication, userID UUID, page PageRequest) iter.Seq2[PageEvent[PAT], error] {
+	if actor.UserID == (UUID{}) {
+		return errorSeq[PageEvent[PAT]](ErrUnauthorized)
+	}
+	if userID == (UUID{}) {
+		userID = actor.UserID
+	}
+	if userID == actor.UserID {
+		if err := m.requireRecentInteractive(ctx, actor); err != nil {
+			return errorSeq[PageEvent[PAT]](err)
+		}
+	} else if err := m.AuthorizeAdmin(ctx, actor, PermissionUsersRead); err != nil {
 		return errorSeq[PageEvent[PAT]](err)
 	}
 	page, err := normalizePage(page)
 	if err != nil {
 		return errorSeq[PageEvent[PAT]](err)
 	}
-	return m.store.PATs(ctx, actor.UserID, page)
+	return m.store.PATs(ctx, userID, page)
 }
 
-func parsePAT(raw string) (string, bool) {
+// parsePAT validates the `<marker>_<12 hex>_<43 chars>` PAT shape against the
+// marker this deployment issues and returns the prefix the store indexes. The
+// marker is a parameter, like it is for the sibling parsers, because it is
+// configurable (Config.PATPrefix): a PAT minted by another deployment must not
+// even reach a lookup here.
+func parsePAT(marker, raw string) (string, bool) {
 	parts := strings.SplitN(raw, "_", 3)
-	if len(parts) != 3 || parts[0] != "cbp" || len(parts[1]) != 12 || len(parts[2]) != 43 {
+	if len(parts) != 3 || parts[0] != marker || len(parts[1]) != 12 || len(parts[2]) != 43 {
 		return "", false
 	}
 	if _, err := hex.DecodeString(parts[1]); err != nil {
@@ -201,16 +258,21 @@ func parsePAT(raw string) (string, bool) {
 	return parts[1], true
 }
 
+// normalizeScopes validates and deduplicates the requested PAT scopes. A
+// scope is either the "*" wildcard or a workspace permission string —
+// AuthorizePermission enforces the set on every scoped authorization, so a
+// name outside the permission grammar would create a token that can never
+// authorize anything.
 func normalizeScopes(scopes []string) ([]string, error) {
 	if len(scopes) == 0 {
-		return nil, fmt.Errorf("%w: at least one PAT scope is required", ErrInvalidInput)
+		return nil, &ValidationError{Field: "scopes", Rule: "required", Message: "at least one PAT scope is required"}
 	}
 	seen := make(map[string]struct{}, len(scopes))
 	result := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
 		scope = strings.TrimSpace(scope)
-		if scope == "" || len(scope) > 100 {
-			return nil, fmt.Errorf("%w: invalid PAT scope", ErrInvalidInput)
+		if scope != "*" && !workspacePermissionPattern.MatchString(scope) {
+			return nil, &ValidationError{Field: "scopes", Rule: "format", Message: "a PAT scope must be \"*\" or a workspace permission"}
 		}
 		if _, duplicate := seen[scope]; duplicate {
 			continue

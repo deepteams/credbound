@@ -135,7 +135,7 @@ func (c *roleCatalog) normalize(role Role) (Role, error) {
 		return "", fmt.Errorf("%w: workspace role catalog unavailable", ErrInvalidInput)
 	}
 	if _, ok := c.roles[role]; !ok {
-		return "", fmt.Errorf("%w: unknown workspace role", ErrInvalidInput)
+		return "", &ValidationError{Field: "role", Rule: "unknown", Message: "unknown workspace role"}
 	}
 	return role, nil
 }

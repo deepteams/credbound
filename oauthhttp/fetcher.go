@@ -1,4 +1,21 @@
-// Package oauthhttp provides optional OAuth/OIDC and MCP HTTP adapters for Credbound.
+// Package oauthhttp provides the optional, mountable HTTP adapters for
+// Credbound's OAuth 2.1/OIDC authorization server: Handler serves the
+// protocol endpoints (discovery, JWKS, authorize, token, revoke, register,
+// userinfo), Protect wraps an MCP or API resource with bearer-token
+// authentication, and MetadataFetcher resolves Client Identifier Metadata
+// Documents over SSRF-hardened HTTPS.
+//
+// The package starts no server and issues no cookies; the host mounts
+// Handler on its own mux and supplies session authentication and consent UI
+// through HandlerConfig. It requires a Manager built with credbound.Config.OAuth
+// and an OAuthStore-capable store:
+//
+//	handler, err := oauthhttp.New(manager, oauthhttp.HandlerConfig{
+//		Issuer:         "https://auth.example.com",
+//		Authenticate:   sessionFromRequest,
+//		PresentConsent: renderConsent,
+//	})
+//	mux.Handle("/", handler)
 package oauthhttp
 
 import (
@@ -16,16 +33,25 @@ import (
 	"time"
 
 	"github.com/deepteams/credbound"
+	"github.com/deepteams/credbound/internal/ssrf"
 )
 
 const maxMetadataDocument = 5 << 10
 
+// MetadataFetcher retrieves Client Identifier Metadata Documents for CIMD
+// client registration. It only speaks HTTPS to hosts resolving to public
+// addresses (blocking SSRF into loopback, private and link-local ranges),
+// refuses redirects, and caps documents at 5 KiB. It implements
+// credbound.OAuthClientMetadataFetcher for credbound.OAuthConfig.MetadataFetcher.
 type MetadataFetcher struct {
 	client *http.Client
 	now    func() time.Time
 	limit  chan struct{}
 }
 
+// NewMetadataFetcher builds a fetcher with the given per-request timeout
+// (zero defaults to 5s) and concurrency cap (zero defaults to 16, at most
+// 256). Requests beyond the cap wait for a slot or their context.
 func NewMetadataFetcher(timeout time.Duration, concurrency int) (*MetadataFetcher, error) {
 	if timeout <= 0 {
 		timeout = 5 * time.Second
@@ -51,6 +77,9 @@ func NewMetadataFetcher(timeout time.Duration, concurrency int) (*MetadataFetche
 	return fetcher, nil
 }
 
+// Fetch downloads and validates the metadata document identified by the
+// HTTPS clientID URL, returning it with the fetch time and a cache expiry
+// derived from the response's Cache-Control header.
 func (f *MetadataFetcher) Fetch(ctx context.Context, clientID string) (credbound.OAuthClientMetadataDocument, error) {
 	select {
 	case f.limit <- struct{}{}:
@@ -127,20 +156,7 @@ func (f *MetadataFetcher) dialContext(ctx context.Context, network, address stri
 }
 
 func publicAddress(address netip.Addr) bool {
-	address = address.Unmap()
-	if !address.IsValid() || !address.IsGlobalUnicast() || address.IsPrivate() || address.IsLoopback() || address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() || address.IsMulticast() || address.IsUnspecified() {
-		return false
-	}
-	for _, raw := range []string{
-		"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15",
-		"198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
-		"2001:db8::/32", "2001::/23", "fc00::/7", "fe80::/10", "ff00::/8",
-	} {
-		if netip.MustParsePrefix(raw).Contains(address) {
-			return false
-		}
-	}
-	return true
+	return ssrf.PublicAddress(address)
 }
 
 func cacheLifetime(value string) time.Duration {

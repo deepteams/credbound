@@ -59,6 +59,14 @@ CREATE TABLE credbound.oauth_refresh_tokens (
     data_json jsonb NOT NULL
 );
 CREATE INDEX oauth_refresh_family_idx ON credbound.oauth_refresh_tokens(family_id);
+-- Revoking a grant cascades to its tokens, and deleting a client or a
+-- resource cascades to its grants; each cascade filters on the foreign key.
+CREATE INDEX oauth_access_tokens_grant_idx ON credbound.oauth_access_tokens(grant_id);
+CREATE INDEX oauth_refresh_grant_idx ON credbound.oauth_refresh_tokens(grant_id);
+CREATE INDEX oauth_grants_client_idx ON credbound.oauth_grants(client_record_id);
+CREATE INDEX oauth_grants_resource_idx ON credbound.oauth_grants(resource_id);
+-- Open dynamic client registration counts an issuer's tokens on every call.
+CREATE INDEX oauth_initial_access_tokens_issuer_idx ON credbound.oauth_initial_access_tokens(issuer_id);
 
 -- +goose Down
 DROP TABLE IF EXISTS credbound.oauth_refresh_tokens;

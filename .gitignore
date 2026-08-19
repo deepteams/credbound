@@ -1,2 +1,6 @@
 /coverage.out
 /.env
+/minimal
+/credbound-minimal.db
+credbound-minimal.*.secret
+.DS_Store

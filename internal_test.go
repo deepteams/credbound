@@ -81,16 +81,19 @@ func TestEventRegistryErrorBoundaries(t *testing.T) {
 	subscription.Remove()
 }
 
+// TestUUIDv7SequenceOverflowAndClockRollback pins ID-001's monotonicity
+// guarantee: identifiers keep increasing across a sequence overflow within
+// the same millisecond and across a wall-clock rollback.
 func TestUUIDv7SequenceOverflowAndClockRollback(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	m := &Manager{clock: func() time.Time { return now }, random: bytes.NewReader(make([]byte, 16*4100))}
-	previous := ""
+	previous := UUID{}
 	for range 4097 {
 		id, err := m.newID()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if previous != "" && id <= previous {
+		if previous != (UUID{}) && id.Compare(previous) <= 0 {
 			t.Fatalf("UUIDv7 is not monotonic: %q <= %q", id, previous)
 		}
 		previous = id
@@ -107,12 +110,13 @@ func TestUUIDv7SequenceOverflowAndClockRollback(t *testing.T) {
 func TestContinuationAndEncryptionBoundaries(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	m := &Manager{
-		secretKey: bytes.Repeat([]byte{1}, 32),
-		clock:     func() time.Time { return now },
-		random:    bytes.NewReader(bytes.Repeat([]byte{2}, 256)),
+		secretKey: bytes.Repeat([]byte{1}, 32), sealKey: bytes.Repeat([]byte{1}, 32),
+		readSealKeys: [][]byte{bytes.Repeat([]byte{1}, 32)},
+		clock:        func() time.Time { return now },
+		random:       bytes.NewReader(bytes.Repeat([]byte{2}, 256)),
 	}
 	continuation, err := m.encodeContinuation(ceremonyContinuation{
-		UserID: "user", Operation: "register", ExpiresAt: now.Add(time.Minute), Session: []byte("session"),
+		UserID: MustParseUUID("0198b463-0000-7000-8000-04f8996da763"), Operation: "register", ExpiresAt: now.Add(time.Minute), Session: []byte("session"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -152,11 +156,12 @@ func TestContinuationAndEncryptionBoundaries(t *testing.T) {
 func TestSSOContinuationBoundaries(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	m := &Manager{
-		secretKey: bytes.Repeat([]byte{1}, 32), clock: func() time.Time { return now },
-		random: bytes.NewReader(bytes.Repeat([]byte{2}, 512)),
+		secretKey: bytes.Repeat([]byte{1}, 32), sealKey: bytes.Repeat([]byte{1}, 32), clock: func() time.Time { return now },
+		readSealKeys: [][]byte{bytes.Repeat([]byte{1}, 32)},
+		random:       bytes.NewReader(bytes.Repeat([]byte{2}, 512)),
 	}
 	valid := ssoContinuation{
-		ProviderConfigurationID: "0198b463-0000-7000-8000-000000000001",
+		ProviderConfigurationID: MustParseUUID("0198b463-0000-7000-8000-000000000001"),
 		Operation:               ssoLogin, ExpiresAt: now.Add(time.Minute), Session: []byte("session"),
 	}
 	encoded, err := m.encodeSSOContinuation(valid)
@@ -181,7 +186,7 @@ func TestSSOContinuationBoundaries(t *testing.T) {
 		t.Fatalf("invalid SSO JSON = %v", err)
 	}
 	cases := []ssoContinuation{
-		{ProviderConfigurationID: "0198b463-0000-4000-8000-000000000001", Operation: ssoLogin, ExpiresAt: now.Add(time.Minute), Session: []byte("session")},
+		{ProviderConfigurationID: MustParseUUID("0198b463-0000-4000-8000-000000000001"), Operation: ssoLogin, ExpiresAt: now.Add(time.Minute), Session: []byte("session")},
 		{ProviderConfigurationID: valid.ProviderConfigurationID, Operation: ssoLogin, ExpiresAt: now.Add(time.Minute)},
 		{ProviderConfigurationID: valid.ProviderConfigurationID, Operation: "unknown", ExpiresAt: now.Add(time.Minute), Session: []byte("session")},
 		{ProviderConfigurationID: valid.ProviderConfigurationID, Operation: ssoLink, ExpiresAt: now.Add(time.Minute), Session: []byte("session")},
@@ -205,6 +210,8 @@ func TestAdminPermissionAndValueHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// ADMIN-003: each instance role maps to explicit permissions, overrides
+	// can only restrict them, and an unknown role carries none.
 	m := &Manager{adminPermissions: permissions}
 	if !m.hasAdminPermission(InstanceRoleDeveloper, PermissionAdminAccess) || m.hasAdminPermission(InstanceRoleDeveloper, PermissionSettingsWrite) {
 		t.Fatal("permission override was not restrictive")
@@ -229,6 +236,8 @@ func TestAdminPermissionAndValueHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// RBAC-003: an unknown workspace role fails closed in both the role and
+	// the permission checks.
 	if roles.includes(Role("unknown"), RoleMember) || roles.allows(Role("unknown"), PermissionWorkspaceAccess) {
 		t.Fatal("unknown workspace role was authorized")
 	}
@@ -238,7 +247,7 @@ func TestAdminPermissionAndValueHelpers(t *testing.T) {
 	if normalizeRecoveryCode(" abcd- efgh ") != "ABCDEFGH" {
 		t.Fatal("recovery code normalization is incorrect")
 	}
-	if _, ok := parsePAT("cbp_000000000000_" + strings.Repeat("*", 43)); ok {
+	if _, ok := parsePAT(defaultPATPrefix, "cbp_000000000000_"+strings.Repeat("*", 43)); ok {
 		t.Fatal("invalid base64 PAT accepted")
 	}
 	nopObserver{}.Observe(context.Background(), Operation{})
@@ -279,13 +288,13 @@ func TestSCIMValueHelpers(t *testing.T) {
 	}
 	group, err := normalizeSCIMGroupInput(SCIMGroupInput{
 		ExternalID: " external ", DisplayName: " Group ",
-		MemberIDs: []string{"0198b463-0000-7000-8000-000000000001", "0198b463-0000-7000-8000-000000000001"},
+		MemberIDs: []UUID{MustParseUUID("0198b463-0000-7000-8000-000000000001"), MustParseUUID("0198b463-0000-7000-8000-000000000001")},
 	})
 	if err != nil || len(group.MemberIDs) != 1 || group.DisplayName != "Group" {
 		t.Fatalf("normalized SCIM group = %#v, %v", group, err)
 	}
 	for _, group := range []SCIMGroupInput{
-		{}, {DisplayName: strings.Repeat("x", 256)}, {DisplayName: "Group", ExternalID: strings.Repeat("x", 256)}, {DisplayName: "Group", MemberIDs: []string{"invalid"}},
+		{}, {DisplayName: strings.Repeat("x", 256)}, {DisplayName: "Group", ExternalID: strings.Repeat("x", 256)}, {DisplayName: "Group", MemberIDs: []UUID{MustParseUUID("00000000-0000-4000-8000-000000000000")}},
 	} {
 		if _, err := normalizeSCIMGroupInput(group); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("invalid SCIM group = %v", err)
@@ -298,5 +307,50 @@ func TestSCIMValueHelpers(t *testing.T) {
 	}
 	if validSCIMFilter(SCIMFilter{Attribute: "unknown"}, true) || validSCIMFilter(SCIMFilter{Attribute: "active"}, false) || !validSCIMFilter(SCIMFilter{Attribute: "displayName"}, false) {
 		t.Fatal("SCIM filter validation mismatch")
+	}
+}
+
+func TestKeySeparationLegacyFallback(t *testing.T) {
+	raw := bytes.Repeat([]byte{7}, 32)
+	legacy := &Manager{secretKey: raw, sealKey: raw, random: bytes.NewReader(bytes.Repeat([]byte{2}, 64))}
+	sealed, err := legacy.seal([]byte("pre-separation data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := &Manager{
+		secretKey:      raw,
+		sealKey:        bytes.Repeat([]byte{8}, 32),
+		digestKey:      bytes.Repeat([]byte{9}, 32),
+		readSealKeys:   [][]byte{bytes.Repeat([]byte{8}, 32), raw},
+		readDigestKeys: [][]byte{bytes.Repeat([]byte{9}, 32)},
+		random:         bytes.NewReader(bytes.Repeat([]byte{2}, 64)),
+	}
+	plaintext, err := current.open(sealed)
+	if err != nil || string(plaintext) != "pre-separation data" {
+		t.Fatalf("legacy unseal = %q, %v", plaintext, err)
+	}
+	if current.matchTokenDigest(digest(raw, "token"), "token") {
+		t.Fatal("legacy raw-key digest still accepted after the window closed")
+	}
+	if !current.matchTokenDigest(current.tokenDigest("token"), "token") {
+		t.Fatal("derived digest rejected")
+	}
+	if current.matchTokenDigest(current.tokenDigest("token"), "other") {
+		t.Fatal("mismatched digest accepted")
+	}
+}
+
+// TestLegacyContinuationsCarryNoConsumption pins the migration posture:
+// continuations sealed before ceremony ids existed consume nothing and stay
+// bounded by their TTL alone.
+func TestLegacyContinuationsCarryNoConsumption(t *testing.T) {
+	if consumption := (ceremonyContinuation{ID: MustParseUUID("0198b463-0000-7000-8000-0000000000ff"), ExpiresAt: time.Unix(1, 0)}).consumption(); consumption == nil || consumption.ID == (UUID{}) {
+		t.Fatalf("ceremony consumption = %#v", consumption)
+	}
+	if consumption := (ceremonyContinuation{}).consumption(); consumption != nil {
+		t.Fatalf("legacy passkey continuation consumption = %#v", consumption)
+	}
+	if consumption := (ssoContinuation{}).consumption(); consumption != nil {
+		t.Fatalf("legacy SSO continuation consumption = %#v", consumption)
 	}
 }

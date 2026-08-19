@@ -59,6 +59,11 @@ func (l *eventRecorder) OnBootstrapCompleted(_ context.Context, event credbound.
 	return nil
 }
 
+func (l *eventRecorder) OnUserAnonymized(_ context.Context, event credbound.UserAnonymizedEvent) error {
+	l.record(event.EventMeta)
+	return nil
+}
+
 func (l *eventRecorder) OnPATCreated(_ context.Context, event credbound.PATCreatedEvent) error {
 	l.record(event.EventMeta)
 	return nil
@@ -154,9 +159,9 @@ func TestBootstrapEventOrderAndListenerIsolation(t *testing.T) {
 	if !reflect.DeepEqual(recorder.names, want) {
 		t.Fatalf("bootstrap event order = %#v", recorder.names)
 	}
-	ids := make(map[string]struct{}, len(recorder.metas))
+	ids := make(map[credbound.UUID]struct{}, len(recorder.metas))
 	for _, meta := range recorder.metas {
-		if !uuidV7.MatchString(meta.ID) || meta.AuditID == "" || meta.ActorID != authn.UserID || meta.WorkspaceID != workspace.ID {
+		if !uuidV7.MatchString(meta.ID.String()) || meta.AuditID == (credbound.UUID{}) || meta.ActorID != authn.UserID || meta.WorkspaceID != workspace.ID {
 			t.Fatalf("invalid bootstrap event metadata: %#v", meta)
 		}
 		ids[meta.ID] = struct{}{}
@@ -185,7 +190,7 @@ func TestSubscriptionRemovalAndStepUpDeniedEvent(t *testing.T) {
 	if !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("AAL1 PAT creation = %v", err)
 	}
-	if len(recorder.events) != 1 || recorder.events[0].Operation != "auth.pat.create" || recorder.events[0].UserID != authn.UserID || !uuidV7.MatchString(recorder.events[0].ID) {
+	if len(recorder.events) != 1 || recorder.events[0].Operation != "auth.pat.create" || recorder.events[0].UserID != authn.UserID || !uuidV7.MatchString(recorder.events[0].ID.String()) {
 		t.Fatalf("step-up event = %#v", recorder.events)
 	}
 }
@@ -213,5 +218,56 @@ func TestPATTransactionHookRollsBackMutationAndAudit(t *testing.T) {
 	}
 	if len(events.names) != 0 {
 		t.Fatalf("post-commit event emitted after rollback: %#v", events.names)
+	}
+}
+
+type catchAllRecorder struct {
+	credbound.UnimplementedEventListener
+	names  []credbound.EventName
+	events []any
+	fail   bool
+}
+
+func (l *catchAllRecorder) OnAnyEvent(_ context.Context, name credbound.EventName, event any) error {
+	l.names = append(l.names, name)
+	l.events = append(l.events, event)
+	if l.fail {
+		return errors.New("dispatcher offline")
+	}
+	return nil
+}
+
+// TestAnyEventListenerReceivesEveryEvent guards the catch-all extension: a
+// listener implementing AnyEventListener receives every emitted event once,
+// carrying the same typed struct the typed methods receive, and its errors
+// never disturb delivery.
+func TestAnyEventListenerReceivesEveryEvent(t *testing.T) {
+	f := newFixture(t)
+	catchAll := &catchAllRecorder{}
+	typed := &eventRecorder{}
+	f.manager.AddEventListener(catchAll)
+	f.manager.AddEventListener(typed)
+
+	authn, _ := f.bootstrap(t)
+	expected := []credbound.EventName{credbound.EventUserCreated, credbound.EventWorkspaceCreated, credbound.EventBootstrapCompleted}
+	if !reflect.DeepEqual(catchAll.names, expected) {
+		t.Fatalf("catch-all names = %#v", catchAll.names)
+	}
+	created, ok := catchAll.events[0].(credbound.UserCreatedEvent)
+	if !ok || created.User.ID != authn.UserID || created.Name != credbound.EventUserCreated {
+		t.Fatalf("catch-all payload = %#v", catchAll.events[0])
+	}
+	if len(typed.names) != len(catchAll.names) {
+		t.Fatalf("typed methods saw %d events, catch-all %d", len(typed.names), len(catchAll.names))
+	}
+
+	// A failing catch-all never disturbs delivery to other listeners.
+	catchAll.fail = true
+	stepUp := aal2(authn.UserID, f.now)
+	if err := f.manager.ChangePassword(context.Background(), stepUp, "correct horse battery", "another strong password"); err != nil {
+		t.Fatal(err)
+	}
+	if catchAll.names[3] != credbound.EventPasswordChanged || catchAll.names[4] != credbound.EventUserSessionsRevoked {
+		t.Fatalf("catch-all after failure = %#v", catchAll.names)
 	}
 }

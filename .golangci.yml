@@ -1,0 +1,17 @@
+version: "2"
+
+# Runs as `make lint` (pinned via go run in the Makefile) and in CI.
+# Generated sources (sqlc, genevents, genpostgresstore) carry the standard
+# "Code generated ... DO NOT EDIT." header and are excluded by default.
+linters:
+  default: standard
+  exclusions:
+    rules:
+      # Best-effort deferred cleanup: the error of a defer'd Close or
+      # Rollback is deliberately discarded — the transaction either already
+      # committed or the original error is the one worth returning.
+      - linters: [errcheck]
+        source: 'defer .*\.(Close|Rollback)\(\)$'
+      # Tests discard cleanup and fake-server write errors freely.
+      - linters: [errcheck]
+        path: _test\.go$

@@ -24,6 +24,9 @@ func collectPasskeys(t *testing.T, sequence func(func(credbound.Passkey, error) 
 	return items, nil
 }
 
+// TestPasskeyListing pins the factor-visibility contract for passkeys
+// (AUTH-011): the owner lists them without secret material, and only an
+// administrator with users read may inspect another account.
 func TestPasskeyListing(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -35,7 +38,7 @@ func TestPasskeyListing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	passkeys, err := collectPasskeys(t, f.manager.Passkeys(context.Background(), authn, ""))
+	passkeys, err := collectPasskeys(t, f.manager.Passkeys(context.Background(), authn, credbound.UUID{}))
 	if err != nil || len(passkeys) != 1 {
 		t.Fatalf("passkeys = %#v, %v", passkeys, err)
 	}
@@ -43,12 +46,12 @@ func TestPasskeyListing(t *testing.T) {
 		t.Fatalf("unsafe passkey listing: %#v", passkeys[0])
 	}
 
-	if _, err := collectPasskeys(t, f.manager.Passkeys(context.Background(), credbound.Authentication{}, "")); !errors.Is(err, credbound.ErrUnauthorized) {
+	if _, err := collectPasskeys(t, f.manager.Passkeys(context.Background(), credbound.Authentication{}, credbound.UUID{})); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("anonymous listing error = %v", err)
 	}
 	stale := authn
 	stale.AuthenticatedAt = f.now.Add(-time.Hour)
-	if _, err := collectPasskeys(t, f.manager.Passkeys(context.Background(), stale, "")); !errors.Is(err, credbound.ErrStepUpRequired) {
+	if _, err := collectPasskeys(t, f.manager.Passkeys(context.Background(), stale, credbound.UUID{})); !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("stale listing error = %v", err)
 	}
 
@@ -68,18 +71,21 @@ func TestPasskeyListing(t *testing.T) {
 	}
 }
 
+// TestTOTPStatusLifecycle pins the TOTP half of factor visibility (AUTH-011):
+// the owner reads enrolled, active, and unused-recovery-code counts without
+// any secret material.
 func TestTOTPStatusLifecycle(t *testing.T) {
 	f := newFixture(t)
 	authn, _ := f.bootstrap(t)
 
-	status, err := f.manager.TOTPStatus(context.Background(), authn, "")
+	status, err := f.manager.TOTPStatus(context.Background(), authn, credbound.UUID{})
 	if err != nil || status.Enrolled || status.Active {
 		t.Fatalf("initial status = %#v, %v", status, err)
 	}
 	if _, err := f.manager.BeginTOTPEnrollment(context.Background(), authn); err != nil {
 		t.Fatal(err)
 	}
-	status, err = f.manager.TOTPStatus(context.Background(), authn, "")
+	status, err = f.manager.TOTPStatus(context.Background(), authn, credbound.UUID{})
 	if err != nil || !status.Enrolled || status.Active || status.UnusedRecoveryCodes != 0 {
 		t.Fatalf("enrolled status = %#v, %v", status, err)
 	}
@@ -87,22 +93,27 @@ func TestTOTPStatusLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err = f.manager.TOTPStatus(context.Background(), authn, "")
+	status, err = f.manager.TOTPStatus(context.Background(), authn, credbound.UUID{})
 	if err != nil || !status.Active || status.UnusedRecoveryCodes != 10 {
 		t.Fatalf("active status = %#v, %v", status, err)
 	}
 	if _, err := f.manager.VerifyTOTP(context.Background(), authn, codes[0]); err != nil {
 		t.Fatal(err)
 	}
-	status, err = f.manager.TOTPStatus(context.Background(), authn, "")
+	status, err = f.manager.TOTPStatus(context.Background(), authn, credbound.UUID{})
 	if err != nil || status.UnusedRecoveryCodes != 9 {
 		t.Fatalf("status after recovery use = %#v, %v", status, err)
 	}
-	if _, err := f.manager.TOTPStatus(context.Background(), credbound.Authentication{}, ""); !errors.Is(err, credbound.ErrUnauthorized) {
+	if _, err := f.manager.TOTPStatus(context.Background(), credbound.Authentication{}, credbound.UUID{}); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("anonymous status error = %v", err)
 	}
 }
 
+// TestAuditRequestMetadata pins that authentication operations append audit
+// events (AUDIT-001) recording the sanitized, bounded client IP address and
+// user agent the host attached to the request context — and nothing when no
+// metadata was attached, since Credbound never reads transport headers itself
+// (AUDIT-004).
 func TestAuditRequestMetadata(t *testing.T) {
 	f := newFixture(t)
 	ctx := credbound.WithRequestMetadata(context.Background(), credbound.RequestMetadata{
@@ -149,8 +160,10 @@ func TestVerifyAuditChain(t *testing.T) {
 	if _, err := f.manager.CreateWorkspace(context.Background(), aal2(authn.UserID, f.now), credbound.CreateWorkspaceInput{Name: "Second"}); err != nil {
 		t.Fatal(err)
 	}
-	// AuthorizeAdmin audits the verification itself, so the chain holds the
-	// bootstrap, the login, the workspace creation and this admin check.
+	// AuthorizeAdmin audits the verification itself — every operation of the
+	// administration interface produces an audit event (ADMIN-007) — so the
+	// chain holds the bootstrap, the login, the workspace creation and this
+	// admin check.
 	report, err := f.manager.VerifyAuditChain(context.Background(), authn)
 	if err != nil || report.Events != 4 || report.HeadSequence != 4 || len(report.HeadHash) != 32 {
 		t.Fatalf("chain report = %#v, %v", report, err)
@@ -199,6 +212,9 @@ func (f *lockoutFixture) bootstrap(t *testing.T) credbound.Authentication {
 	return authn
 }
 
+// TestPasswordLockout pins AUTH-009: consecutive password failures lock the
+// account for the configured duration, the lockout never becomes an
+// enumeration oracle, and a successful sign-in clears the counter.
 func TestPasswordLockout(t *testing.T) {
 	f := newLockoutFixture(t, 3, 15*time.Minute)
 	f.bootstrap(t)
@@ -208,8 +224,10 @@ func TestPasswordLockout(t *testing.T) {
 			t.Fatalf("failure error = %v", err)
 		}
 	}
-	// The account is locked: even the correct password is rejected.
-	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrLocked) {
+	// The account is locked: even the correct password is rejected, and the
+	// public answer stays ErrInvalidCredentials so the lockout never
+	// confirms that the address exists.
+	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrInvalidCredentials) || errors.Is(err, credbound.ErrLocked) {
 		t.Fatalf("locked login error = %v", err)
 	}
 	// Unknown accounts keep answering ErrInvalidCredentials, never ErrLocked.
@@ -235,6 +253,39 @@ func TestPasswordLockout(t *testing.T) {
 	}
 }
 
+func TestChangePasswordLockout(t *testing.T) {
+	f := newLockoutFixture(t, 3, 15*time.Minute)
+	authn := f.bootstrap(t)
+	ctx := context.Background()
+	// Wrong current-password guesses count toward the same lockout as
+	// failed sign-ins, so a hijacked session cannot brute-force the
+	// knowledge factor through ChangePassword.
+	for range 3 {
+		if err := f.manager.ChangePassword(ctx, authn, "wrong password", "another strong password"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+			t.Fatalf("change failure error = %v", err)
+		}
+	}
+	// The actor is authenticated, so the locked account answers ErrLocked —
+	// no enumeration oracle here — and even the correct password is refused.
+	if err := f.manager.ChangePassword(ctx, authn, "correct horse battery", "another strong password"); !errors.Is(err, credbound.ErrLocked) {
+		t.Fatalf("locked change error = %v", err)
+	}
+	// The lockout is shared with sign-in, where it stays ErrInvalidCredentials.
+	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrInvalidCredentials) || errors.Is(err, credbound.ErrLocked) {
+		t.Fatalf("locked login error = %v", err)
+	}
+	f.now = f.now.Add(16 * time.Minute)
+	fresh, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery")
+	if err != nil {
+		t.Fatalf("post-lockout login = %v", err)
+	}
+	if err := f.manager.ChangePassword(ctx, fresh, "correct horse battery", "another strong password"); err != nil {
+		t.Fatalf("post-lockout change = %v", err)
+	}
+}
+
+// TestTOTPLockout proves AUTH-009's second-factor half: consecutive TOTP
+// failures lock the account for the configured duration.
 func TestTOTPLockout(t *testing.T) {
 	f := newLockoutFixture(t, 3, 15*time.Minute)
 	authn := f.bootstrap(t)
@@ -253,12 +304,143 @@ func TestTOTPLockout(t *testing.T) {
 	if _, err := f.manager.VerifyTOTP(ctx, authn, "123456"); !errors.Is(err, credbound.ErrLocked) {
 		t.Fatalf("locked TOTP error = %v", err)
 	}
-	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrLocked) {
+	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("locked password error = %v", err)
 	}
 	f.now = f.now.Add(16 * time.Minute)
 	if _, err := f.manager.VerifyTOTP(ctx, authn, "123456"); err != nil {
 		t.Fatalf("post-lockout TOTP = %v", err)
+	}
+}
+
+// TestPasswordSuccessDoesNotResetSecondFactorLockout proves the online-guessing
+// defense for the second factor: a correct password, while a second factor is
+// still pending, must not clear the lockout counter accumulated by TOTP
+// failures — otherwise an attacker holding the password could reset the budget
+// between guesses indefinitely.
+func TestPasswordSuccessDoesNotResetSecondFactorLockout(t *testing.T) {
+	f := newLockoutFixture(t, 3, 15*time.Minute)
+	authn := f.bootstrap(t)
+	ctx := context.Background()
+	if _, err := f.manager.BeginTOTPEnrollment(ctx, authn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.ConfirmTOTPEnrollment(ctx, authn, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	// Two wrong codes: counter at 2 of 3, not yet locked.
+	for range 2 {
+		if _, err := f.manager.VerifyTOTP(ctx, authn, "000000"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+			t.Fatalf("TOTP failure error = %v", err)
+		}
+	}
+	// A correct password mid-2FA must not reset the counter.
+	pending, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery")
+	if err != nil || !pending.SecondFactorRequired {
+		t.Fatalf("password re-auth = %#v, %v", pending, err)
+	}
+	// The third wrong code therefore locks the account; had the password
+	// cleared the counter this would still be attempt one of three.
+	if _, err := f.manager.VerifyTOTP(ctx, authn, "000000"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("third TOTP failure error = %v", err)
+	}
+	if _, err := f.manager.VerifyTOTP(ctx, authn, "123456"); !errors.Is(err, credbound.ErrLocked) {
+		t.Fatalf("account not locked after counter carried over: %v", err)
+	}
+}
+
+// TestEmailFlowsDoNotResetSecondFactorLockout extends the online-guessing
+// defense to the email flows: while a second factor is pending, redeeming a
+// magic link or an email OTP spends the token but must not clear the lockout
+// counter accumulated by TOTP failures — otherwise an attacker holding the
+// mailbox could reset the budget between guesses indefinitely.
+func TestEmailFlowsDoNotResetSecondFactorLockout(t *testing.T) {
+	f := newLockoutFixture(t, 3, 15*time.Minute)
+	authn := f.bootstrap(t)
+	ctx := context.Background()
+	if _, err := f.manager.BeginTOTPEnrollment(ctx, authn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.ConfirmTOTPEnrollment(ctx, authn, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	// Two wrong codes: counter at 2 of 3, not yet locked.
+	for range 2 {
+		if _, err := f.manager.VerifyTOTP(ctx, authn, "000000"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+			t.Fatalf("TOTP failure error = %v", err)
+		}
+	}
+	// A redeemed magic link mid-2FA must not reset the counter.
+	link, err := f.manager.BeginEmailAuthentication(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := f.manager.CompleteEmailAuthentication(ctx, link.Token)
+	if err != nil || !pending.SecondFactorRequired {
+		t.Fatalf("magic-link re-auth = %#v, %v", pending, err)
+	}
+	// Neither must a redeemed email OTP.
+	issued, err := f.manager.BeginEmailOTP(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pendingOTP, err := f.manager.CompleteEmailOTP(ctx, issued.Continuation, issued.Code); err != nil || !pendingOTP.SecondFactorRequired {
+		t.Fatalf("OTP re-auth = %#v, %v", pendingOTP, err)
+	}
+	// The third wrong code therefore locks the account; had either email
+	// flow cleared the counter this would still be attempt one of three.
+	if _, err := f.manager.VerifyTOTP(ctx, authn, "000000"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("third TOTP failure error = %v", err)
+	}
+	if _, err := f.manager.VerifyTOTP(ctx, authn, "123456"); !errors.Is(err, credbound.ErrLocked) {
+		t.Fatalf("account not locked after counter carried over: %v", err)
+	}
+	// A locked account refuses the magic link outright: redeeming it proves
+	// mailbox control, so — like CompleteEmailOTP — ErrLocked opens no
+	// enumeration oracle here.
+	locked, err := f.manager.BeginEmailAuthentication(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.CompleteEmailAuthentication(ctx, locked.Token); !errors.Is(err, credbound.ErrLocked) {
+		t.Fatalf("locked magic-link completion = %v", err)
+	}
+}
+
+// TestPasskeySignInUnlocksAccount proves AUTH-009's "any successful
+// authentication clears the counter" for the possession-based methods: a
+// completed passkey sign-in lifts the lockout instead of leaving the user
+// blocked for every other method until it expires.
+func TestPasskeySignInUnlocksAccount(t *testing.T) {
+	f := newLockoutFixture(t, 3, 15*time.Minute)
+	authn := f.bootstrap(t)
+	ctx := context.Background()
+	challenge, err := f.manager.BeginPasskeyRegistration(ctx, authn, "MacBook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishPasskeyRegistration(ctx, authn, challenge.Continuation, []byte("valid")); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "wrong password"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+			t.Fatalf("failure error = %v", err)
+		}
+	}
+	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("locked error = %v", err)
+	}
+	// The passkey is a possession proof, not a guessable secret, so the
+	// lockout does not block it — and its success resets the counter.
+	login, err := f.manager.BeginPasskeyAuthentication(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishPasskeyAuthentication(ctx, login.Continuation, []byte("valid")); err != nil {
+		t.Fatalf("passkey sign-in while locked = %v", err)
+	}
+	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); err != nil {
+		t.Fatalf("post-passkey login = %v", err)
 	}
 }
 
@@ -276,6 +458,10 @@ func TestLockoutDisabled(t *testing.T) {
 	}
 }
 
+// TestWorkspaceRequireMFA pins TENANT-006: a workspace requiring MFA rejects
+// interactive AAL1 sessions with the step-up sentinel while a
+// non-interactive workspace-bound PAT keeps working, and the policy can be
+// lifted again.
 func TestWorkspaceRequireMFA(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -295,8 +481,9 @@ func TestWorkspaceRequireMFA(t *testing.T) {
 	if err := f.manager.Authorize(ctx, stepUp, secure.ID, credbound.RoleAdmin); err != nil {
 		t.Fatalf("AAL2 authorization = %v", err)
 	}
-	// A workspace-bound PAT is non-interactive and stays usable.
-	issued, err := f.manager.CreatePAT(ctx, stepUp, credbound.CreatePATInput{Name: "ci", WorkspaceID: secure.ID, Scopes: []string{"read"}})
+	// A workspace-bound PAT is non-interactive and stays usable, within the
+	// permissions its scopes name.
+	issued, err := f.manager.CreatePAT(ctx, stepUp, credbound.CreatePATInput{Name: "ci", WorkspaceID: secure.ID, Scopes: []string{string(credbound.PermissionWorkspaceAccess)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,6 +507,10 @@ func TestWorkspaceRequireMFA(t *testing.T) {
 	}
 }
 
+// TestPasswordResetFlow pins AUTH-007: the reset token is single use and
+// expiring, ineligible addresses receive an indistinguishable no-token
+// answer, and completion replaces the password and revokes the account's
+// PATs.
 func TestPasswordResetFlow(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -331,8 +522,8 @@ func TestPasswordResetFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := f.manager.BeginPasswordReset(ctx, "ghost@example.com"); !errors.Is(err, credbound.ErrNotFound) {
-		t.Fatalf("unknown email error = %v", err)
+	if issued, err := f.manager.BeginPasswordReset(ctx, "ghost@example.com"); err != nil || issued.Token != "" || issued.Deliverable {
+		t.Fatalf("unknown email reset = %#v, %v", issued, err)
 	}
 	reset, err := f.manager.BeginPasswordReset(ctx, "ROOT@example.com")
 	if err != nil || reset.UserID != authn.UserID || !strings.HasPrefix(reset.Token, "cbr_") {
@@ -376,6 +567,8 @@ func TestPasswordResetFlow(t *testing.T) {
 	}
 }
 
+// TestPasswordResetUnlocksAccount proves the recovery clause shared by
+// AUTH-007 and AUTH-009: completing a password reset clears the lockout.
 func TestPasswordResetUnlocksAccount(t *testing.T) {
 	f := newLockoutFixture(t, 3, 15*time.Minute)
 	f.bootstrap(t)
@@ -385,7 +578,7 @@ func TestPasswordResetUnlocksAccount(t *testing.T) {
 			t.Fatalf("failure error = %v", err)
 		}
 	}
-	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrLocked) {
+	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery"); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("locked error = %v", err)
 	}
 	reset, err := f.manager.BeginPasswordReset(ctx, "root@example.com")
@@ -400,16 +593,19 @@ func TestPasswordResetUnlocksAccount(t *testing.T) {
 	}
 }
 
+// TestMagicLinkAuthentication pins AUTH-008: a single-use, short-lived email
+// token authenticates the owner of a verified address at AAL1 and reports
+// whether a TOTP factor is still required.
 func TestMagicLinkAuthentication(t *testing.T) {
 	f := newFixture(t)
 	authn, _ := f.bootstrap(t)
 	ctx := context.Background()
 
-	if _, err := f.manager.BeginEmailAuthentication(ctx, "ghost@example.com"); !errors.Is(err, credbound.ErrNotFound) {
-		t.Fatalf("unknown email error = %v", err)
+	if issued, err := f.manager.BeginEmailAuthentication(ctx, "ghost@example.com"); err != nil || issued.Token != "" || issued.Deliverable {
+		t.Fatalf("unknown email link = %#v, %v", issued, err)
 	}
 	link, err := f.manager.BeginEmailAuthentication(ctx, "Root@example.com")
-	if err != nil || link.UserID != authn.UserID || !strings.HasPrefix(link.Token, "cbl_") || link.EmailID == "" {
+	if err != nil || link.UserID != authn.UserID || !strings.HasPrefix(link.Token, "cbl_") || link.EmailID == (credbound.UUID{}) || !link.Deliverable {
 		t.Fatalf("magic link = %#v, %v", link, err)
 	}
 	login, err := f.manager.CompleteEmailAuthentication(ctx, link.Token)
@@ -436,6 +632,14 @@ func TestMagicLinkAuthentication(t *testing.T) {
 	if err != nil || !mfaLogin.SecondFactorRequired {
 		t.Fatalf("second factor flag = %#v, %v", mfaLogin, err)
 	}
+	otpIssued, err := f.manager.BeginEmailOTP(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otpLogin, err := f.manager.CompleteEmailOTP(ctx, otpIssued.Continuation, otpIssued.Code)
+	if err != nil || !otpLogin.SecondFactorRequired {
+		t.Fatalf("OTP second factor flag = %#v, %v", otpLogin, err)
+	}
 
 	expired, err := f.manager.BeginEmailAuthentication(ctx, "root@example.com")
 	if err != nil {
@@ -447,6 +651,42 @@ func TestMagicLinkAuthentication(t *testing.T) {
 	}
 }
 
+// TestEmailCeremonyForRemovedAddressFails: a magic link or email OTP issued
+// for an address that is removed before redemption must fail like any invalid
+// credential — the mailbox proof no longer names an address of the account.
+func TestEmailCeremonyForRemovedAddressFails(t *testing.T) {
+	f := newFixture(t)
+	authn, _ := f.bootstrap(t)
+	ctx := context.Background()
+	issued, err := f.manager.BeginEmailAddition(ctx, authn, "alias@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.ConfirmEmail(ctx, issued.Token); err != nil {
+		t.Fatal(err)
+	}
+	link, err := f.manager.BeginEmailAuthentication(ctx, "alias@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otp, err := f.manager.BeginEmailOTP(ctx, "alias@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.RemoveEmail(ctx, aal2(authn.UserID, f.now), issued.Email.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.CompleteEmailAuthentication(ctx, link.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("magic link for removed address = %v", err)
+	}
+	if _, err := f.manager.CompleteEmailOTP(ctx, otp.Continuation, otp.Code); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("email OTP for removed address = %v", err)
+	}
+}
+
+// TestRevokeUserCredentials pins AUTH-010: one operation revokes a user's
+// credentials, by the user with step-up or by an authorized instance
+// administrator, and never by an unprivileged third party.
 func TestRevokeUserCredentials(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -460,7 +700,7 @@ func TestRevokeUserCredentials(t *testing.T) {
 	if _, err := f.manager.AuthenticatePAT(context.Background(), issued.Token); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.manager.RevokeUserCredentials(context.Background(), stepUp, credbound.TrustedRequest{}, ""); err != nil {
+	if err := f.manager.RevokeUserCredentials(context.Background(), stepUp, credbound.TrustedRequest{}, credbound.UUID{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.manager.AuthenticatePAT(context.Background(), issued.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
@@ -480,14 +720,18 @@ func TestRevokeUserCredentials(t *testing.T) {
 	if err := f.manager.RevokeUserCredentials(context.Background(), stepUp, credbound.TrustedRequest{}, member.ID); err != nil {
 		t.Fatalf("admin revocation = %v", err)
 	}
-	if err := f.manager.RevokeUserCredentials(context.Background(), stepUp, credbound.TrustedRequest{}, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.RevokeUserCredentials(context.Background(), stepUp, credbound.TrustedRequest{}, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid user id error = %v", err)
 	}
-	if err := f.manager.RevokeUserCredentials(context.Background(), credbound.Authentication{}, credbound.TrustedRequest{}, ""); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.RevokeUserCredentials(context.Background(), credbound.Authentication{}, credbound.TrustedRequest{}, credbound.UUID{}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("anonymous revocation error = %v", err)
 	}
 }
 
+// TestInvitationRegistration pins the registration half of TENANT-005: the
+// single-use token is returned exactly once without its digest, only one
+// invitation may be pending per address, and the invitee registers a new
+// account whose invited address is verified by token delivery.
 func TestInvitationRegistration(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -541,6 +785,10 @@ func TestInvitationRegistration(t *testing.T) {
 	}
 }
 
+// TestInvitationAcceptRevokeAndExpiry pins the acceptance half of
+// TENANT-005: only an authenticated account owning the invited address may
+// accept, invitations are revocable and expiring, and the listing never
+// carries the digest.
 func TestInvitationAcceptRevokeAndExpiry(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -650,6 +898,10 @@ func TestTokenForgeryAndDisabledUserPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	otp, err := f.manager.BeginEmailOTP(ctx, "member@example.com")
+	if err != nil || otp.Code == "" {
+		t.Fatalf("member OTP = %#v, %v", otp, err)
+	}
 	// A forged secret with a valid identifier is rejected.
 	if _, err := f.manager.CompletePasswordReset(ctx, forgeSecret(reset.Token), "some new password"); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("forged reset error = %v", err)
@@ -658,11 +910,11 @@ func TestTokenForgeryAndDisabledUserPaths(t *testing.T) {
 		t.Fatalf("forged link error = %v", err)
 	}
 	// A well-formed token with an unknown identifier is rejected too.
-	ghostReset := "cbr_" + reset.UserID + "_" + strings.Repeat("A", 43)
+	ghostReset := "cbr_" + reset.UserID.String() + "_" + strings.Repeat("A", 43)
 	if _, err := f.manager.CompletePasswordReset(ctx, ghostReset, "some new password"); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("unknown reset error = %v", err)
 	}
-	if _, err := f.manager.CompleteEmailAuthentication(ctx, "cbl_"+link.UserID+"_"+strings.Repeat("A", 43)); !errors.Is(err, credbound.ErrInvalidCredentials) {
+	if _, err := f.manager.CompleteEmailAuthentication(ctx, "cbl_"+link.UserID.String()+"_"+strings.Repeat("A", 43)); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("unknown link error = %v", err)
 	}
 
@@ -676,11 +928,17 @@ func TestTokenForgeryAndDisabledUserPaths(t *testing.T) {
 	if _, err := f.manager.CompleteEmailAuthentication(ctx, link.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("link for disabled user error = %v", err)
 	}
-	if _, err := f.manager.BeginPasswordReset(ctx, "member@example.com"); !errors.Is(err, credbound.ErrNotFound) {
-		t.Fatalf("reset request for disabled user error = %v", err)
+	if issued, err := f.manager.BeginPasswordReset(ctx, "member@example.com"); err != nil || issued.Token != "" {
+		t.Fatalf("reset request for disabled user = %#v, %v", issued, err)
 	}
-	if _, err := f.manager.BeginEmailAuthentication(ctx, "member@example.com"); !errors.Is(err, credbound.ErrNotFound) {
-		t.Fatalf("link request for disabled user error = %v", err)
+	if issued, err := f.manager.BeginEmailAuthentication(ctx, "member@example.com"); err != nil || issued.Token != "" {
+		t.Fatalf("link request for disabled user = %#v, %v", issued, err)
+	}
+	if _, err := f.manager.CompleteEmailOTP(ctx, otp.Continuation, otp.Code); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("OTP for disabled user error = %v", err)
+	}
+	if issued, err := f.manager.BeginEmailOTP(ctx, "member@example.com"); err != nil || issued.Code != "" || issued.Continuation == "" {
+		t.Fatalf("OTP request for disabled user = %#v, %v", issued, err)
 	}
 }
 
@@ -704,7 +962,7 @@ func TestInvitationForgedAndDisabledWorkspace(t *testing.T) {
 	}); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("forged invitation error = %v", err)
 	}
-	if _, _, err := f.manager.RegisterFromInvitation(ctx, "cbi_"+second.ID+"_"+strings.Repeat("A", 43), credbound.RegisterFromInvitationInput{
+	if _, _, err := f.manager.RegisterFromInvitation(ctx, "cbi_"+second.ID.String()+"_"+strings.Repeat("A", 43), credbound.RegisterFromInvitationInput{
 		DisplayName: "Invitee", Password: "chosen by invitee",
 	}); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("unknown invitation error = %v", err)
@@ -724,10 +982,10 @@ func TestInvitationForgedAndDisabledWorkspace(t *testing.T) {
 		t.Fatalf("invitation in disabled workspace error = %v", err)
 	}
 	// Listing and revocation validation paths.
-	if _, err := collectPasskeys(t, f.manager.Passkeys(context.Background(), stepUp, "")); err != nil {
+	if _, err := collectPasskeys(t, f.manager.Passkeys(context.Background(), stepUp, credbound.UUID{})); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.manager.RevokeInvitation(ctx, stepUp, second.ID, "not-a-uuid"); !errors.Is(err, credbound.ErrForbidden) {
+	if err := f.manager.RevokeInvitation(ctx, stepUp, second.ID, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrForbidden) {
 		// The disabled workspace is rejected before the id validation.
 		t.Fatalf("revoke in disabled workspace error = %v", err)
 	}
@@ -766,6 +1024,10 @@ func TestHardeningAuditUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	otp, err := f.manager.BeginEmailOTP(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
 	invitation, err := f.manager.InviteToWorkspace(ctx, stepUp, workspace.ID, credbound.InviteToWorkspaceInput{
 		Email: "invitee@example.com", Role: credbound.RoleMember,
 	})
@@ -796,7 +1058,43 @@ func TestHardeningAuditUnavailable(t *testing.T) {
 	if _, err := f.manager.CompleteEmailAuthentication(ctx, forgeSecret(link.Token)); !errors.Is(err, credbound.ErrAuditUnavailable) {
 		t.Fatalf("link forged audit failure = %v", err)
 	}
-	if err := f.manager.RevokeUserCredentials(ctx, stepUp, credbound.TrustedRequest{}, ""); !errors.Is(err, credbound.ErrAuditUnavailable) {
+	if _, err := f.manager.BeginEmailOTP(ctx, "unknown@example.com"); !errors.Is(err, credbound.ErrAuditUnavailable) {
+		t.Fatalf("OTP request audit failure = %v", err)
+	}
+	if _, err := f.manager.BeginEmailOTP(ctx, "root@example.com"); !errors.Is(err, credbound.ErrAuditUnavailable) {
+		t.Fatalf("OTP begin audit failure = %v", err)
+	}
+	if _, err := f.manager.CompleteEmailOTP(ctx, otp.Continuation, otp.Code); !errors.Is(err, credbound.ErrAuditUnavailable) {
+		t.Fatalf("OTP complete audit failure = %v", err)
+	}
+	if _, err := f.manager.CompleteEmailOTP(ctx, otp.Continuation, "00000000"); !errors.Is(err, credbound.ErrAuditUnavailable) && !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("OTP wrong-code audit failure = %v", err)
+	}
+	f.store.SetAuditFailure(nil)
+	decoy, err := f.manager.BeginEmailOTP(ctx, "ghost@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.CompleteEmailOTP(ctx, otp.Continuation, otp.Code); err != nil {
+		t.Fatalf("OTP baseline completion = %v", err)
+	}
+	expiredOTP, err := f.manager.BeginEmailOTP(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.store.SetAuditFailure(errors.New("disk full"))
+	if _, err := f.manager.CompleteEmailOTP(ctx, decoy.Continuation, "00000000"); !errors.Is(err, credbound.ErrAuditUnavailable) {
+		t.Fatalf("OTP decoy audit failure = %v", err)
+	}
+	if _, err := f.manager.CompleteEmailOTP(ctx, otp.Continuation, otp.Code); !errors.Is(err, credbound.ErrAuditUnavailable) {
+		t.Fatalf("OTP reuse audit failure = %v", err)
+	}
+	f.now = f.now.Add(15*time.Minute + 30*time.Second)
+	if _, err := f.manager.CompleteEmailOTP(ctx, expiredOTP.Continuation, expiredOTP.Code); !errors.Is(err, credbound.ErrAuditUnavailable) && !errors.Is(err, credbound.ErrExpired) {
+		t.Fatalf("OTP expired audit failure = %v", err)
+	}
+	f.now = f.now.Add(-(15*time.Minute + 30*time.Second))
+	if err := f.manager.RevokeUserCredentials(ctx, stepUp, credbound.TrustedRequest{}, credbound.UUID{}); !errors.Is(err, credbound.ErrAuditUnavailable) {
 		t.Fatalf("revocation audit failure = %v", err)
 	}
 	if _, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "wrong password"); !errors.Is(err, credbound.ErrAuditUnavailable) {
@@ -835,63 +1133,63 @@ type hardeningFaultStore struct {
 	completeResetErr error
 }
 
-func (s *hardeningFaultStore) TOTPByUserID(ctx context.Context, userID string) (credbound.TOTPFactor, error) {
+func (s *hardeningFaultStore) TOTPByUserID(ctx context.Context, userID credbound.UUID) (credbound.TOTPFactor, error) {
 	if s.totpErr != nil {
 		return credbound.TOTPFactor{}, s.totpErr
 	}
 	return s.Store.TOTPByUserID(ctx, userID)
 }
 
-func (s *hardeningFaultStore) WorkspaceByID(ctx context.Context, workspaceID string) (credbound.Workspace, error) {
+func (s *hardeningFaultStore) WorkspaceByID(ctx context.Context, workspaceID credbound.UUID) (credbound.Workspace, error) {
 	if s.workspaceErr != nil {
 		return credbound.Workspace{}, s.workspaceErr
 	}
 	return s.Store.WorkspaceByID(ctx, workspaceID)
 }
 
-func (s *hardeningFaultStore) ConsumeEmailAuthentication(ctx context.Context, tokenID, userID string, at time.Time, commit credbound.Commit) error {
+func (s *hardeningFaultStore) ConsumeEmailAuthentication(ctx context.Context, tokenID, userID credbound.UUID, at time.Time, completesLogin bool, commit credbound.Commit) error {
 	if s.consumeLinkErr != nil {
 		return s.consumeLinkErr
 	}
-	return s.Store.ConsumeEmailAuthentication(ctx, tokenID, userID, at, commit)
+	return s.Store.ConsumeEmailAuthentication(ctx, tokenID, userID, at, completesLogin, commit)
 }
 
-func (s *hardeningFaultStore) CompletePasswordReset(ctx context.Context, resetID string, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {
+func (s *hardeningFaultStore) CompletePasswordReset(ctx context.Context, resetID credbound.UUID, password credbound.PasswordCredential, at time.Time, commit credbound.Commit) error {
 	if s.completeResetErr != nil {
 		return s.completeResetErr
 	}
 	return s.Store.CompletePasswordReset(ctx, resetID, password, at, commit)
 }
 
-func (s *hardeningFaultStore) LoginThrottleByUserID(ctx context.Context, userID string) (credbound.LoginThrottle, error) {
+func (s *hardeningFaultStore) LoginThrottleByUserID(ctx context.Context, userID credbound.UUID) (credbound.LoginThrottle, error) {
 	if s.throttleErr != nil {
 		return credbound.LoginThrottle{}, s.throttleErr
 	}
 	return s.Store.LoginThrottleByUserID(ctx, userID)
 }
 
-func (s *hardeningFaultStore) RecordLoginFailure(ctx context.Context, userID string, at time.Time, threshold int64, lockedUntil time.Time, commit credbound.Commit) (credbound.LoginThrottle, error) {
+func (s *hardeningFaultStore) RecordLoginFailure(ctx context.Context, userID credbound.UUID, at time.Time, threshold int64, lockedUntil time.Time, commit credbound.Commit) (credbound.LoginThrottle, error) {
 	if s.recordFailErr != nil {
 		return credbound.LoginThrottle{}, s.recordFailErr
 	}
 	return s.Store.RecordLoginFailure(ctx, userID, at, threshold, lockedUntil, commit)
 }
 
-func (s *hardeningFaultStore) PasswordResetByID(ctx context.Context, resetID string) (credbound.PasswordResetCredential, error) {
+func (s *hardeningFaultStore) PasswordResetByID(ctx context.Context, resetID credbound.UUID) (credbound.PasswordResetCredential, error) {
 	if s.resetErr != nil {
 		return credbound.PasswordResetCredential{}, s.resetErr
 	}
 	return s.Store.PasswordResetByID(ctx, resetID)
 }
 
-func (s *hardeningFaultStore) EmailAuthenticationByID(ctx context.Context, tokenID string) (credbound.EmailAuthenticationCredential, error) {
+func (s *hardeningFaultStore) EmailAuthenticationByID(ctx context.Context, tokenID credbound.UUID) (credbound.EmailAuthenticationCredential, error) {
 	if s.linkErr != nil {
 		return credbound.EmailAuthenticationCredential{}, s.linkErr
 	}
 	return s.Store.EmailAuthenticationByID(ctx, tokenID)
 }
 
-func (s *hardeningFaultStore) WorkspaceInvitationByID(ctx context.Context, invitationID string) (credbound.WorkspaceInvitation, error) {
+func (s *hardeningFaultStore) WorkspaceInvitationByID(ctx context.Context, invitationID credbound.UUID) (credbound.WorkspaceInvitation, error) {
 	if s.invitationErr != nil {
 		return credbound.WorkspaceInvitation{}, s.invitationErr
 	}
@@ -905,7 +1203,7 @@ func (s *hardeningFaultStore) UserByEmail(ctx context.Context, email string) (cr
 	return s.Store.UserByEmail(ctx, email)
 }
 
-func (s *hardeningFaultStore) Emails(ctx context.Context, userID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.EmailAddress], error] {
+func (s *hardeningFaultStore) Emails(ctx context.Context, userID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.EmailAddress], error] {
 	if s.emailsErr != nil {
 		return func(yield func(credbound.PageEvent[credbound.EmailAddress], error) bool) {
 			yield(credbound.PageEvent[credbound.EmailAddress]{}, s.emailsErr)
@@ -914,7 +1212,7 @@ func (s *hardeningFaultStore) Emails(ctx context.Context, userID string, page cr
 	return s.Store.Emails(ctx, userID, page)
 }
 
-func (s *hardeningFaultStore) CountUnusedRecoveryCodes(ctx context.Context, userID string) (int64, error) {
+func (s *hardeningFaultStore) CountUnusedRecoveryCodes(ctx context.Context, userID credbound.UUID) (int64, error) {
 	if s.recoveryCountErr != nil {
 		return 0, s.recoveryCountErr
 	}
@@ -1001,7 +1299,7 @@ func TestHardeningInfrastructureFailures(t *testing.T) {
 	}
 	fault.emailsErr = nil
 	fault.recoveryCountErr = boom
-	if _, err := manager.TOTPStatus(ctx, authn, ""); !errors.Is(err, boom) {
+	if _, err := manager.TOTPStatus(ctx, authn, credbound.UUID{}); !errors.Is(err, boom) {
 		t.Fatalf("recovery count failure = %v", err)
 	}
 	fault.recoveryCountErr = nil
@@ -1035,6 +1333,36 @@ func TestHardeningInfrastructureFailures(t *testing.T) {
 		t.Fatalf("invitation workspace lookup failure = %v", err)
 	}
 	fault.workspaceErr = nil
+
+	fault.userByEmailErr = boom
+	if _, err := manager.BeginEmailOTP(ctx, "root@example.com"); !errors.Is(err, boom) {
+		t.Fatalf("OTP user lookup failure = %v", err)
+	}
+	fault.userByEmailErr = nil
+	fault.emailsErr = boom
+	if _, err := manager.BeginEmailOTP(ctx, "root@example.com"); !errors.Is(err, boom) {
+		t.Fatalf("OTP email enumeration failure = %v", err)
+	}
+	fault.emailsErr = nil
+	freshOTP, err := f.manager.BeginEmailOTP(ctx, "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fault.linkErr = boom
+	if _, err := manager.CompleteEmailOTP(ctx, freshOTP.Continuation, freshOTP.Code); !errors.Is(err, boom) {
+		t.Fatalf("OTP lookup failure = %v", err)
+	}
+	fault.linkErr = nil
+	fault.totpErr = boom
+	if _, err := manager.CompleteEmailOTP(ctx, freshOTP.Continuation, freshOTP.Code); !errors.Is(err, boom) {
+		t.Fatalf("OTP factor lookup failure = %v", err)
+	}
+	fault.totpErr = nil
+	fault.consumeLinkErr = credbound.ErrConflict
+	if _, err := manager.CompleteEmailOTP(ctx, freshOTP.Continuation, freshOTP.Code); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("OTP consume race = %v", err)
+	}
+	fault.consumeLinkErr = nil
 }
 
 func TestHardeningReadAuthorization(t *testing.T) {
@@ -1126,7 +1454,7 @@ func TestInvitationEdgeCases(t *testing.T) {
 		t.Fatalf("AAL1 admin revocation error = %v", err)
 	}
 	// Revocation validation.
-	if err := f.manager.RevokeInvitation(ctx, stepUp, second.ID, "not-a-uuid"); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.RevokeInvitation(ctx, stepUp, second.ID, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid invitation id error = %v", err)
 	}
 	if err := f.manager.RevokeInvitation(ctx, stepUp, workspace.ID, issued.Invitation.ID); !errors.Is(err, credbound.ErrNotFound) {
@@ -1158,10 +1486,10 @@ type tamperedChainStore struct {
 	corruptedHead bool
 }
 
-func (s *tamperedChainStore) ChainedAuditEvents(ctx context.Context) iter.Seq2[credbound.AuditEvent, error] {
+func (s *tamperedChainStore) ChainedAuditEvents(ctx context.Context, afterSequence int64) iter.Seq2[credbound.AuditEvent, error] {
 	return func(yield func(credbound.AuditEvent, error) bool) {
 		first := true
-		for event, err := range s.Store.ChainedAuditEvents(ctx) {
+		for event, err := range s.Store.ChainedAuditEvents(ctx, afterSequence) {
 			if err != nil {
 				yield(credbound.AuditEvent{}, err)
 				return
@@ -1189,6 +1517,9 @@ func (s *tamperedChainStore) AuditChainHead(ctx context.Context) (int64, []byte,
 	return sequence, hash, err
 }
 
+// TestVerifyAuditChainDetectsTampering pins the tamper evidence of AUDIT-005:
+// VerifyAuditChain fails with ErrAuditCompromised when an event was edited,
+// removed, or the persisted chain head was altered.
 func TestVerifyAuditChainDetectsTampering(t *testing.T) {
 	f := newFixture(t)
 	authn, _ := f.bootstrap(t)
@@ -1204,5 +1535,628 @@ func TestVerifyAuditChainDetectsTampering(t *testing.T) {
 		if _, err := manager.VerifyAuditChain(context.Background(), authn); !errors.Is(err, credbound.ErrAuditCompromised) {
 			t.Fatalf("tampered chain (%+v) error = %v", tampered, err)
 		}
+	}
+}
+
+// TestAdminResetSecondFactor pins AUTH-017: an instance administrator removes
+// the target's TOTP factor, recovery codes, passkeys, and sessions in one
+// atomic operation, and can never target their own account.
+func TestAdminResetSecondFactor(t *testing.T) {
+	f := newFixture(t)
+	authn, workspace := f.bootstrap(t)
+	ctx := context.Background()
+	root := aal2(authn.UserID, f.now)
+
+	member, err := f.manager.CreateUser(ctx, root, workspace.ID, credbound.CreateUserInput{
+		Email: "member@example.com", DisplayName: "Member", Password: "another strong password", Role: credbound.RoleMember,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberAuthn := aal2(member.ID, f.now)
+	if _, err := f.manager.BeginTOTPEnrollment(ctx, memberAuthn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.ConfirmTOTPEnrollment(ctx, memberAuthn, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	challenge, err := f.manager.BeginPasskeyRegistration(ctx, memberAuthn, "MacBook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishPasskeyRegistration(ctx, memberAuthn, challenge.Continuation, []byte("valid")); err != nil {
+		t.Fatal(err)
+	}
+	session, err := f.manager.CreateSession(ctx, memberAuthn, credbound.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Guards: self-reset, non-admin actor, invalid and unknown targets.
+	if err := f.manager.AdminResetSecondFactor(ctx, root, credbound.TrustedRequest{Local: true}, authn.UserID); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("self reset error = %v", err)
+	}
+	if err := f.manager.AdminResetSecondFactor(ctx, memberAuthn, credbound.TrustedRequest{}, authn.UserID); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("member reset error = %v", err)
+	}
+	if err := f.manager.AdminResetSecondFactor(ctx, root, credbound.TrustedRequest{Local: true}, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("invalid target error = %v", err)
+	}
+	if err := f.manager.AdminResetSecondFactor(ctx, root, credbound.TrustedRequest{Local: true}, credbound.MustParseUUID("01890000-0000-7000-8000-000000000000")); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("unknown target error = %v", err)
+	}
+
+	if err := f.manager.AdminResetSecondFactor(ctx, root, credbound.TrustedRequest{Local: true}, member.ID); err != nil {
+		t.Fatalf("admin reset = %v", err)
+	}
+
+	// TOTP, recovery codes, passkeys and sessions are all gone atomically.
+	status, err := f.manager.TOTPStatus(ctx, root, member.ID)
+	if err != nil || status.Enrolled || status.Active || status.UnusedRecoveryCodes != 0 {
+		t.Fatalf("status after reset = %#v, %v", status, err)
+	}
+	passkeys, err := collectPasskeys(t, f.manager.Passkeys(ctx, root, member.ID))
+	if err != nil || len(passkeys) != 0 {
+		t.Fatalf("passkeys after reset = %#v, %v", passkeys, err)
+	}
+	if _, _, err := f.manager.AuthenticateSession(ctx, session.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("session after reset error = %v", err)
+	}
+	// The account falls back to its first factor without a pending 2FA step.
+	signin, err := f.manager.AuthenticatePassword(ctx, "member@example.com", "another strong password")
+	if err != nil || signin.SecondFactorRequired {
+		t.Fatalf("post-reset sign-in = %#v, %v", signin, err)
+	}
+	// Resetting an account that has no second factor left stays a success.
+	if err := f.manager.AdminResetSecondFactor(ctx, root, credbound.TrustedRequest{Local: true}, member.ID); err != nil {
+		t.Fatalf("idempotent reset = %v", err)
+	}
+}
+
+// TestRegenerateRecoveryCodes pins AUTH-016: a fresh interactive AAL2
+// authentication replaces the recovery codes with a new single-display set,
+// and the previous set stops working in the same transaction.
+func TestRegenerateRecoveryCodes(t *testing.T) {
+	f := newFixture(t)
+	authn, _ := f.bootstrap(t)
+	ctx := context.Background()
+	stepUp := aal2(authn.UserID, f.now)
+
+	// Without an active factor the regeneration reports ErrNotFound.
+	if _, err := f.manager.RegenerateRecoveryCodes(ctx, stepUp); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("no factor error = %v", err)
+	}
+	if _, err := f.manager.BeginTOTPEnrollment(ctx, stepUp); err != nil {
+		t.Fatal(err)
+	}
+	original, err := f.manager.ConfirmTOTPEnrollment(ctx, stepUp, "123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.RegenerateRecoveryCodes(ctx, authn); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("AAL1 regeneration error = %v", err)
+	}
+	replacement, err := f.manager.RegenerateRecoveryCodes(ctx, stepUp)
+	if err != nil || len(replacement) != 10 {
+		t.Fatalf("regenerated codes = %d, %v", len(replacement), err)
+	}
+	// The previous set stopped working in the same transaction.
+	if _, err := f.manager.VerifyTOTP(ctx, authn, original[0]); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("old recovery code error = %v", err)
+	}
+	if _, err := f.manager.VerifyTOTP(ctx, authn, replacement[0]); err != nil {
+		t.Fatalf("new recovery code = %v", err)
+	}
+	status, err := f.manager.TOTPStatus(ctx, stepUp, credbound.UUID{})
+	if err != nil || status.UnusedRecoveryCodes != 9 {
+		t.Fatalf("status after regeneration = %#v, %v", status, err)
+	}
+}
+
+// TestPATScopeEnforcement pins PAT-004: a scope is either the `*` wildcard
+// or a workspace permission string validated at creation, the permission
+// authorization denies a scoped credential anything outside its scopes, and
+// the coarse role authorization requires the wildcard, so the owner's role
+// never widens a narrow token.
+func TestPATScopeEnforcement(t *testing.T) {
+	f := newFixture(t)
+	authn, workspace := f.bootstrap(t)
+	ctx := context.Background()
+	stepUp := aal2(authn.UserID, f.now)
+
+	// Scopes outside the permission grammar are rejected at creation.
+	if _, err := f.manager.CreatePAT(ctx, stepUp, credbound.CreatePATInput{
+		Name: "00000000-0000-4000-8000-000000000000", WorkspaceID: workspace.ID, Scopes: []string{"Read Only"},
+	}); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("invalid scope error = %v", err)
+	}
+
+	narrow, err := f.manager.CreatePAT(ctx, stepUp, credbound.CreatePATInput{
+		Name: "narrow", WorkspaceID: workspace.ID, Scopes: []string{string(credbound.PermissionWorkspaceAccess)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	narrowAuthn, err := f.manager.AuthenticatePAT(ctx, narrow.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.AuthorizePermission(ctx, narrowAuthn, workspace.ID, credbound.PermissionWorkspaceAccess); err != nil {
+		t.Fatalf("in-scope permission = %v", err)
+	}
+	// The owner is a workspace admin, but the token's scopes stay the
+	// ceiling: the role never widens a narrow PAT.
+	if err := f.manager.AuthorizePermission(ctx, narrowAuthn, workspace.ID, credbound.PermissionWorkspaceUsersRead); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("out-of-scope permission error = %v", err)
+	}
+	// The coarse role check requires the wildcard from scoped credentials.
+	if err := f.manager.Authorize(ctx, narrowAuthn, workspace.ID, credbound.RoleMember); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("scoped role authorization error = %v", err)
+	}
+
+	wildcard, err := f.manager.CreatePAT(ctx, stepUp, credbound.CreatePATInput{
+		Name: "wildcard", WorkspaceID: workspace.ID, Scopes: []string{"*"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wildcardAuthn, err := f.manager.AuthenticatePAT(ctx, wildcard.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.AuthorizePermission(ctx, wildcardAuthn, workspace.ID, credbound.PermissionWorkspaceUsersRead); err != nil {
+		t.Fatalf("wildcard permission = %v", err)
+	}
+	if err := f.manager.Authorize(ctx, wildcardAuthn, workspace.ID, credbound.RoleAdmin); err != nil {
+		t.Fatalf("wildcard role authorization = %v", err)
+	}
+}
+
+// TestVerifyAuditChainFromCheckpoint pins the incremental half of AUDIT-005:
+// VerifyAuditChainFrom verifies only the delta after a caller-trusted
+// checkpoint and rejects forged or rewound checkpoints.
+func TestVerifyAuditChainFromCheckpoint(t *testing.T) {
+	f := newFixture(t)
+	authn, _ := f.bootstrap(t)
+	ctx := context.Background()
+
+	first, err := f.manager.VerifyAuditChain(ctx, authn)
+	if err != nil || first.HeadSequence == 0 {
+		t.Fatalf("initial verification = %#v, %v", first, err)
+	}
+	checkpoint := credbound.AuditChainCheckpoint{Sequence: first.HeadSequence, Hash: first.HeadHash}
+
+	// Grow the chain, then verify only the delta from the checkpoint.
+	if _, err := f.manager.CreatePAT(ctx, aal2(authn.UserID, f.now), credbound.CreatePATInput{Name: "delta", Scopes: []string{"*"}}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := f.manager.VerifyAuditChainFrom(ctx, authn, checkpoint)
+	if err != nil || second.HeadSequence <= first.HeadSequence {
+		t.Fatalf("delta verification = %#v, %v", second, err)
+	}
+	// An idempotent re-run from the new head verifies zero events.
+	if _, err := f.manager.VerifyAuditChainFrom(ctx, authn, credbound.AuditChainCheckpoint{Sequence: second.HeadSequence, Hash: second.HeadHash}); err != nil {
+		t.Fatalf("head checkpoint verification = %v", err)
+	}
+
+	// A checkpoint with a wrong hash vouches for nothing.
+	forged := credbound.AuditChainCheckpoint{Sequence: first.HeadSequence, Hash: bytesOf(9, 32)}
+	if _, err := f.manager.VerifyAuditChainFrom(ctx, authn, forged); !errors.Is(err, credbound.ErrAuditCompromised) {
+		t.Fatalf("forged checkpoint error = %v", err)
+	}
+	// A checkpoint beyond the head reports a rewound chain.
+	beyond := credbound.AuditChainCheckpoint{Sequence: second.HeadSequence + 10, Hash: second.HeadHash}
+	if _, err := f.manager.VerifyAuditChainFrom(ctx, authn, beyond); !errors.Is(err, credbound.ErrAuditCompromised) {
+		t.Fatalf("rewound chain error = %v", err)
+	}
+	// A sequence without its hash is rejected before any store read.
+	if _, err := f.manager.VerifyAuditChainFrom(ctx, authn, credbound.AuditChainCheckpoint{Sequence: 3}); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("hashless checkpoint error = %v", err)
+	}
+}
+
+func TestSecretRotationWithRetiredKeys(t *testing.T) {
+	store := memory.New()
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	oldSecret, oldPAT, oldRecovery := bytesOf(1, 32), bytesOf(2, 32), bytesOf(3, 32)
+	seed := byte(0x61)
+	build := func(secret, pat, recovery []byte, retiredSecret, retiredPAT, retiredRecovery [][]byte) *credbound.Manager {
+		seed += 0x20
+		manager, err := credbound.New(credbound.Config{
+			Store: store, Passwords: &fakePasswords{}, TOTP: fakeTOTP{},
+			SecretKey: secret, PATPepper: pat, RecoveryPepper: recovery,
+			RetiredSecretKeys: retiredSecret, RetiredPATPeppers: retiredPAT, RetiredRecoveryPeppers: retiredRecovery,
+			Clock: func() time.Time { return now }, Random: &counterReader{next: seed},
+			StepUpMaxAge: 10 * time.Minute,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return manager
+	}
+	before := build(oldSecret, oldPAT, oldRecovery, nil, nil, nil)
+	ctx := context.Background()
+	authn, workspace, err := before.Bootstrap(ctx, credbound.BootstrapInput{
+		Email: "root@example.com", DisplayName: "Root", Password: "correct horse battery", WorkspaceName: "Main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stepUp := aal2(authn.UserID, now)
+	pat, err := before.CreatePAT(ctx, stepUp, credbound.CreatePATInput{Name: "ci", WorkspaceID: workspace.ID, Scopes: []string{"*"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := before.CreateSession(ctx, authn, credbound.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := before.BeginTOTPEnrollment(ctx, stepUp); err != nil {
+		t.Fatal(err)
+	}
+	codes, err := before.ConfirmTOTPEnrollment(ctx, stepUp, "123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// After rotation, everything issued under the old keys keeps working.
+	after := build(bytesOf(11, 32), bytesOf(12, 32), bytesOf(13, 32),
+		[][]byte{oldSecret}, [][]byte{oldPAT}, [][]byte{oldRecovery})
+	if _, err := after.AuthenticatePAT(ctx, pat.Token); err != nil {
+		t.Fatalf("retired-pepper PAT = %v", err)
+	}
+	if _, _, err := after.AuthenticateSession(ctx, session.Token); err != nil {
+		t.Fatalf("retired-digest session = %v", err)
+	}
+	now = now.Add(time.Minute)
+	if _, err := after.VerifyTOTP(ctx, authn, "123456"); err != nil {
+		t.Fatalf("retired-seal TOTP secret = %v", err)
+	}
+	if _, err := after.VerifyTOTP(ctx, authn, codes[0]); err != nil {
+		t.Fatalf("retired-pepper recovery code = %v", err)
+	}
+	// New credentials issued after the rotation use the active keys and a
+	// manager without the retired keys rejects the old ones.
+	fresh, err := after.CreatePAT(ctx, aal2(authn.UserID, now), credbound.CreatePATInput{Name: "fresh", WorkspaceID: workspace.ID, Scopes: []string{"*"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := build(bytesOf(11, 32), bytesOf(12, 32), bytesOf(13, 32), nil, nil, nil)
+	if _, err := bare.AuthenticatePAT(ctx, fresh.Token); err != nil {
+		t.Fatalf("active-pepper PAT = %v", err)
+	}
+	if _, err := bare.AuthenticatePAT(ctx, pat.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("dropped retired pepper still accepted: %v", err)
+	}
+
+	// Config validation of the retired material.
+	if _, err := credbound.New(credbound.Config{
+		Store: store, Passwords: &fakePasswords{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		RetiredSecretKeys: [][]byte{bytesOf(9, 16)},
+	}); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("short retired secret key error = %v", err)
+	}
+	if _, err := credbound.New(credbound.Config{
+		Store: store, Passwords: &fakePasswords{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		RetiredPATPeppers: [][]byte{bytesOf(9, 8)},
+	}); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("short retired pepper error = %v", err)
+	}
+}
+
+func TestAnonymizeUser(t *testing.T) {
+	f := newFixture(t)
+	authn, workspace := f.bootstrap(t)
+	ctx := context.Background()
+	root := aal2(authn.UserID, f.now)
+	recorder := &eventRecorder{}
+	f.manager.AddEventListener(recorder)
+
+	member, err := f.manager.CreateUser(ctx, root, workspace.ID, credbound.CreateUserInput{
+		Email: "member@example.com", DisplayName: "Member", Password: "another strong password", Role: credbound.RoleMember,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberAuthn := aal2(member.ID, f.now)
+	if _, err := f.manager.CreatePAT(ctx, memberAuthn, credbound.CreatePATInput{
+		Name: "member token", WorkspaceID: workspace.ID, Scopes: []string{"read"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Guards: invalid id, unknown target, and a non-admin actor are refused.
+	if err := f.manager.AnonymizeUser(ctx, root, credbound.TrustedRequest{Local: true}, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("invalid target = %v", err)
+	}
+	if err := f.manager.AnonymizeUser(ctx, memberAuthn, credbound.TrustedRequest{}, authn.UserID); !errors.Is(err, credbound.ErrForbidden) {
+		t.Fatalf("non-admin actor = %v", err)
+	}
+	// The sole root cannot be anonymized, just as it cannot be disabled.
+	if err := f.manager.AnonymizeUser(ctx, root, credbound.TrustedRequest{Local: true}, authn.UserID); !errors.Is(err, credbound.ErrConflict) {
+		t.Fatalf("last-root anonymize = %v", err)
+	}
+
+	if err := f.manager.AnonymizeUser(ctx, root, credbound.TrustedRequest{Local: true}, member.ID); err != nil {
+		t.Fatalf("anonymize = %v", err)
+	}
+
+	// The mutable PII is scrubbed: display name empty, email replaced by a
+	// tombstone, PAT revoked with its name cleared, account disabled.
+	export, err := f.manager.ExportUserData(ctx, root, member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if export.User.DisplayName != "" || !export.User.Disabled {
+		t.Fatalf("profile not scrubbed: %#v", export.User)
+	}
+	if len(export.Emails) != 1 || export.Emails[0].Address == "member@example.com" ||
+		!strings.HasPrefix(export.Emails[0].Address, "anonymized-") {
+		t.Fatalf("email not tombstoned: %#v", export.Emails)
+	}
+	if len(export.PATs) != 1 || export.PATs[0].Name != "" || export.PATs[0].RevokedAt == nil {
+		t.Fatalf("PAT not scrubbed/revoked: %#v", export.PATs)
+	}
+
+	// The original address can no longer authenticate.
+	if _, err := f.manager.AuthenticatePassword(ctx, "member@example.com", "another strong password"); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("anonymized login = %v", err)
+	}
+
+	// The append-only audit chain stays intact after the scrub.
+	if _, err := f.manager.VerifyAuditChain(ctx, root); err != nil {
+		t.Fatalf("audit chain after anonymize = %v", err)
+	}
+
+	anonymizedEvents := 0
+	for _, name := range recorder.names {
+		if name == credbound.EventUserAnonymized {
+			anonymizedEvents++
+		}
+	}
+	if anonymizedEvents != 1 {
+		t.Fatalf("anonymized events = %d, want 1", anonymizedEvents)
+	}
+}
+
+// TestPendingSecondFactorCannotBypassMFA pins the fix for the second-factor
+// bypass: an Authentication whose second factor is still pending
+// (SecondFactorRequired) proves the first factor only, so every self-service
+// operation behind requireRecentInteractive refuses it with ErrStepUpRequired
+// — most critically the ones that mint a new credential (passkey
+// registration, SSO linking, TOTP re-enrollment), which would otherwise let
+// an attacker knowing only the password enroll their own second factor and
+// come back at AAL2. The one operation such a context exists for — completing
+// the pending factor through VerifyTOTP — keeps working, and the promoted
+// context regains access.
+func TestPendingSecondFactorCannotBypassMFA(t *testing.T) {
+	provider := &fakeSSOProvider{
+		configurationID: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000cc"), kind: credbound.SSOProviderOIDC,
+		claims: credbound.SSOClaims{Issuer: "https://idp.example.com", Subject: "subject-pending"},
+	}
+	f := newFixture(t, provider)
+	authn, _ := f.bootstrap(t)
+	ctx := context.Background()
+	if _, err := f.manager.BeginTOTPEnrollment(ctx, authn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.ConfirmTOTPEnrollment(ctx, authn, "123456"); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := f.manager.AuthenticatePassword(ctx, "root@example.com", "correct horse battery")
+	if err != nil || !pending.SecondFactorRequired {
+		t.Fatalf("pending sign-in = %#v, %v", pending, err)
+	}
+
+	operations := map[string]func() error{
+		"passkey.registration.begin": func() error {
+			_, err := f.manager.BeginPasskeyRegistration(ctx, pending, "Attacker key")
+			return err
+		},
+		"passkey.registration.finish": func() error {
+			_, err := f.manager.FinishPasskeyRegistration(ctx, pending, "junk", []byte("{}"))
+			return err
+		},
+		"sso.link.begin": func() error {
+			_, err := f.manager.BeginSSOLink(ctx, pending, provider.configurationID)
+			return err
+		},
+		"sso.step_up.begin": func() error {
+			_, err := f.manager.BeginSSOStepUp(ctx, pending, provider.configurationID)
+			return err
+		},
+		"totp.enroll.begin": func() error {
+			_, err := f.manager.BeginTOTPEnrollment(ctx, pending)
+			return err
+		},
+		"totp.enroll.confirm": func() error {
+			_, err := f.manager.ConfirmTOTPEnrollment(ctx, pending, "123456")
+			return err
+		},
+		"password.change": func() error {
+			return f.manager.ChangePassword(ctx, pending, "correct horse battery", "eight nine ten eleven")
+		},
+		"email.add.begin": func() error {
+			_, err := f.manager.BeginEmailAddition(ctx, pending, "attacker@example.com")
+			return err
+		},
+		"user.profile.update": func() error {
+			_, err := f.manager.UpdateUser(ctx, pending, credbound.UpdateUserInput{DisplayName: "Mallory"})
+			return err
+		},
+		"user.data.export": func() error {
+			_, err := f.manager.ExportUserData(ctx, pending, credbound.UUID{})
+			return err
+		},
+		"workspace.invitation.accept": func() error {
+			_, err := f.manager.AcceptInvitation(ctx, pending, "junk")
+			return err
+		},
+		"totp.status": func() error {
+			_, err := f.manager.TOTPStatus(ctx, pending, credbound.UUID{})
+			return err
+		},
+		"user.read": func() error {
+			_, err := f.manager.User(ctx, pending, credbound.UUID{})
+			return err
+		},
+		"passkey.list": func() error {
+			_, err := collectPasskeys(t, f.manager.Passkeys(ctx, pending, credbound.UUID{}))
+			return err
+		},
+		"pat.list": func() error {
+			_, _, err := credbound.CollectPage(f.manager.PATs(ctx, pending, credbound.UUID{}, credbound.PageRequest{}))
+			return err
+		},
+		"email.list": func() error {
+			_, _, err := credbound.CollectPage(f.manager.Emails(ctx, pending, credbound.UUID{}, credbound.PageRequest{}))
+			return err
+		},
+		"sso.identity.list": func() error {
+			_, _, err := credbound.CollectPage(f.manager.SSOIdentities(ctx, pending, credbound.UUID{}, credbound.PageRequest{}))
+			return err
+		},
+	}
+	for operation, call := range operations {
+		if err := call(); !errors.Is(err, credbound.ErrStepUpRequired) {
+			t.Fatalf("%s with pending second factor = %v, want ErrStepUpRequired", operation, err)
+		}
+	}
+
+	// A hand-assembled AAL2 context that still carries the pending flag must
+	// not satisfy a step-up either.
+	forged := credbound.Authentication{
+		UserID: pending.UserID, Method: credbound.MethodTOTP, Level: credbound.AAL2,
+		AuthenticatedAt: f.now, SecondFactorRequired: true,
+	}
+	if err := f.manager.RequireStepUp(forged); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("forged pending AAL2 step-up = %v, want ErrStepUpRequired", err)
+	}
+
+	// Completing the pending factor stays reachable, and the promoted context
+	// regains the guarded operations.
+	f.now = f.now.Add(time.Minute)
+	promoted, err := f.manager.VerifyTOTP(ctx, pending, "123456")
+	if err != nil || promoted.SecondFactorRequired || promoted.Level != credbound.AAL2 {
+		t.Fatalf("TOTP completion = %#v, %v", promoted, err)
+	}
+	if _, err := f.manager.BeginPasskeyRegistration(ctx, promoted, "Laptop"); err != nil {
+		t.Fatalf("promoted passkey registration = %v", err)
+	}
+}
+
+// TestPasskeyMidCeremonyRefusals pins the checks that run between Begin and
+// Finish of the passkey ceremonies: a registration continuation bound to
+// another actor or failed by the provider is refused, a cloned authenticator
+// (regressed signature counter) is rejected on both sign-in flows, an account
+// disabled mid-ceremony cannot finish either flow, and a confirmed EnforceSSO
+// domain refuses the usernameless flow against the resolved account's address.
+func TestPasskeyMidCeremonyRefusals(t *testing.T) {
+	provider := &fakeSSOProvider{
+		configurationID: credbound.MustParseUUID("0198b463-0000-7000-8000-0000000000dd"), kind: credbound.SSOProviderOIDC,
+		claims: credbound.SSOClaims{Issuer: "https://idp.example.com", Subject: "subject-passkey"},
+	}
+	f := newFixture(t, provider)
+	authn, workspace := f.bootstrap(t)
+	ctx := context.Background()
+	root := aal2(authn.UserID, f.now)
+	local := credbound.TrustedRequest{Local: true}
+	member, err := f.manager.CreateUser(ctx, root, workspace.ID, credbound.CreateUserInput{
+		Email: "member@corp.example.com", DisplayName: "Member", Password: "another strong password", Role: credbound.RoleMember,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberActor := aal2(member.ID, f.now)
+
+	// A ceremony the provider fails is audited and refused, and its
+	// continuation cannot be finished by a different actor even with a valid
+	// response.
+	failed, err := f.manager.BeginPasskeyRegistration(ctx, memberActor, "Member key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishPasskeyRegistration(ctx, memberActor, failed.Continuation, []byte("bogus")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("failed registration ceremony = %v", err)
+	}
+	if _, err := f.manager.FinishPasskeyRegistration(ctx, root, failed.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("cross-actor registration continuation = %v", err)
+	}
+
+	registration, err := f.manager.BeginPasskeyRegistration(ctx, memberActor, "Member key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishPasskeyRegistration(ctx, memberActor, registration.Continuation, []byte("valid")); err != nil {
+		t.Fatal(err)
+	}
+
+	// A regressed signature counter reports a possibly cloned authenticator:
+	// both the email-first and the usernameless flow refuse it as invalid
+	// credentials.
+	cloned, err := f.manager.BeginPasskeyAuthentication(ctx, "member@corp.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishPasskeyAuthentication(ctx, cloned.Continuation, []byte("cloned")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("cloned email-first sign-in = %v", err)
+	}
+	clonedDiscoverable, err := f.manager.BeginDiscoverablePasskeyAuthentication(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishDiscoverablePasskeyAuthentication(ctx, clonedDiscoverable.Continuation, []byte("cloned")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("cloned discoverable sign-in = %v", err)
+	}
+
+	// An account disabled between Begin and Finish cannot mint AAL2 through
+	// either flow.
+	pendingEmailFirst, err := f.manager.BeginPasskeyAuthentication(ctx, "member@corp.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingDiscoverable, err := f.manager.BeginDiscoverablePasskeyAuthentication(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.DisableUser(ctx, root, local, member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishPasskeyAuthentication(ctx, pendingEmailFirst.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("disabled email-first sign-in = %v", err)
+	}
+	if _, err := f.manager.FinishDiscoverablePasskeyAuthentication(ctx, pendingDiscoverable.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("disabled discoverable sign-in = %v", err)
+	}
+	if err := f.manager.EnableUser(ctx, root, local, member.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// A confirmed EnforceSSO domain refuses the usernameless flow too: the
+	// policy is enforced against the resolved account's primary address, so a
+	// passkey registered before confirmation cannot bypass it.
+	issued, err := f.manager.CreateWorkspaceDomain(ctx, root, workspace.ID, "corp.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.ConfirmWorkspaceDomain(ctx, root, issued.Domain.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.UpdateWorkspaceDomainPolicy(ctx, root, issued.Domain.ID, credbound.WorkspaceDomainPolicyInput{
+		EnforceSSO: true, SSOProviderConfigurationID: provider.configurationID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.BeginPasskeyAuthentication(ctx, "member@corp.example.com"); !errors.Is(err, credbound.ErrSSORequired) {
+		t.Fatalf("email-first begin under EnforceSSO = %v", err)
+	}
+	enforced, err := f.manager.BeginDiscoverablePasskeyAuthentication(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.manager.FinishDiscoverablePasskeyAuthentication(ctx, enforced.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrSSORequired) {
+		t.Fatalf("discoverable finish under EnforceSSO = %v", err)
 	}
 }

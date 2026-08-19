@@ -24,7 +24,7 @@ func TestHardeningCanceledOperations(t *testing.T) {
 		f.store.CreatePasswordReset(ctx, reset, event),
 		f.store.CompletePasswordReset(ctx, reset.ID, credbound.PasswordCredential{UserID: f.user.ID}, f.now, event),
 		f.store.CreateEmailAuthentication(ctx, link, event),
-		f.store.ConsumeEmailAuthentication(ctx, link.ID, f.user.ID, f.now, event),
+		f.store.ConsumeEmailAuthentication(ctx, link.ID, f.user.ID, f.now, true, event),
 		f.store.CreateWorkspaceInvitation(ctx, invitation, event),
 		f.store.AcceptWorkspaceInvitation(ctx, invitation.ID, f.user.ID, f.now, membership, event),
 		f.store.RegisterInvitedUser(ctx, invitation.ID, f.user, f.email(f.user), credbound.PasswordCredential{UserID: f.user.ID}, membership, f.now, event),
@@ -59,7 +59,7 @@ func TestHardeningCanceledOperations(t *testing.T) {
 	if _, _, err := f.store.AuditChainHead(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled chain head = %v", err)
 	}
-	for _, err := range f.store.ChainedAuditEvents(ctx) {
+	for _, err := range f.store.ChainedAuditEvents(ctx, 0) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("canceled chained events = %v", err)
 		}
@@ -89,7 +89,7 @@ func TestHardeningEarlyBreaks(t *testing.T) {
 		if err := f.store.SavePasskey(ctx, passkey, f.event("passkey")); err != nil {
 			t.Fatal(err)
 		}
-		identity := credbound.SSOIdentity{ID: f.id(), UserID: f.user.ID, ProviderConfigurationID: f.id(), ProviderKind: credbound.SSOProviderOIDC, Issuer: "https://idp", Subject: f.id(), Email: f.user.Email, CreatedAt: f.now}
+		identity := credbound.SSOIdentity{ID: f.id(), UserID: f.user.ID, ProviderConfigurationID: f.id(), ProviderKind: credbound.SSOProviderOIDC, Issuer: "https://idp", Subject: f.id().String(), Email: f.user.Email, CreatedAt: f.now}
 		if err := f.store.LinkSSO(ctx, identity, f.event("sso")); err != nil {
 			t.Fatal(err)
 		}
@@ -107,7 +107,7 @@ func TestHardeningEarlyBreaks(t *testing.T) {
 	for range f.store.WorkspaceInvitations(ctx, f.workspace.ID, credbound.PageRequest{Limit: 1}) {
 		break
 	}
-	for range f.store.ChainedAuditEvents(ctx) {
+	for range f.store.ChainedAuditEvents(ctx, 0) {
 		break
 	}
 	// Cursor-driven second page of the invitation listing.
@@ -170,7 +170,7 @@ func TestHardeningNotFoundAndConflictBranches(t *testing.T) {
 	if err := f.store.CreateEmailAuthentication(ctx, link, f.event("link")); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("duplicate link = %v", err)
 	}
-	if err := f.store.ConsumeEmailAuthentication(ctx, link.ID, unknown, f.now, f.event("consume")); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.store.ConsumeEmailAuthentication(ctx, link.ID, unknown, f.now, true, f.event("consume")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("consume with wrong user = %v", err)
 	}
 

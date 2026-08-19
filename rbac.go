@@ -6,11 +6,25 @@ import (
 	"fmt"
 )
 
-func (m *Manager) Authorize(ctx context.Context, authn Authentication, workspaceID string, minimumRole Role) error {
-	if authn.UserID == "" {
+// Authorize checks that the authentication belongs to an enabled user with
+// an active membership whose role includes the minimum role in that
+// workspace. Missing or insufficient memberships, disabled users or
+// workspaces, and workspace-bound credentials used elsewhere fail with
+// ErrForbidden; a workspace requiring MFA rejects interactive AAL1 contexts
+// with ErrStepUpRequired, and a TOTP-pending context (SecondFactorRequired)
+// is rejected the same way in every workspace — the first factor alone never
+// authorizes anything. A scoped credential (a PAT) passes this coarse
+// role check only with the "*" wildcard scope — a narrowed token has no
+// role-shaped privilege, so route it through AuthorizePermission, the
+// canonical, finer check.
+func (m *Manager) Authorize(ctx context.Context, authn Authentication, workspaceID UUID, minimumRole Role) error {
+	if authn.UserID == (UUID{}) {
 		return ErrUnauthorized
 	}
-	if workspaceID == "" {
+	if authn.SecondFactorRequired {
+		return ErrStepUpRequired
+	}
+	if workspaceID == (UUID{}) {
 		return fmt.Errorf("%w: workspace id is required", ErrInvalidInput)
 	}
 	user, err := m.store.UserByID(ctx, authn.UserID)
@@ -21,7 +35,11 @@ func (m *Manager) Authorize(ctx context.Context, authn Authentication, workspace
 	if err != nil {
 		return err
 	}
-	if authn.WorkspaceID != "" && authn.WorkspaceID != workspaceID {
+	if len(authn.Scopes) > 0 && !authn.HasScope("*") {
+		m.emitAuthorizationDenied(ctx, authn, workspaceID, required)
+		return ErrForbidden
+	}
+	if authn.WorkspaceID != (UUID{}) && authn.WorkspaceID != workspaceID {
 		m.emitAuthorizationDenied(ctx, authn, workspaceID, required)
 		return ErrForbidden
 	}
@@ -53,18 +71,37 @@ func (m *Manager) Authorize(ctx context.Context, authn Authentication, workspace
 	return nil
 }
 
-func (m *Manager) AuthorizePermission(ctx context.Context, authn Authentication, workspaceID string, permission WorkspacePermission) error {
-	if authn.UserID == "" {
+// AuthorizePermission is the canonical tenant authorization: it checks that
+// the authentication belongs to an enabled user with an active membership
+// whose role carries the workspace permission. A scoped credential (a PAT)
+// must additionally carry the permission itself — or the "*" wildcard — as
+// a scope: scopes are the least privilege the owner chose at creation, and
+// without this check the role lookup would silently widen a narrow token
+// back to the member's full permission set. Failures behave exactly like
+// Authorize — ErrForbidden fails closed, a workspace requiring MFA
+// rejects interactive AAL1 contexts with ErrStepUpRequired while
+// non-interactive credentials such as PATs are unaffected, and a
+// TOTP-pending context (SecondFactorRequired) is rejected with
+// ErrStepUpRequired in every workspace.
+func (m *Manager) AuthorizePermission(ctx context.Context, authn Authentication, workspaceID UUID, permission WorkspacePermission) error {
+	if authn.UserID == (UUID{}) {
 		return ErrUnauthorized
 	}
-	if workspaceID == "" || !workspacePermissionPattern.MatchString(string(permission)) {
+	if authn.SecondFactorRequired {
+		return ErrStepUpRequired
+	}
+	if workspaceID == (UUID{}) || !workspacePermissionPattern.MatchString(string(permission)) {
 		return fmt.Errorf("%w: workspace id and permission are required", ErrInvalidInput)
+	}
+	if len(authn.Scopes) > 0 && !authn.HasScope(string(permission)) {
+		m.emitAuthorizationDenied(ctx, authn, workspaceID, Role(""))
+		return ErrForbidden
 	}
 	user, err := m.store.UserByID(ctx, authn.UserID)
 	if err != nil || user.Disabled {
 		return ErrForbidden
 	}
-	if authn.WorkspaceID != "" && authn.WorkspaceID != workspaceID {
+	if authn.WorkspaceID != (UUID{}) && authn.WorkspaceID != workspaceID {
 		m.emitAuthorizationDenied(ctx, authn, workspaceID, Role(""))
 		return ErrForbidden
 	}
@@ -94,7 +131,12 @@ func (m *Manager) AuthorizePermission(ctx context.Context, authn Authentication,
 	return nil
 }
 
-func (m *Manager) GrantRole(ctx context.Context, actor Authentication, workspaceID, userID string, role Role) (err error) {
+// GrantRole sets a user's workspace role, creating the local membership when
+// none exists, atomically with the audit event. The actor needs a fresh AAL2
+// step-up and workspace RBAC write; SCIM-managed memberships fail with
+// ErrConflict and unknown roles are rejected. The store protects the last
+// active workspace administrator from demotion.
+func (m *Manager) GrantRole(ctx context.Context, actor Authentication, workspaceID, userID UUID, role Role) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "rbac.role.grant", started, err) }()
 	if err := m.requireStepUp(ctx, actor, "rbac.role.grant"); err != nil {
@@ -125,7 +167,7 @@ func (m *Manager) GrantRole(ctx context.Context, actor Authentication, workspace
 	}
 	now := m.now()
 	membership := Membership{WorkspaceID: workspaceID, UserID: userID, Role: role, Status: status, ProvisioningSource: ProvisioningSourceLocal, UpdatedAt: now, CreatedAt: createdAt}
-	event, err := m.newAudit(ctx, actor.UserID, "membership.role.set", "user", userID, workspaceID, AuditSucceeded, "")
+	event, err := m.newAudit(ctx, actor.UserID, "membership.role.set", "user", userID.String(), workspaceID, AuditSucceeded, "")
 	if err != nil {
 		return err
 	}
@@ -145,7 +187,7 @@ func (m *Manager) GrantRole(ctx context.Context, actor Authentication, workspace
 	return nil
 }
 
-func (m *Manager) emitAuthorizationDenied(ctx context.Context, authn Authentication, workspaceID string, required Role) {
+func (m *Manager) emitAuthorizationDenied(ctx context.Context, authn Authentication, workspaceID UUID, required Role) {
 	meta, err := m.newEventMeta(EventAuthorizationDenied, "rbac.authorize", authn.UserID, workspaceID, AuditEvent{})
 	if err != nil {
 		return

@@ -20,6 +20,49 @@ WHERE u.id = $1;
 -- name: SetUserDisabled :execrows
 UPDATE credbound.users SET disabled = $2, updated_at = $3 WHERE id = $1;
 
+-- name: UpdateUser :execrows
+UPDATE credbound.users SET display_name = $2, updated_at = $3 WHERE id = $1;
+
+-- name: ScrubUserProfile :execrows
+UPDATE credbound.users SET display_name = '', disabled = true, updated_at = $2 WHERE id = $1;
+
+-- name: ScrubUserEmails :exec
+UPDATE credbound.user_emails SET address = 'anonymized-' || id::text || '@invalid', updated_at = $2 WHERE user_id = $1;
+
+-- name: ScrubUserSSOEmails :exec
+UPDATE credbound.sso_identities SET email = '' WHERE user_id = $1;
+
+-- name: ScrubUserPATNames :exec
+UPDATE credbound.personal_access_tokens SET name = '' WHERE user_id = $1;
+
+-- name: ScrubUserSessions :exec
+UPDATE credbound.sessions SET user_agent = '', ip_address = '' WHERE user_id = $1;
+
+-- name: ScrubUserSCIMLinks :exec
+UPDATE credbound.scim_users SET external_id = NULL, normalized_user_name = 'anonymized-' || id::text, display_name = '', emails_json = '[]', profile_json = '{}', active = FALSE, updated_at = $2, deprovisioned_at = COALESCE(deprovisioned_at, $2) WHERE user_id = $1;
+
+-- name: ScrubUserAcceptedInvitations :exec
+UPDATE credbound.workspace_invitations SET email = 'anonymized-' || id::text || '@invalid' WHERE accepted_user_id = $1;
+
+-- name: ListInstanceAdministrators :many
+SELECT user_id, role, created_at, updated_at FROM credbound.instance_administrators ORDER BY created_at, user_id;
+
+-- name: ListSCIMConfigurationsByWorkspace :many
+SELECT id, workspace_id, enabled, default_role, trust_directory_emails, group_role_mappings_json, created_at, updated_at
+FROM credbound.scim_configurations WHERE workspace_id = $1 ORDER BY created_at, id;
+
+-- name: ListSCIMCredentials :many
+SELECT id, configuration_id, prefix, digest, created_at, expires_at, last_used_at, revoked_at
+FROM credbound.scim_credentials WHERE configuration_id = $1 ORDER BY created_at, id;
+
+-- name: ListSCIMUsersForUser :many
+SELECT id, configuration_id, user_id, external_id, normalized_user_name, display_name, emails_json, profile_json, active, created_at, updated_at, deprovisioned_at
+FROM credbound.scim_users WHERE user_id = $1 ORDER BY created_at, id;
+
+-- name: ListAcceptedInvitationsForUser :many
+SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
+FROM credbound.workspace_invitations WHERE accepted_user_id = $1 ORDER BY created_at, id;
+
 -- name: CountEnabledRootAdministrators :one
 SELECT count(*) FROM credbound.instance_administrators a
 JOIN credbound.users u ON u.id = a.user_id
@@ -74,6 +117,7 @@ UPDATE credbound.login_throttles SET locked_until = $2 WHERE user_id = $1;
 -- name: ClearLoginThrottle :exec
 DELETE FROM credbound.login_throttles WHERE user_id = $1;
 
+
 -- name: InsertPasswordReset :exec
 INSERT INTO credbound.password_resets (id, user_id, digest, created_at, expires_at, used_at) VALUES ($1, $2, $3, $4, $5, NULL);
 
@@ -103,6 +147,15 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
 SELECT id, user_id, address, is_primary, verified_at, verification_digest, verification_expires_at, created_at, updated_at
 FROM credbound.user_emails WHERE id = $1;
 
+-- name: GetEmailByAddress :one
+SELECT id, user_id, address, is_primary, verified_at, verification_digest, verification_expires_at, created_at, updated_at
+FROM credbound.user_emails WHERE address = $1;
+
+-- name: ReissueEmailVerification :execrows
+UPDATE credbound.user_emails
+SET verification_digest = $2, verification_expires_at = $3, updated_at = $4
+WHERE id = $1 AND verified_at IS NULL;
+
 -- name: VerifyEmail :execrows
 UPDATE credbound.user_emails
 SET verified_at = $2, verification_digest = NULL, verification_expires_at = NULL, updated_at = $2
@@ -127,8 +180,24 @@ INSERT INTO credbound.password_credentials (user_id, hash, updated_at) VALUES ($
 -- name: GetPassword :one
 SELECT user_id, hash, updated_at FROM credbound.password_credentials WHERE user_id = $1;
 
+-- name: LockPassword :one
+SELECT user_id, hash, updated_at FROM credbound.password_credentials WHERE user_id = $1
+FOR UPDATE;
+
 -- name: ReplacePassword :execrows
 UPDATE credbound.password_credentials SET hash = $2, updated_at = $3 WHERE user_id = $1;
+
+-- name: UpsertPassword :exec
+INSERT INTO credbound.password_credentials (user_id, hash, updated_at) VALUES ($1, $2, $3)
+ON CONFLICT (user_id) DO UPDATE SET hash = excluded.hash, updated_at = excluded.updated_at;
+
+-- name: RehashPassword :execrows
+UPDATE credbound.password_credentials SET hash = $2, updated_at = $3 WHERE user_id = $1 AND hash = @previous_hash;
+
+-- name: CountUserAuthenticationMethods :one
+SELECT CAST((SELECT COUNT(*) FROM credbound.password_credentials p WHERE p.user_id = $1)
+     + (SELECT COUNT(*) FROM credbound.passkeys k WHERE k.user_id = $1)
+     + (SELECT COUNT(*) FROM credbound.sso_identities i WHERE i.user_id = $1) AS bigint) AS methods;
 
 -- name: InsertWorkspace :exec
 INSERT INTO credbound.workspaces (id, name, created_at, updated_at, disabled_at, require_mfa) VALUES ($1, $2, $3, $4, $5, $6);
@@ -248,11 +317,17 @@ SELECT COUNT(*) FROM credbound.recovery_codes WHERE user_id = $1 AND used_at IS 
 -- name: InsertPasskey :exec
 INSERT INTO credbound.passkeys (id, user_id, name, credential_id, credential_json, created_at, last_used_at) VALUES ($1, $2, $3, $4, $5, $6, NULL);
 
+-- name: GetPasskeyByCredentialID :one
+SELECT id, user_id, name, credential_id, credential_json, created_at, last_used_at FROM credbound.passkeys WHERE credential_id = $1;
+
 -- name: TouchPasskey :execrows
 UPDATE credbound.passkeys SET credential_json = $3, last_used_at = $4 WHERE user_id = $1 AND credential_id = $2;
 
 -- name: DeletePasskey :execrows
 DELETE FROM credbound.passkeys WHERE user_id = $1 AND id = $2;
+
+-- name: DeleteUserPasskeys :exec
+DELETE FROM credbound.passkeys WHERE user_id = $1;
 
 -- name: InsertPAT :exec
 INSERT INTO credbound.personal_access_tokens (id, user_id, name, prefix, digest, workspace_id, scopes_json, created_at, expires_at, last_used_at, revoked_at)
@@ -271,6 +346,23 @@ UPDATE credbound.personal_access_tokens SET last_used_at = $2 WHERE id = $1;
 
 -- name: RevokePAT :execrows
 UPDATE credbound.personal_access_tokens SET revoked_at = $3 WHERE user_id = $1 AND id = $2;
+
+-- name: InsertSession :exec
+INSERT INTO credbound.sessions (id, user_id, method, level, authenticated_at, second_factor_required, user_agent, ip_address, digest, created_at, last_seen_at, expires_at, revoked_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULL);
+
+-- name: GetSession :one
+SELECT id, user_id, method, level, authenticated_at, second_factor_required, user_agent, ip_address, digest, created_at, last_seen_at, expires_at, revoked_at
+FROM credbound.sessions WHERE id = $1;
+
+-- name: TouchSession :execrows
+UPDATE credbound.sessions SET last_seen_at = $2 WHERE id = $1 AND revoked_at IS NULL;
+
+-- name: RevokeSessionByID :execrows
+UPDATE credbound.sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL;
+
+-- name: RevokeUserSessions :exec
+UPDATE credbound.sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL;
 
 -- name: InsertAudit :exec
 INSERT INTO credbound.audit_events (id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash)
@@ -344,7 +436,8 @@ UPDATE credbound.personal_access_tokens SET revoked_at = $3 WHERE user_id = $1 A
 -- name: UpsertSCIMGroup :exec
 INSERT INTO credbound.scim_groups (id, configuration_id, external_id, display_name, member_ids_json, created_at, updated_at, deleted_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-ON CONFLICT (id) DO UPDATE SET external_id = EXCLUDED.external_id, display_name = EXCLUDED.display_name, member_ids_json = EXCLUDED.member_ids_json, updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at;
+ON CONFLICT (id) DO UPDATE SET external_id = EXCLUDED.external_id, display_name = EXCLUDED.display_name, member_ids_json = EXCLUDED.member_ids_json, updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at
+WHERE credbound.scim_groups.configuration_id = EXCLUDED.configuration_id;
 
 -- name: GetSCIMGroup :one
 SELECT id, configuration_id, external_id, display_name, member_ids_json, created_at, updated_at, deleted_at
@@ -371,6 +464,9 @@ UPDATE credbound.oauth_issuers SET data_json = $2 WHERE id = $1;
 
 -- name: OAuthIssuerJSONByID :one
 SELECT data_json FROM credbound.oauth_issuers WHERE id = $1;
+
+-- name: OAuthLockIssuer :one
+SELECT id FROM credbound.oauth_issuers WHERE id = $1 FOR UPDATE;
 
 -- name: OAuthIssuerJSONByURL :one
 SELECT data_json FROM credbound.oauth_issuers WHERE issuer = $1;
@@ -413,6 +509,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 -- name: OAuthInitialAccessTokenJSONByPrefix :one
 SELECT data_json FROM credbound.oauth_initial_access_tokens WHERE prefix = $1;
 
+-- name: OAuthInitialAccessTokenJSONsByIssuer :many
+SELECT data_json FROM credbound.oauth_initial_access_tokens WHERE issuer_id = $1 ORDER BY id;
+
 -- name: OAuthInitialAccessTokenJSONByID :one
 SELECT data_json FROM credbound.oauth_initial_access_tokens WHERE id = $1;
 
@@ -437,6 +536,15 @@ SELECT data_json FROM credbound.oauth_grants WHERE id = $1;
 -- name: OAuthGrantRecords :many
 SELECT id, data_json FROM credbound.oauth_grants;
 
+-- name: OAuthGrantIDsByUser :many
+SELECT id FROM credbound.oauth_grants WHERE user_id = $1;
+
+-- name: OAuthGrantIDsByClient :many
+SELECT id FROM credbound.oauth_grants WHERE client_record_id = $1;
+
+-- name: OAuthGrantIDsByResource :many
+SELECT id FROM credbound.oauth_grants WHERE resource_id = $1;
+
 -- name: OAuthUpdateGrantJSON :execrows
 UPDATE credbound.oauth_grants SET data_json = $2 WHERE id = $1;
 
@@ -452,6 +560,18 @@ SELECT data_json FROM credbound.oauth_authorization_codes WHERE id = $1;
 -- name: OAuthConsumeAuthorizationCode :execrows
 UPDATE credbound.oauth_authorization_codes SET used_at = $2, data_json = $3
 WHERE id = $1 AND used_at IS NULL AND expires_at > $4;
+
+-- name: OAuthInsertClientAccessToken :exec
+INSERT INTO credbound.oauth_client_access_tokens (id, prefix, client_record_id, data_json) VALUES ($1, $2, $3, $4);
+
+-- name: OAuthClientAccessTokenJSONByPrefix :one
+SELECT data_json FROM credbound.oauth_client_access_tokens WHERE prefix = $1;
+
+-- name: OAuthClientAccessTokenJSONByID :one
+SELECT data_json FROM credbound.oauth_client_access_tokens WHERE id = $1;
+
+-- name: OAuthUpdateClientAccessTokenJSON :execrows
+UPDATE credbound.oauth_client_access_tokens SET data_json = $2 WHERE id = $1;
 
 -- name: OAuthInsertAccessToken :exec
 INSERT INTO credbound.oauth_access_tokens (id, prefix, grant_id, data_json) VALUES ($1, $2, $3, $4);
@@ -493,3 +613,37 @@ UPDATE credbound.oauth_refresh_tokens SET revoked_at = $2 WHERE family_id = $1 A
 
 -- name: OAuthRefreshFamilyExists :one
 SELECT EXISTS(SELECT 1 FROM credbound.oauth_refresh_tokens WHERE family_id = $1);
+
+-- name: OAuthRefreshFamilyGrantIDs :many
+SELECT DISTINCT grant_id FROM credbound.oauth_refresh_tokens WHERE family_id = $1;
+
+-- name: InsertWorkspaceDomain :exec
+INSERT INTO credbound.workspace_domains (id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
+
+-- name: GetWorkspaceDomain :one
+SELECT id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at
+FROM credbound.workspace_domains WHERE id = $1;
+
+-- name: GetConfirmedWorkspaceDomainByName :one
+SELECT id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at
+FROM credbound.workspace_domains WHERE domain = $1 AND confirmed_at IS NOT NULL;
+
+-- name: ConfirmWorkspaceDomain :execrows
+UPDATE credbound.workspace_domains SET confirmed_at = $2, updated_at = $2 WHERE id = $1 AND confirmed_at IS NULL;
+
+-- name: UpdateWorkspaceDomainPolicy :execrows
+UPDATE credbound.workspace_domains SET auto_join = $2, auto_join_role = $3, sso_provider_configuration_id = $4, enforce_sso = $5, updated_at = $6
+WHERE id = $1 AND confirmed_at IS NOT NULL;
+
+-- name: DeleteWorkspaceDomain :execrows
+DELETE FROM credbound.workspace_domains WHERE id = $1;
+
+-- name: DeleteStaleWorkspaceDomainClaim :execrows
+DELETE FROM credbound.workspace_domains WHERE domain = $1 AND confirmed_at IS NULL AND created_at < @stale_before;
+
+-- name: InsertConsumedCeremony :exec
+INSERT INTO credbound.consumed_ceremonies (id, expires_at) VALUES ($1, $2);
+
+-- name: PruneConsumedCeremonies :exec
+DELETE FROM credbound.consumed_ceremonies WHERE expires_at < $1;

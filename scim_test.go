@@ -13,6 +13,8 @@ import (
 
 type coreOnlyStore struct{ credbound.Store }
 
+// TestSCIMAPIsRequireStoreCapability pins SCIM-001: every SCIM API answers
+// ErrNotSupported when the configured store does not implement SCIMStore.
 func TestSCIMAPIsRequireStoreCapability(t *testing.T) {
 	base := memory.New()
 	manager, err := credbound.New(credbound.Config{
@@ -28,37 +30,54 @@ func TestSCIMAPIsRequireStoreCapability(t *testing.T) {
 	principal := credbound.SCIMAuthentication{}
 	operations := []func() error{
 		func() error {
-			_, err := manager.CreateSCIMConfiguration(ctx, actor, "workspace", credbound.CreateSCIMConfigurationInput{})
+			_, err := manager.CreateSCIMConfiguration(ctx, actor, credbound.MustParseUUID("0198b463-0000-7000-8000-21a3230e0377"), credbound.CreateSCIMConfigurationInput{})
 			return err
 		},
 		func() error {
-			_, err := manager.UpdateSCIMConfiguration(ctx, actor, "configuration", credbound.UpdateSCIMConfigurationInput{})
+			_, err := manager.UpdateSCIMConfiguration(ctx, actor, credbound.MustParseUUID("0198b463-0000-7000-8000-b7d64a922100"), credbound.UpdateSCIMConfigurationInput{})
 			return err
 		},
-		func() error { _, err := manager.RotateSCIMCredential(ctx, actor, "configuration", nil); return err },
-		func() error { return manager.RevokeSCIMCredential(ctx, actor, "configuration", "credential") },
-		func() error { return manager.DisableSCIMConfiguration(ctx, actor, "configuration") },
+		func() error {
+			_, err := manager.RotateSCIMCredential(ctx, actor, credbound.MustParseUUID("0198b463-0000-7000-8000-b7d64a922100"), nil)
+			return err
+		},
+		func() error {
+			return manager.RevokeSCIMCredential(ctx, actor, credbound.MustParseUUID("0198b463-0000-7000-8000-b7d64a922100"), credbound.MustParseUUID("0198b463-0000-7000-8000-e265b6f56460"))
+		},
+		func() error {
+			return manager.DisableSCIMConfiguration(ctx, actor, credbound.MustParseUUID("0198b463-0000-7000-8000-b7d64a922100"))
+		},
 		func() error { _, err := manager.AuthenticateSCIM(ctx, "token"); return err },
 		func() error {
 			_, err := manager.ProvisionSCIMUser(ctx, principal, credbound.SCIMUserInput{})
 			return err
 		},
 		func() error {
-			_, err := manager.AdoptSCIMUser(ctx, actor, "configuration", "user", credbound.SCIMUserInput{})
+			_, err := manager.AdoptSCIMUser(ctx, actor, credbound.MustParseUUID("0198b463-0000-7000-8000-b7d64a922100"), credbound.MustParseUUID("0198b463-0000-7000-8000-04f8996da763"), credbound.SCIMUserInput{})
 			return err
 		},
 		func() error {
-			_, err := manager.ReplaceSCIMUser(ctx, principal, "user", credbound.SCIMUserInput{})
+			_, err := manager.ReplaceSCIMUser(ctx, principal, credbound.MustParseUUID("0198b463-0000-7000-8000-04f8996da763"), credbound.SCIMUserInput{})
 			return err
 		},
-		func() error { return manager.DeprovisionSCIMUser(ctx, principal, "user") },
-		func() error { _, err := manager.SCIMUser(ctx, principal, "user"); return err },
 		func() error {
-			_, err := manager.UpsertSCIMGroup(ctx, principal, "group", credbound.SCIMGroupInput{})
+			return manager.DeprovisionSCIMUser(ctx, principal, credbound.MustParseUUID("0198b463-0000-7000-8000-04f8996da763"))
+		},
+		func() error {
+			_, err := manager.SCIMUser(ctx, principal, credbound.MustParseUUID("0198b463-0000-7000-8000-04f8996da763"))
 			return err
 		},
-		func() error { return manager.DeleteSCIMGroup(ctx, principal, "group") },
-		func() error { _, err := manager.SCIMGroup(ctx, principal, "group"); return err },
+		func() error {
+			_, err := manager.UpsertSCIMGroup(ctx, principal, credbound.MustParseUUID("0198b463-0000-7000-8000-ad936fcbed63"), credbound.SCIMGroupInput{})
+			return err
+		},
+		func() error {
+			return manager.DeleteSCIMGroup(ctx, principal, credbound.MustParseUUID("0198b463-0000-7000-8000-ad936fcbed63"))
+		},
+		func() error {
+			_, err := manager.SCIMGroup(ctx, principal, credbound.MustParseUUID("0198b463-0000-7000-8000-ad936fcbed63"))
+			return err
+		},
 	}
 	for index, operation := range operations {
 		if err := operation(); !errors.Is(err, credbound.ErrNotSupported) {
@@ -75,6 +94,11 @@ func TestSCIMAPIsRequireStoreCapability(t *testing.T) {
 
 type coreStoreOnly struct{ credbound.Store }
 
+// TestExtensibleWorkspaceRoles pins that the host service can register
+// additional workspace roles and permissions alongside the provided admin and
+// member roles (RBAC-001), and that the permission-based authorization
+// resolves inheritance, gives admin every registered permission, rejects
+// cyclic or dangling catalogs, and fails closed on an unknown role (RBAC-003).
 func TestExtensibleWorkspaceRoles(t *testing.T) {
 	store := memory.New()
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
@@ -136,6 +160,10 @@ func TestExtensibleWorkspaceRoles(t *testing.T) {
 	}
 }
 
+// TestSCIMLifecycleRolesGroupsAndDeprovision walks the provisioning
+// lifecycle — passwordless creation, explicit adoption of a local user,
+// group-driven role mapping, and logical deprovisioning that leaves the
+// global account enabled (SCIM-003, SCIM-005).
 func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 	f := newFixture(t)
 	root, workspace := f.bootstrap(t)
@@ -181,7 +209,9 @@ func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 	}); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("second adoption = %v", err)
 	}
-	if issued.Token == "" || issued.Credential.Digest != nil || !uuidV7.MatchString(issued.Configuration.ID) || !uuidV7.MatchString(issued.Credential.ID) {
+	// The token is displayed only this once, the response never carries the
+	// persisted digest, and both identifiers are UUIDv7 (SCIM-002, SCIM-006).
+	if issued.Token == "" || issued.Credential.Digest != nil || !uuidV7.MatchString(issued.Configuration.ID.String()) || !uuidV7.MatchString(issued.Credential.ID.String()) {
 		t.Fatalf("unsafe issued SCIM credential: %#v", issued)
 	}
 	if _, err := manager.AuthenticateSCIM(context.Background(), issued.Token+"x"); !errors.Is(err, credbound.ErrInvalidCredentials) {
@@ -198,7 +228,8 @@ func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if link.UserName != "user@example.com" || link.UserID == "" || link.ID == link.UserID {
+	// The user's SCIM identifier is distinct from the global User.ID (SCIM-002).
+	if link.UserName != "user@example.com" || link.UserID == (credbound.UUID{}) || link.ID == link.UserID {
 		t.Fatalf("invalid SCIM link: %#v", link)
 	}
 	if value, err := f.store.SCIMUserByExternalID(context.Background(), issued.Configuration.ID, link.ExternalID); err != nil || value.ID != link.ID {
@@ -207,8 +238,10 @@ func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 	if value, err := f.store.SCIMUserByUserName(context.Background(), issued.Configuration.ID, strings.ToUpper(link.UserName)); err != nil || value.ID != link.ID {
 		t.Fatalf("memory username SCIM lookup = %#v, %v", value, err)
 	}
+	// The membership names the SCIM configuration as its provisioning source
+	// (SCIM-004).
 	membership, err := f.store.Membership(context.Background(), workspace.ID, link.UserID)
-	if err != nil || membership.Role != credbound.RoleMember || membership.Status != credbound.MembershipActive || membership.ProvisioningSource != issued.Configuration.ID {
+	if err != nil || membership.Role != credbound.RoleMember || membership.Status != credbound.MembershipActive || membership.ProvisioningSource != issued.Configuration.ID.String() {
 		t.Fatalf("provisioned membership = %#v, %v", membership, err)
 	}
 	if _, err := f.store.PasswordByUserID(context.Background(), link.UserID); !errors.Is(err, credbound.ErrNotFound) {
@@ -222,8 +255,8 @@ func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 	if len(page.items) != 1 || page.items[0].ID != link.ID {
 		t.Fatalf("filtered SCIM users = %#v", page)
 	}
-	group, err := manager.UpsertSCIMGroup(context.Background(), principal, "", credbound.SCIMGroupInput{
-		ExternalID: "directory-editors", DisplayName: "Editors", MemberIDs: []string{link.ID},
+	group, err := manager.UpsertSCIMGroup(context.Background(), principal, credbound.UUID{}, credbound.SCIMGroupInput{
+		ExternalID: "directory-editors", DisplayName: "Editors", MemberIDs: []credbound.UUID{link.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -250,12 +283,14 @@ func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 	if len(groups.items) != 1 || groups.items[0].ID != group.ID {
 		t.Fatalf("filtered SCIM groups = %#v", groups)
 	}
+	// An ordinary local mutation cannot overwrite the SCIM-managed membership
+	// (SCIM-004, TENANT-003).
 	if err := manager.GrantRole(context.Background(), admin, workspace.ID, link.UserID, credbound.RoleAdmin); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("ordinary RBAC overrode SCIM source: %v", err)
 	}
 
-	pat := credbound.PAT{ID: "0198b463-0000-7000-8000-000000000001", UserID: link.UserID, Name: "workspace", Prefix: "scimuser0001", Digest: []byte("digest"), WorkspaceID: workspace.ID, CreatedAt: f.now}
-	audit := credbound.AuditEvent{ID: "0198b463-0000-7000-8000-000000000002", OccurredAt: f.now, ActorKind: credbound.ActorSystem, Action: "test.pat", ResourceType: "pat", ResourceID: pat.ID, WorkspaceID: workspace.ID, Outcome: credbound.AuditSucceeded}
+	pat := credbound.PAT{ID: credbound.MustParseUUID("0198b463-0000-7000-8000-000000000001"), UserID: link.UserID, Name: "workspace", Prefix: "scimuser0001", Digest: []byte("digest"), WorkspaceID: workspace.ID, CreatedAt: f.now}
+	audit := credbound.AuditEvent{ID: credbound.MustParseUUID("0198b463-0000-7000-8000-000000000002"), OccurredAt: f.now, ActorKind: credbound.ActorSystem, Action: "test.pat", ResourceType: "pat", ResourceID: pat.ID.String(), WorkspaceID: workspace.ID, Outcome: credbound.AuditSucceeded}
 	if err := f.store.CreatePAT(context.Background(), pat, credbound.Commit{Audit: audit}); err != nil {
 		t.Fatal(err)
 	}
@@ -281,6 +316,8 @@ func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 		t.Fatalf("idempotent deprovision = %v", err)
 	}
 
+	// SCIM-006: rotation issues a fresh secret and revocation ends it
+	// immediately.
 	rotated, err := manager.RotateSCIMCredential(context.Background(), admin, issued.Configuration.ID, nil)
 	if err != nil || rotated.Token == issued.Token {
 		t.Fatalf("rotated credential = %#v, %v", rotated, err)
@@ -291,6 +328,49 @@ func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 	if _, err := manager.AuthenticateSCIM(context.Background(), rotated.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("revoked SCIM credential = %v", err)
 	}
+	// The administration reads inventory the workspace's configurations and
+	// the configuration's credentials — digests omitted, revocation visible.
+	configurations := 0
+	for configuration, err := range manager.SCIMConfigurations(context.Background(), admin, workspace.ID) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if configuration.ID != issued.Configuration.ID {
+			t.Fatalf("inventoried SCIM configuration = %#v", configuration)
+		}
+		configurations++
+	}
+	if configurations != 1 {
+		t.Fatalf("SCIM configurations = %d, want 1", configurations)
+	}
+	credentials := map[credbound.UUID]credbound.SCIMCredential{}
+	for credential, err := range manager.SCIMCredentials(context.Background(), admin, issued.Configuration.ID) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if credential.Digest != nil {
+			t.Fatalf("credential inventory leaked a digest: %#v", credential)
+		}
+		credentials[credential.ID] = credential
+	}
+	if len(credentials) != 2 || credentials[rotated.Credential.ID].RevokedAt == nil {
+		t.Fatalf("SCIM credential inventory = %#v", credentials)
+	}
+	for _, err := range manager.SCIMCredentials(context.Background(), credbound.Authentication{UserID: link.UserID}, issued.Configuration.ID) {
+		if !errors.Is(err, credbound.ErrForbidden) {
+			t.Fatalf("non-admin SCIM credential inventory = %v", err)
+		}
+	}
+	for _, err := range manager.SCIMConfigurations(context.Background(), credbound.Authentication{UserID: link.UserID}, workspace.ID) {
+		if !errors.Is(err, credbound.ErrForbidden) {
+			t.Fatalf("non-admin SCIM configuration inventory = %v", err)
+		}
+	}
+	for _, err := range manager.SCIMConfigurations(context.Background(), admin, credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")) {
+		if !errors.Is(err, credbound.ErrInvalidInput) {
+			t.Fatalf("invalid workspace id inventory = %v", err)
+		}
+	}
 	if err := manager.DisableSCIMConfiguration(context.Background(), admin, issued.Configuration.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -299,6 +379,10 @@ func TestSCIMLifecycleRolesGroupsAndDeprovision(t *testing.T) {
 	}
 }
 
+// TestSCIMValidationConflictsAndStateTransitions pins the suspend and
+// reactivate transitions of Replace (SCIM-003) together with the fail-closed
+// group paths: an unknown member or an ambiguous role mapping is refused
+// (SCIM-005).
 func TestSCIMValidationConflictsAndStateTransitions(t *testing.T) {
 	f := newFixture(t)
 	root, workspace := f.bootstrap(t)
@@ -331,10 +415,10 @@ func TestSCIMValidationConflictsAndStateTransitions(t *testing.T) {
 	if _, err := f.manager.UpdateSCIMConfiguration(context.Background(), admin, issued.Configuration.ID, credbound.UpdateSCIMConfigurationInput{DefaultRole: "missing"}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid SCIM configuration update = %v", err)
 	}
-	if err := f.manager.RevokeSCIMCredential(context.Background(), admin, issued.Configuration.ID, "0198b463-0000-7000-8000-000000000099"); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.manager.RevokeSCIMCredential(context.Background(), admin, issued.Configuration.ID, credbound.MustParseUUID("0198b463-0000-7000-8000-000000000099")); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("missing SCIM credential revocation = %v", err)
 	}
-	if _, err := f.manager.SCIMUser(context.Background(), credbound.SCIMAuthentication{}, "missing"); !errors.Is(err, credbound.ErrUnauthorized) {
+	if _, err := f.manager.SCIMUser(context.Background(), credbound.SCIMAuthentication{}, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6")); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("forged empty principal = %v", err)
 	}
 	for name, input := range map[string]credbound.SCIMUserInput{
@@ -350,7 +434,7 @@ func TestSCIMValidationConflictsAndStateTransitions(t *testing.T) {
 			}
 		})
 	}
-	if _, err := f.manager.ProvisionSCIMUser(context.Background(), principal, credbound.SCIMUserInput{UserName: "invalid", Emails: []credbound.SCIMEmail{{Value: "not-an-email"}}, Active: true}); !errors.Is(err, credbound.ErrInvalidInput) {
+	if _, err := f.manager.ProvisionSCIMUser(context.Background(), principal, credbound.SCIMUserInput{UserName: "00000000-0000-4000-8000-000000000000", Emails: []credbound.SCIMEmail{{Value: "not-an-email"}}, Active: true}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid SCIM user = %v", err)
 	}
 	link, err := f.manager.ProvisionSCIMUser(context.Background(), principal, credbound.SCIMUserInput{
@@ -383,7 +467,7 @@ func TestSCIMValidationConflictsAndStateTransitions(t *testing.T) {
 		t.Fatalf("reactivate = %#v, %v", updated, err)
 	}
 	for _, filter := range []credbound.SCIMFilter{
-		{Attribute: "id", Value: link.ID}, {Attribute: "userName", Value: link.UserName},
+		{Attribute: "id", Value: link.ID.String()}, {Attribute: "userName", Value: link.UserName},
 		{Attribute: "emails.value", Value: link.Emails[0].Value}, {Attribute: "active", Value: "true"},
 	} {
 		if page := collectSCIMPage(t, f.manager.SCIMUsers(context.Background(), principal, filter, credbound.PageRequest{Limit: 1})); len(page.items) != 1 {
@@ -396,19 +480,19 @@ func TestSCIMValidationConflictsAndStateTransitions(t *testing.T) {
 	if _, err := firstSCIMError(f.manager.SCIMUsers(context.Background(), principal, credbound.SCIMFilter{}, credbound.PageRequest{Limit: 101})); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid user page = %v", err)
 	}
-	if _, err := f.manager.ReplaceSCIMUser(context.Background(), principal, "0198b463-0000-7000-8000-000000000098", credbound.SCIMUserInput{UserName: "missing@example.com", Active: true}); !errors.Is(err, credbound.ErrNotFound) {
+	if _, err := f.manager.ReplaceSCIMUser(context.Background(), principal, credbound.MustParseUUID("0198b463-0000-7000-8000-000000000098"), credbound.SCIMUserInput{UserName: "missing@example.com", Active: true}); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("replace missing SCIM user = %v", err)
 	}
-	if err := f.manager.DeprovisionSCIMUser(context.Background(), principal, "0198b463-0000-7000-8000-000000000098"); err != nil {
+	if err := f.manager.DeprovisionSCIMUser(context.Background(), principal, credbound.MustParseUUID("0198b463-0000-7000-8000-000000000098")); err != nil {
 		t.Fatalf("deprovision missing SCIM user = %v", err)
 	}
 	for name, input := range map[string]credbound.SCIMGroupInput{
 		"empty name":     {},
-		"invalid member": {DisplayName: "Invalid", MemberIDs: []string{"invalid"}},
-		"unknown member": {DisplayName: "Unknown", MemberIDs: []string{"0198b463-0000-7000-8000-000000000097"}},
+		"invalid member": {DisplayName: "Invalid", MemberIDs: []credbound.UUID{credbound.MustParseUUID("00000000-0000-4000-8000-000000000000")}},
+		"unknown member": {DisplayName: "Unknown", MemberIDs: []credbound.UUID{credbound.MustParseUUID("0198b463-0000-7000-8000-000000000097")}},
 	} {
 		t.Run("group_"+name, func(t *testing.T) {
-			if _, err := f.manager.UpsertSCIMGroup(context.Background(), principal, "", input); !errors.Is(err, credbound.ErrInvalidInput) {
+			if _, err := f.manager.UpsertSCIMGroup(context.Background(), principal, credbound.UUID{}, input); !errors.Is(err, credbound.ErrInvalidInput) {
 				t.Fatalf("invalid SCIM group input = %v", err)
 			}
 		})
@@ -419,11 +503,11 @@ func TestSCIMValidationConflictsAndStateTransitions(t *testing.T) {
 	if _, err := firstSCIMError(f.manager.SCIMGroups(context.Background(), principal, credbound.SCIMFilter{}, credbound.PageRequest{Limit: 101})); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("invalid group page = %v", err)
 	}
-	admins, err := f.manager.UpsertSCIMGroup(context.Background(), principal, "", credbound.SCIMGroupInput{ExternalID: "admins", DisplayName: "Admins", MemberIDs: []string{link.ID}})
+	admins, err := f.manager.UpsertSCIMGroup(context.Background(), principal, credbound.UUID{}, credbound.SCIMGroupInput{ExternalID: "admins", DisplayName: "Admins", MemberIDs: []credbound.UUID{link.ID}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.manager.UpsertSCIMGroup(context.Background(), principal, "", credbound.SCIMGroupInput{ExternalID: "members", DisplayName: "Members", MemberIDs: []string{link.ID}}); !errors.Is(err, credbound.ErrConflict) {
+	if _, err := f.manager.UpsertSCIMGroup(context.Background(), principal, credbound.UUID{}, credbound.SCIMGroupInput{ExternalID: "members", DisplayName: "Members", MemberIDs: []credbound.UUID{link.ID}}); !errors.Is(err, credbound.ErrConflict) {
 		t.Fatalf("ambiguous group roles = %v", err)
 	}
 	if err := f.manager.DeleteSCIMGroup(context.Background(), principal, admins.ID); err != nil {

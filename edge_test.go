@@ -8,13 +8,14 @@ import (
 	"time"
 
 	"github.com/deepteams/credbound"
+	"github.com/deepteams/credbound/memory"
 )
 
 func TestPasswordChangeAndInputValidation(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	invalidBootstraps := []credbound.BootstrapInput{
-		{Email: "bad", DisplayName: "Root", Password: "correct horse battery", WorkspaceName: "Main"},
+		{Email: "00000000-0000-4000-8000-000000000000", DisplayName: "Root", Password: "correct horse battery", WorkspaceName: "Main"},
 		{Email: "root@example.com", Password: "correct horse battery", WorkspaceName: "Main"},
 		{Email: "root@example.com", DisplayName: "Root", Password: "short", WorkspaceName: "Main"},
 	}
@@ -44,6 +45,115 @@ func TestPasswordChangeAndInputValidation(t *testing.T) {
 	}
 }
 
+// TestChangePasswordRevokesSessionsKeepsPATs verifies the cascade choice for a
+// voluntary password change: interactive sessions die (a leaked session token
+// must not outlive the password) while PATs, being integration credentials,
+// keep working.
+func TestChangePasswordRevokesSessionsKeepsPATs(t *testing.T) {
+	f := newFixture(t)
+	authn, _ := f.bootstrap(t)
+	ctx := context.Background()
+	actor := aal2(authn.UserID, f.now)
+
+	session, err := f.manager.CreateSession(ctx, actor, credbound.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pat, err := f.manager.CreatePAT(ctx, actor, credbound.CreatePATInput{Name: "ci", Scopes: []string{"read"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.manager.AuthenticateSession(ctx, session.Token); err != nil {
+		t.Fatalf("session before change = %v", err)
+	}
+	if _, err := f.manager.AuthenticatePAT(ctx, pat.Token); err != nil {
+		t.Fatalf("pat before change = %v", err)
+	}
+
+	if err := f.manager.ChangePassword(ctx, actor, "correct horse battery", "another secure password"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := f.manager.AuthenticateSession(ctx, session.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("session after change = %v, want revoked", err)
+	}
+	if _, err := f.manager.AuthenticatePAT(ctx, pat.Token); err != nil {
+		t.Fatalf("pat after change = %v, want still valid", err)
+	}
+}
+
+// TestEmailIssuanceCooldown verifies the per-address anti-bombing cooldown:
+// within the window a repeated request returns the enumeration-safe decoy (no
+// token, no error), a different purpose is independent, and the window slides
+// shut and reopens with the clock.
+func TestEmailIssuanceCooldown(t *testing.T) {
+	f := newFixture(t)
+	f.bootstrap(t)
+	ctx := context.Background()
+	spy := &issuanceSpy{Store: f.store}
+	manager, err := credbound.New(credbound.Config{
+		Store: spy, Passwords: f.passwords, TOTP: fakeTOTP{}, Passkeys: &fakePasskeys{},
+		SecretKey: bytesOf(1, 32), PATPepper: bytesOf(2, 32), RecoveryPepper: bytesOf(3, 32),
+		Clock: func() time.Time { return f.now }, Random: &counterReader{next: 0x77},
+		EmailIssuanceCooldown: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := manager.BeginPasswordReset(ctx, "root@example.com")
+	if err != nil || first.Token == "" {
+		t.Fatalf("first reset = %#v, %v", first, err)
+	}
+	// A second reset inside the cooldown answers with the decoy, no token.
+	second, err := manager.BeginPasswordReset(ctx, "root@example.com")
+	if err != nil || second.Token != "" {
+		t.Fatalf("throttled reset = %#v, %v", second, err)
+	}
+	// A different purpose (magic link) has its own window.
+	link, err := manager.BeginEmailAuthentication(ctx, "root@example.com")
+	if err != nil || link.Token == "" {
+		t.Fatalf("independent purpose = %#v, %v", link, err)
+	}
+	// Once the cooldown elapses, reset issues again.
+	f.now = f.now.Add(2 * time.Minute)
+	third, err := manager.BeginPasswordReset(ctx, "root@example.com")
+	if err != nil || third.Token == "" {
+		t.Fatalf("post-cooldown reset = %#v, %v", third, err)
+	}
+	// The throttle never sees an address — only a fixed-size opaque HMAC
+	// key — so a hostile arbitrary-length input costs the store exactly one
+	// bounded row and a dump reveals nothing about the addresses tried.
+	if _, err := manager.BeginPasswordReset(ctx, strings.Repeat("a", 100_000)+"@example.com"); err != nil {
+		t.Fatalf("oversized address reset = %v", err)
+	}
+	if len(spy.keys) == 0 {
+		t.Fatal("no issuance claims recorded")
+	}
+	for _, key := range spy.keys {
+		if len(key) != 43 || strings.Contains(key, "@") {
+			t.Fatalf("issuance key is not a bounded opaque digest: %q", key)
+		}
+	}
+}
+
+// issuanceSpy records the throttle keys the manager hands the store.
+type issuanceSpy struct {
+	*memory.Store
+	keys []string
+}
+
+func (s *issuanceSpy) ClaimEmailIssuance(ctx context.Context, address, purpose string, at, notBefore time.Time) (bool, error) {
+	s.keys = append(s.keys, address)
+	return s.Store.ClaimEmailIssuance(ctx, address, purpose, at, notBefore)
+}
+
+// TestStepUpAuthorizationAndRBACFailures pins the step-up gate (AUTH-005):
+// RequireStepUp refuses anonymous, non-interactive (PAT), and stale AAL2
+// contexts, so sensitive operations demand an interactive AAL2 authentication
+// newer than the configured freshness window. It also pins TENANT-001: every
+// authorization is evaluated for an explicit workspace id — a blank one is
+// invalid input, and a credential bound to another workspace or lacking a
+// membership in the target workspace is refused.
 func TestStepUpAuthorizationAndRBACFailures(t *testing.T) {
 	f := newFixture(t)
 	authn, workspace := f.bootstrap(t)
@@ -65,26 +175,34 @@ func TestStepUpAuthorizationAndRBACFailures(t *testing.T) {
 	if err := f.manager.AuthorizePermission(ctx, credbound.Authentication{}, workspace.ID, credbound.PermissionWorkspaceAccess); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("anonymous permission authorization = %v", err)
 	}
-	if err := f.manager.AuthorizePermission(ctx, authn, "", credbound.PermissionWorkspaceAccess); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.AuthorizePermission(ctx, authn, credbound.UUID{}, credbound.PermissionWorkspaceAccess); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("empty permission workspace = %v", err)
 	}
-	if err := f.manager.Authorize(ctx, authn, "", credbound.RoleMember); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.Authorize(ctx, authn, credbound.UUID{}, credbound.RoleMember); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("empty workspace = %v", err)
 	}
 	if err := f.manager.Authorize(ctx, authn, workspace.ID, credbound.Role("owner")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("unknown role = %v", err)
 	}
+	pending := authn
+	pending.SecondFactorRequired = true
+	if err := f.manager.Authorize(ctx, pending, workspace.ID, credbound.RoleMember); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("TOTP-pending role authorization = %v", err)
+	}
+	if err := f.manager.AuthorizePermission(ctx, pending, workspace.ID, credbound.PermissionWorkspaceAccess); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("TOTP-pending permission authorization = %v", err)
+	}
 	bound := authn
-	bound.WorkspaceID = "0198b463-0000-7000-8000-ffffffffffff"
+	bound.WorkspaceID = credbound.MustParseUUID("0198b463-0000-7000-8000-ffffffffffff")
 	if err := f.manager.Authorize(ctx, bound, workspace.ID, credbound.RoleMember); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("workspace-bound auth = %v", err)
 	}
 	missing := authn
-	missing.UserID = "0198b463-0000-7000-8000-eeeeeeeeeeee"
+	missing.UserID = credbound.MustParseUUID("0198b463-0000-7000-8000-eeeeeeeeeeee")
 	if err := f.manager.Authorize(ctx, missing, workspace.ID, credbound.RoleMember); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("missing membership = %v", err)
 	}
-	missingWorkspace := "0198b463-0000-7000-8000-fffffffffff0"
+	missingWorkspace := credbound.MustParseUUID("0198b463-0000-7000-8000-fffffffffff0")
 	if err := f.manager.Authorize(ctx, authn, missingWorkspace, credbound.RoleMember); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("missing workspace role authorization = %v", err)
 	}
@@ -104,7 +222,7 @@ func TestStepUpAuthorizationAndRBACFailures(t *testing.T) {
 	if err := f.manager.EnableWorkspace(ctx, stepUp, workspace.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.manager.GrantRole(ctx, aal2(authn.UserID, f.now), workspace.ID, "missing", credbound.RoleMember); !errors.Is(err, credbound.ErrNotFound) {
+	if err := f.manager.GrantRole(ctx, aal2(authn.UserID, f.now), workspace.ID, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6"), credbound.RoleMember); !errors.Is(err, credbound.ErrNotFound) {
 		t.Fatalf("grant missing user = %v", err)
 	}
 }
@@ -145,7 +263,7 @@ func TestTOTPAndPATFailureBoundaries(t *testing.T) {
 			t.Fatalf("invalid PAT %#v = %v", input, err)
 		}
 	}
-	otherWorkspace := "0198b463-0000-7000-8000-dddddddddddd"
+	otherWorkspace := credbound.MustParseUUID("0198b463-0000-7000-8000-dddddddddddd")
 	if _, err := f.manager.CreatePAT(ctx, stepUp, credbound.CreatePATInput{Name: "x", WorkspaceID: otherWorkspace, Scopes: []string{"read"}}); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("foreign workspace PAT = %v", err)
 	}
@@ -154,7 +272,7 @@ func TestTOTPAndPATFailureBoundaries(t *testing.T) {
 			t.Fatalf("malformed PAT %q = %v", raw, err)
 		}
 	}
-	if err := f.manager.RevokePAT(ctx, stepUp, ""); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.RevokePAT(ctx, stepUp, credbound.UUID{}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("empty PAT revocation = %v", err)
 	}
 	if err := f.manager.Authorize(ctx, stepUp, workspace.ID, credbound.RoleMember); err != nil {
@@ -173,27 +291,33 @@ func TestPasskeyAndAdminFailureBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.manager.FinishPasskeyRegistration(ctx, authn, challenge.Continuation, []byte("bad")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+	if _, err := f.manager.FinishPasskeyRegistration(ctx, authn, challenge.Continuation, []byte("00000000-0000-4000-8000-000000000000")); !errors.Is(err, credbound.ErrInvalidCredentials) {
 		t.Fatalf("bad registration response = %v", err)
 	}
 	f.now = f.now.Add(6 * time.Minute)
 	if _, err := f.manager.FinishPasskeyRegistration(ctx, authn, challenge.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrExpired) {
 		t.Fatalf("expired registration = %v", err)
 	}
-	if _, err := f.manager.BeginPasskeyAuthentication(ctx, "missing@example.com"); !errors.Is(err, credbound.ErrInvalidCredentials) {
-		t.Fatalf("unknown passkey user = %v", err)
+	// An unknown address returns a decoy challenge rather than an error, so it
+	// never reveals whether the account exists; finishing it fails closed.
+	decoy, err := f.manager.BeginPasskeyAuthentication(ctx, "missing@example.com")
+	if err != nil || len(decoy.Options) == 0 || decoy.Continuation == "" {
+		t.Fatalf("unknown passkey user decoy = %#v, %v", decoy, err)
 	}
-	if err := f.manager.DeletePasskey(ctx, aal2(authn.UserID, f.now), ""); !errors.Is(err, credbound.ErrInvalidInput) {
+	if _, err := f.manager.FinishPasskeyAuthentication(ctx, decoy.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("decoy finish = %v", err)
+	}
+	if err := f.manager.DeletePasskey(ctx, aal2(authn.UserID, f.now), credbound.UUID{}); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("empty passkey deletion = %v", err)
 	}
 	root := aal2(authn.UserID, f.now)
 	if err := f.manager.SetInstanceRole(ctx, root, credbound.TrustedRequest{}, authn.UserID, credbound.InstanceRoleSales); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("self downgrade = %v", err)
 	}
-	if err := f.manager.SetInstanceRole(ctx, root, credbound.TrustedRequest{}, "", credbound.InstanceRoleSales); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.SetInstanceRole(ctx, root, credbound.TrustedRequest{}, credbound.UUID{}, credbound.InstanceRoleSales); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("empty target role = %v", err)
 	}
-	if err := f.manager.SetInstanceRole(ctx, root, credbound.TrustedRequest{}, "missing", credbound.InstanceRole("unknown")); !errors.Is(err, credbound.ErrInvalidInput) {
+	if err := f.manager.SetInstanceRole(ctx, root, credbound.TrustedRequest{}, credbound.MustParseUUID("0198b463-0000-7000-8000-ffa63583dfa6"), credbound.InstanceRole("unknown")); !errors.Is(err, credbound.ErrInvalidInput) {
 		t.Fatalf("unknown instance role = %v", err)
 	}
 	if err := f.manager.RemoveInstanceRole(ctx, root, credbound.TrustedRequest{}, authn.UserID); !errors.Is(err, credbound.ErrForbidden) {
@@ -213,8 +337,8 @@ func TestWorkspaceAuditAndErrorSequences(t *testing.T) {
 		t.Fatalf("workspace audit = %#v", page)
 	}
 	for _, sequence := range []func(func(credbound.PageEvent[credbound.PAT], error) bool){
-		f.manager.PATs(context.Background(), credbound.Authentication{}, credbound.PageRequest{}),
-		f.manager.PATs(context.Background(), authn, credbound.PageRequest{Limit: 101}),
+		f.manager.PATs(context.Background(), credbound.Authentication{}, credbound.UUID{}, credbound.PageRequest{}),
+		f.manager.PATs(context.Background(), authn, credbound.UUID{}, credbound.PageRequest{Limit: 101}),
 	} {
 		seen := false
 		for _, err := range sequence {
@@ -244,13 +368,15 @@ func TestEarlyAuthorizationAndIdentityBoundaries(t *testing.T) {
 		t.Fatalf("unauthorized registration finish = %v", err)
 	}
 	other := authn
-	other.UserID = "0198b463-0000-7000-8000-ffffffffffff"
+	other.UserID = credbound.MustParseUUID("0198b463-0000-7000-8000-ffffffffffff")
 	if _, err := f.manager.FinishPasskeyRegistration(ctx, other, challenge.Continuation, []byte("valid")); !errors.Is(err, credbound.ErrForbidden) {
 		t.Fatalf("cross-user continuation = %v", err)
 	}
-	if err := f.manager.DeletePasskey(ctx, credbound.Authentication{}, "passkey"); !errors.Is(err, credbound.ErrUnauthorized) {
+	if err := f.manager.DeletePasskey(ctx, credbound.Authentication{}, credbound.MustParseUUID("0198b463-0000-7000-8000-4b949c130904")); !errors.Is(err, credbound.ErrUnauthorized) {
 		t.Fatalf("unauthorized passkey deletion = %v", err)
 	}
+	// RBAC-002: granting or modifying a workspace role demands a valid
+	// step-up.
 	if err := f.manager.GrantRole(ctx, authn, workspace.ID, authn.UserID, credbound.RoleMember); !errors.Is(err, credbound.ErrStepUpRequired) {
 		t.Fatalf("role grant without step-up = %v", err)
 	}
@@ -268,12 +394,12 @@ func TestCorruptStoredPasskeyFailsClosed(t *testing.T) {
 	f := newFixture(t)
 	authn, _ := f.bootstrap(t)
 	event := credbound.AuditEvent{
-		ID: "0198b463-0000-7000-8000-fffffffffff0", OccurredAt: f.now,
+		ID: credbound.MustParseUUID("0198b463-0000-7000-8000-fffffffffff0"), OccurredAt: f.now,
 		ActorID: authn.UserID, Action: "test.passkey.corrupt", ResourceType: "passkey",
 		ResourceID: "0198b463-0000-7000-8000-fffffffffff1", Outcome: credbound.AuditSucceeded,
 	}
 	err := f.store.SavePasskey(context.Background(), credbound.Passkey{
-		ID: event.ResourceID, UserID: authn.UserID, Name: "Corrupt",
+		ID: credbound.MustParseUUID(event.ResourceID), UserID: authn.UserID, Name: "Corrupt",
 		CredentialID: []byte("corrupt"), CredentialJSON: []byte("not-encrypted"), CreatedAt: f.now,
 	}, credbound.Commit{Audit: event})
 	if err != nil {

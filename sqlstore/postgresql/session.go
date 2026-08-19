@@ -1,0 +1,173 @@
+package postgresql
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"errors"
+	"iter"
+	"time"
+
+	"github.com/deepteams/credbound"
+	db "github.com/deepteams/credbound/internal/sqlc/postgresql"
+)
+
+// CreateSession stores a server-side session; a duplicate ID reports
+// credbound.ErrConflict. A non-empty credentialDigest must still fingerprint
+// the user's current password credential, so a session can never be minted
+// from an authentication whose password was concurrently replaced; a
+// mismatch (or a vanished credential) reports credbound.ErrConflict.
+func (s *Store) CreateSession(ctx context.Context, session credbound.Session, credentialDigest []byte, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		if _, err := q.GetUserByID(ctx, dbID(session.UserID)); err != nil {
+			return mapError(err)
+		}
+		if len(credentialDigest) > 0 {
+			credential, err := q.LockPassword(ctx, dbID(session.UserID))
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return credbound.ErrConflict
+				}
+				return mapError(err)
+			}
+			if !bytes.Equal(credbound.CredentialFingerprint(credential.Hash), credentialDigest) {
+				return credbound.ErrConflict
+			}
+		}
+		return mapError(q.InsertSession(ctx, db.InsertSessionParams{
+			ID: dbID(session.ID), UserID: dbID(session.UserID), Method: string(session.Method), Level: int16(session.Level),
+			AuthenticatedAt: session.AuthenticatedAt, SecondFactorRequired: session.SecondFactorRequired,
+			UserAgent: session.UserAgent, IpAddress: session.IPAddress, Digest: session.Digest,
+			CreatedAt: session.CreatedAt, LastSeenAt: session.LastSeenAt, ExpiresAt: session.ExpiresAt,
+		}))
+	})
+}
+
+// SessionByID returns the session with the given ID.
+func (s *Store) SessionByID(ctx context.Context, id credbound.UUID) (credbound.Session, error) {
+	row, err := s.queries.GetSession(ctx, dbID(id))
+	if err != nil {
+		return credbound.Session{}, mapError(err)
+	}
+	return sessionFromRow(row), nil
+}
+
+// TouchSession updates the session's and user's last-seen times. A session
+// already revoked reports credbound.ErrConflict, so an authentication racing
+// a revocation can neither record activity on nor extend the idle window of
+// a dead session.
+func (s *Store) TouchSession(ctx context.Context, id credbound.UUID, at time.Time, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		session, err := q.GetSession(ctx, dbID(id))
+		if err != nil {
+			return mapError(err)
+		}
+		count, err := q.TouchSession(ctx, db.TouchSessionParams{ID: dbID(id), LastSeenAt: at})
+		if err != nil {
+			return mapError(err)
+		}
+		// The session exists, so zero affected rows means a concurrent
+		// revocation won the race.
+		if count == 0 {
+			return credbound.ErrConflict
+		}
+		count, err = q.TouchUserLastSeen(ctx, db.TouchUserLastSeenParams{ID: session.UserID, LastSeenAt: nullableTime(&at)})
+		return affected(count, err)
+	})
+}
+
+// RevokeSession marks the session revoked; an already-revoked session is
+// left unchanged.
+func (s *Store) RevokeSession(ctx context.Context, id credbound.UUID, at time.Time, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		if _, err := q.GetSession(ctx, dbID(id)); err != nil {
+			return mapError(err)
+		}
+		// Re-revoking an already revoked session is a no-op, not an error.
+		_, err := q.RevokeSessionByID(ctx, db.RevokeSessionByIDParams{ID: dbID(id), RevokedAt: nullableTime(&at)})
+		return mapError(err)
+	})
+}
+
+// RevokeUserSessions revokes every session of the user.
+func (s *Store) RevokeUserSessions(ctx context.Context, userID credbound.UUID, at time.Time, commit credbound.Commit) error {
+	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		if _, err := q.GetUserByID(ctx, dbID(userID)); err != nil {
+			return mapError(err)
+		}
+		return mapError(q.RevokeUserSessions(ctx, db.RevokeUserSessionsParams{UserID: dbID(userID), RevokedAt: nullableTime(&at)}))
+	})
+}
+
+// Sessions streams the user's sessions, newest first, as one cursor page
+// with digests omitted.
+func (s *Store) Sessions(ctx context.Context, userID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Session], error] {
+	return func(yield func(credbound.PageEvent[credbound.Session], error) bool) {
+		streamCtx, cancel := context.WithTimeout(ctx, s.streamTimeout)
+		defer cancel()
+		cursor, err := decodeCursor(page.Cursor)
+		if err != nil {
+			yield(credbound.PageEvent[credbound.Session]{}, err)
+			return
+		}
+		query, args := sessionsFirstPage, []any{userID, page.Limit + 1}
+		if cursor.ID != (credbound.UUID{}) {
+			query, args = sessionsAfterCursor, []any{userID, cursor.Time, cursor.ID, page.Limit + 1}
+		}
+		rows, err := s.query(streamCtx, query, args...)
+		if err != nil {
+			yield(credbound.PageEvent[credbound.Session]{}, mapError(err))
+			return
+		}
+		defer rows.Close()
+		var last credbound.Session
+		count := 0
+		for rows.Next() {
+			value, err := scanSession(rows)
+			if err != nil {
+				yield(credbound.PageEvent[credbound.Session]{}, err)
+				return
+			}
+			if count == page.Limit {
+				yield(credbound.EndEvent[credbound.Session](credbound.PageEnd{HasMore: true, NextCursor: encodeCursor(last.CreatedAt, last.ID)}), nil)
+				return
+			}
+			last = value
+			count++
+			if !yield(credbound.ItemEvent(value), nil) {
+				return
+			}
+		}
+		if err := rows.Err(); err != nil {
+			yield(credbound.PageEvent[credbound.Session]{}, err)
+			return
+		}
+		yield(credbound.EndEvent[credbound.Session](credbound.PageEnd{}), nil)
+	}
+}
+
+func sessionFromRow(row db.CredboundSession) credbound.Session {
+	return credbound.Session{
+		ID: domainID(row.ID), UserID: domainID(row.UserID), Method: credbound.AuthMethod(row.Method), Level: credbound.AssuranceLevel(row.Level),
+		AuthenticatedAt: row.AuthenticatedAt, SecondFactorRequired: row.SecondFactorRequired,
+		UserAgent: row.UserAgent, IPAddress: row.IpAddress, Digest: row.Digest,
+		CreatedAt: row.CreatedAt, LastSeenAt: row.LastSeenAt, ExpiresAt: row.ExpiresAt, RevokedAt: timePointer(row.RevokedAt),
+	}
+}
+
+func scanSession(row scanner) (credbound.Session, error) {
+	var value credbound.Session
+	var method string
+	var level int64
+	var secondFactor bool
+	var revoked sql.NullTime
+	if err := row.Scan(&value.ID, &value.UserID, &method, &level, &value.AuthenticatedAt, &secondFactor, &value.UserAgent, &value.IPAddress, &value.CreatedAt, &value.LastSeenAt, &value.ExpiresAt, &revoked); err != nil {
+		return credbound.Session{}, err
+	}
+	value.Method, value.Level = credbound.AuthMethod(method), credbound.AssuranceLevel(level)
+	value.SecondFactorRequired = secondFactor
+	value.RevokedAt = timePointer(revoked)
+	return value, nil
+}
+
+var _ credbound.SessionStore = (*Store)(nil)

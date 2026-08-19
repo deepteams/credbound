@@ -88,10 +88,13 @@ func TestOAuthProtocolValidationHelpers(t *testing.T) {
 	if err != nil || len(grants) != 1 || responses[0] != "code" {
 		t.Fatalf("default flow = %v/%v, %v", grants, responses, err)
 	}
-	for _, grants := range [][]string{{"client_credentials"}, {"refresh_token"}} {
+	for _, grants := range [][]string{{"refresh_token"}, {"00000000-0000-4000-8000-000000000000"}} {
 		if _, _, err := normalizeOAuthFlowMetadata(grants, nil); err == nil {
 			t.Fatalf("invalid grants accepted: %v", grants)
 		}
+	}
+	if g, _, err := normalizeOAuthFlowMetadata([]string{"client_credentials"}, nil); err != nil || len(g) != 1 {
+		t.Fatalf("client_credentials-only grant = %v, %v", g, err)
 	}
 	if _, _, err := normalizeOAuthFlowMetadata([]string{"authorization_code"}, []string{"token"}); err == nil {
 		t.Fatal("implicit response accepted")
@@ -139,7 +142,7 @@ func TestOAuthProtocolValidationHelpers(t *testing.T) {
 	if (OAuthAuthentication{}).HasScope("documents.read") {
 		t.Fatal("missing scope accepted")
 	}
-	if validPKCEChallenge("invalid") {
+	if validPKCEChallenge("00000000-0000-4000-8000-000000000000") {
 		t.Fatal("invalid PKCE challenge accepted")
 	}
 }
@@ -153,7 +156,8 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 	manager := &Manager{
 		oauth: &OAuthConfig{Pepper: bytes.Repeat([]byte{4}, 32)}, workspaceRoles: roles,
 		clock: func() time.Time { return now }, random: bytes.NewReader(bytes.Repeat([]byte{7}, 8192)),
-		secretKey: bytes.Repeat([]byte{1}, 32), ceremonyTTL: 5 * time.Minute, observer: nopObserver{},
+		secretKey: bytes.Repeat([]byte{1}, 32), sealKey: bytes.Repeat([]byte{1}, 32),
+		readSealKeys: [][]byte{bytes.Repeat([]byte{1}, 32)}, ceremonyTTL: 5 * time.Minute, observer: nopObserver{},
 	}
 	invalidPolicies := []UpdateOAuthIssuerInput{
 		{CIMDMode: "unknown"}, {DCRMode: "unknown"},
@@ -180,7 +184,7 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 		nil,
 		make([]OAuthScopeDefinition, 101),
 		{{Name: "openid", Description: "reserved", Permissions: []WorkspacePermission{PermissionWorkspaceAccess}}},
-		{{Name: "bad scope", Description: "bad", Permissions: []WorkspacePermission{PermissionWorkspaceAccess}}},
+		{{Name: "bad scope", Description: "00000000-0000-4000-8000-000000000000", Permissions: []WorkspacePermission{PermissionWorkspaceAccess}}},
 		{{Name: "documents.read", Permissions: []WorkspacePermission{PermissionWorkspaceAccess}}},
 		{{Name: "documents.read", Description: "Read", Permissions: nil}},
 		{{Name: "documents.read", Description: "Read", Permissions: []WorkspacePermission{"unknown.permission"}}},
@@ -198,7 +202,7 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 		t.Fatalf("scope catalog = %#v, %v", scopes, err)
 	}
 
-	issuer := OAuthIssuer{ID: "0198b463-0000-7000-8000-000000000001"}
+	issuer := OAuthIssuer{ID: MustParseUUID("0198b463-0000-7000-8000-000000000001")}
 	base := OAuthClientRegistrationInput{
 		Name: "Client", ApplicationType: OAuthApplicationWeb, RedirectURIs: []string{"https://client.example.com/callback"},
 		GrantTypes: []string{"authorization_code"}, ResponseTypes: []string{"code"}, TokenEndpointAuthMethod: OAuthAuthNone,
@@ -229,11 +233,54 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 		}(), false},
 		{func() OAuthClientRegistrationInput { v := base; v.JWKSURI = "http://keys.example.com"; return v }(), false},
 		{func() OAuthClientRegistrationInput { v := base; v.JWKS = json.RawMessage(`{`); return v }(), false},
+		// client_credentials is pre-registration only: a DCR client cannot
+		// self-declare it, even as a confidential private_key_jwt client with
+		// scopes and an allowlist.
+		{func() OAuthClientRegistrationInput {
+			v := base
+			v.GrantTypes = []string{"client_credentials"}
+			v.TokenEndpointAuthMethod, v.JWKS = OAuthAuthPrivateKeyJWT, json.RawMessage(`{"keys":[]}`)
+			v.Scopes = []string{"documents.read"}
+			v.ClientCredentialsResources = []string{"https://mcp.example.com/acme"}
+			return v
+		}(), false},
+		// An allowlist without the grant is rejected.
+		{func() OAuthClientRegistrationInput {
+			v := base
+			v.ClientCredentialsResources = []string{"https://mcp.example.com/acme"}
+			return v
+		}(), false},
 	}
 	for _, test := range invalidClients {
 		if _, _, err := manager.newOAuthClient(issuer, OAuthClientDCR, test.input, test.allowSecret); err == nil {
 			t.Fatalf("invalid client accepted: %#v", test.input)
 		}
+	}
+	// CIMD resolution can never mint a client_credentials client either.
+	cimdCC := base
+	cimdCC.GrantTypes = []string{"client_credentials"}
+	cimdCC.TokenEndpointAuthMethod, cimdCC.JWKS = OAuthAuthPrivateKeyJWT, json.RawMessage(`{"keys":[]}`)
+	cimdCC.Scopes = []string{"documents.read"}
+	cimdCC.ClientCredentialsResources = []string{"https://mcp.example.com/acme"}
+	if _, _, err := manager.newOAuthClient(issuer, OAuthClientCIMD, cimdCC, false); err == nil {
+		t.Fatal("CIMD client_credentials client accepted")
+	}
+	// Pre-registration still requires registered scopes and an allowlist.
+	for _, mutate := range []func(*OAuthClientRegistrationInput){
+		func(v *OAuthClientRegistrationInput) { v.Scopes = nil },
+		func(v *OAuthClientRegistrationInput) { v.ClientCredentialsResources = nil },
+		func(v *OAuthClientRegistrationInput) {
+			v.ClientCredentialsResources = []string{"http://plain.example.com"}
+		},
+	} {
+		v := cimdCC
+		mutate(&v)
+		if _, _, err := manager.newOAuthClient(issuer, OAuthClientPreRegistered, v, true); err == nil {
+			t.Fatalf("under-specified client_credentials client accepted: %#v", v)
+		}
+	}
+	if cc, _, err := manager.newOAuthClient(issuer, OAuthClientPreRegistered, cimdCC, true); err != nil || len(cc.ClientCredentialsResources) != 1 {
+		t.Fatalf("pre-registered client_credentials client = %#v, %v", cc, err)
 	}
 	confidential := base
 	confidential.TokenEndpointAuthMethod = OAuthAuthClientSecretBasic
@@ -247,12 +294,12 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 		t.Fatalf("private key client secret=%q, %v", secret, err)
 	}
 
-	continuation := oauthAuthorizationContinuation{UserID: "u", ClientRecordID: "c", ResourceID: "r", ExpiresAt: now.Add(time.Minute)}
+	continuation := oauthAuthorizationContinuation{UserID: MustParseUUID("0198b463-0000-7000-8000-0bfe935e70c3"), ClientRecordID: MustParseUUID("0198b463-0000-7000-8000-2e7d2c03a950"), ResourceID: MustParseUUID("0198b463-0000-7000-8000-454349e422f0"), ExpiresAt: now.Add(time.Minute)}
 	raw, err := manager.encodeOAuthContinuation(continuation)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded, err := manager.decodeOAuthContinuation(raw); err != nil || decoded.UserID != "u" {
+	if decoded, err := manager.decodeOAuthContinuation(raw); err != nil || decoded.UserID != continuation.UserID {
 		t.Fatalf("continuation = %#v, %v", decoded, err)
 	}
 	if _, err := manager.decodeOAuthContinuation(raw + "tampered"); err == nil {
@@ -283,11 +330,11 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 	}
 	unsupportedContext := context.Background()
 	_, _ = manager.CreateOAuthIssuer(unsupportedContext, Authentication{}, TrustedRequest{}, CreateOAuthIssuerInput{})
-	_, _ = manager.UpdateOAuthIssuer(unsupportedContext, Authentication{}, TrustedRequest{}, "", UpdateOAuthIssuerInput{})
-	_, _ = manager.CreateOAuthProtectedResource(unsupportedContext, Authentication{}, "", CreateOAuthProtectedResourceInput{})
-	_, _ = manager.PreRegisterOAuthClient(unsupportedContext, Authentication{}, TrustedRequest{}, "", OAuthClientRegistrationInput{})
-	_, _ = manager.CreateOAuthInitialAccessToken(unsupportedContext, Authentication{}, TrustedRequest{}, "", CreateOAuthInitialAccessTokenInput{})
-	_ = manager.RevokeOAuthInitialAccessToken(unsupportedContext, Authentication{}, TrustedRequest{}, "")
+	_, _ = manager.UpdateOAuthIssuer(unsupportedContext, Authentication{}, TrustedRequest{}, UUID{}, UpdateOAuthIssuerInput{})
+	_, _ = manager.CreateOAuthProtectedResource(unsupportedContext, Authentication{}, UUID{}, CreateOAuthProtectedResourceInput{})
+	_, _ = manager.PreRegisterOAuthClient(unsupportedContext, Authentication{}, TrustedRequest{}, UUID{}, OAuthClientRegistrationInput{})
+	_, _ = manager.CreateOAuthInitialAccessToken(unsupportedContext, Authentication{}, TrustedRequest{}, UUID{}, CreateOAuthInitialAccessTokenInput{})
+	_ = manager.RevokeOAuthInitialAccessToken(unsupportedContext, Authentication{}, TrustedRequest{}, UUID{})
 	_, _ = manager.RegisterOAuthClient(unsupportedContext, "", "", OAuthClientRegistrationInput{})
 	_, _ = manager.BeginOAuthAuthorization(unsupportedContext, Authentication{}, BeginOAuthAuthorizationInput{})
 	_, _ = manager.CompleteOAuthAuthorization(unsupportedContext, Authentication{}, "", false)
@@ -311,7 +358,7 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 	if _, err := manager.resolveOAuthClient(context.Background(), issuer, ""); err != ErrInvalidCredentials {
 		t.Fatalf("empty client id = %v", err)
 	}
-	policyResource := OAuthProtectedResource{WorkspaceID: "workspace", Scopes: []OAuthScopeDefinition{{
+	policyResource := OAuthProtectedResource{WorkspaceID: MustParseUUID("0198b463-0000-7000-8000-21a3230e0377"), Scopes: []OAuthScopeDefinition{{
 		Name: "documents.read", Description: "Read", Permissions: []WorkspacePermission{PermissionWorkspaceAccess},
 	}}}
 	if _, _, err := manager.authorizedOAuthScopes(context.Background(), Authentication{}, OAuthIssuer{}, policyResource, nil); !errors.Is(err, ErrInvalidInput) {
@@ -333,20 +380,20 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 	if _, err := manager.oauthIDToken(context.Background(), OAuthIssuer{OIDCEnabled: true}, OAuthClient{}, OAuthGrant{Scopes: []string{"openid"}}, "", now.Add(time.Minute)); err != ErrNotSupported {
 		t.Fatalf("missing OIDC signer = %v", err)
 	}
-	manager.secretKey = []byte("invalid")
+	manager.sealKey = []byte("00000000-0000-4000-8000-000000000000")
 	if _, err := manager.encodeOAuthContinuation(oauthAuthorizationContinuation{}); err == nil {
 		t.Fatal("continuation encryption failure ignored")
 	}
-	manager.secretKey = bytes.Repeat([]byte{1}, 32)
+	manager.sealKey = bytes.Repeat([]byte{1}, 32)
 	manager.random = bytes.NewReader(nil)
-	if _, _, err := manager.newOAuthChange(EventOAuthTokenIssued, "test", AuditEvent{}, OAuthClient{}, "", "", "", "", nil); err == nil {
+	if _, _, err := manager.newOAuthChange(EventOAuthTokenIssued, "test", AuditEvent{}, OAuthClient{}, UUID{}, UUID{}, UUID{}, UUID{}, nil); err == nil {
 		t.Fatal("OAuth event entropy failure ignored")
 	}
 	manager.random = bytes.NewReader(bytes.Repeat([]byte{7}, 8192))
 
 	manager.clock = func() time.Time { return now }
 	issuer.CIMDMode = OAuthCIMDPublicWeb
-	if _, err := manager.oauthClientFromMetadata(issuer, OAuthClientMetadataDocument{ClientID: "bad"}); err == nil {
+	if _, err := manager.oauthClientFromMetadata(issuer, OAuthClientMetadataDocument{ClientID: "00000000-0000-4000-8000-000000000000"}); err == nil {
 		t.Fatal("invalid metadata client id accepted")
 	}
 	if _, err := manager.oauthClientFromMetadata(issuer, OAuthClientMetadataDocument{ClientID: "https://client.example.com/client.json", FetchedAt: now, ExpiresAt: now}); err == nil {
@@ -364,11 +411,11 @@ func TestOAuthPolicyAndClientValidation(t *testing.T) {
 		t.Fatal("access bearer entropy failure ignored")
 	}
 	manager.random = bytes.NewReader(nil)
-	if _, _, err := manager.newOAuthRefreshToken(OAuthGrant{}, "family", time.Minute); err == nil {
+	if _, _, err := manager.newOAuthRefreshToken(OAuthGrant{}, MustParseUUID("0198b463-0000-7000-8000-d34a569ab7aa"), time.Minute); err == nil {
 		t.Fatal("refresh token entropy failure ignored")
 	}
 	manager.random = bytes.NewReader(make([]byte, 16))
-	if _, _, err := manager.newOAuthRefreshToken(OAuthGrant{}, "family", time.Minute); err == nil {
+	if _, _, err := manager.newOAuthRefreshToken(OAuthGrant{}, MustParseUUID("0198b463-0000-7000-8000-d34a569ab7aa"), time.Minute); err == nil {
 		t.Fatal("refresh bearer entropy failure ignored")
 	}
 	manager.random = bytes.NewReader(nil)

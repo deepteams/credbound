@@ -1,0 +1,19 @@
+# Keeps the Go module graph and the SHA-pinned GitHub Actions current.
+# Security updates open immediately; routine version bumps batch weekly to
+# keep review load predictable.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday

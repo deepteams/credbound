@@ -289,7 +289,7 @@ contain a SCIM credential, password, SSO token, or other secret.
 
 ### Persistence and observability
 
-Goose migrations and sqlc queries are provided for SQLite and PostgreSQL. Lists
+Goose migrations and sqlc queries are provided for PostgreSQL. Lists
 use `rows.Next()` with timeouts, backpressure, and stable pagination. All
 identifiers created by Credbound are UUIDv7 values.
 
@@ -321,7 +321,7 @@ stable version. Applications must register their roles before constructing the
 `Manager` and cannot modify the catalog at runtime.
 
 The implementation includes user and membership lifecycle primitives, the role
-catalog, the SCIM domain, in-memory/SQLite/PostgreSQL stores, and the HTTP
+catalog, the SCIM domain, in-memory and PostgreSQL stores, and the HTTP
 adapter. Maintained-code coverage remains strictly above 90%. PostgreSQL
 migrations must also be validated against a real instance in a consuming
 project's CI.

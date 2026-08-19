@@ -1,3 +1,8 @@
+-- Schema model for sqlc query analysis ONLY. It is a simplified projection and
+-- is NOT the provisioning source of truth: apply migrations/postgresql/ at runtime,
+-- which additionally carries partial unique indexes, immutability triggers and
+-- enum CHECK constraints this file omits. Keep it in sync when migrations change.
+
 CREATE SCHEMA credbound;
 CREATE TABLE credbound.instance (singleton boolean PRIMARY KEY, initialized_at timestamptz NOT NULL);
 CREATE TABLE credbound.users (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), display_name text NOT NULL, disabled boolean NOT NULL, last_seen_at timestamptz, created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL);
@@ -15,6 +20,7 @@ CREATE TABLE credbound.audit_events (id uuid PRIMARY KEY CHECK (substring(id::te
 CREATE UNIQUE INDEX audit_events_sequence_idx ON credbound.audit_events(sequence) WHERE sequence IS NOT NULL;
 CREATE TABLE credbound.audit_chain (singleton integer PRIMARY KEY CHECK (singleton = 1), sequence bigint NOT NULL, head_hash bytea NOT NULL);
 CREATE TABLE credbound.login_throttles (user_id uuid PRIMARY KEY REFERENCES credbound.users(id), failed_attempts bigint NOT NULL, locked_until timestamptz, updated_at timestamptz NOT NULL);
+CREATE TABLE credbound.email_issuance (address TEXT NOT NULL, purpose TEXT NOT NULL, last_issued_at timestamptz NOT NULL, PRIMARY KEY (address, purpose));
 CREATE TABLE credbound.password_resets (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), user_id uuid NOT NULL REFERENCES credbound.users(id), digest bytea NOT NULL, created_at timestamptz NOT NULL, expires_at timestamptz NOT NULL, used_at timestamptz);
 CREATE INDEX password_resets_user_idx ON credbound.password_resets(user_id);
 CREATE TABLE credbound.email_authentications (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), user_id uuid NOT NULL REFERENCES credbound.users(id), email_id uuid NOT NULL REFERENCES credbound.user_emails(id), digest bytea NOT NULL, created_at timestamptz NOT NULL, expires_at timestamptz NOT NULL, used_at timestamptz);
@@ -39,5 +45,29 @@ CREATE TABLE credbound.oauth_initial_access_tokens (id uuid PRIMARY KEY CHECK (s
 CREATE TABLE credbound.oauth_grants (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), client_record_id uuid NOT NULL REFERENCES credbound.oauth_clients(id), resource_id uuid NOT NULL REFERENCES credbound.oauth_resources(id), user_id uuid NOT NULL REFERENCES credbound.users(id), workspace_id uuid NOT NULL REFERENCES credbound.workspaces(id), created_at timestamptz NOT NULL, data_json jsonb NOT NULL);
 CREATE TABLE credbound.oauth_authorization_codes (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), prefix text NOT NULL UNIQUE, grant_id uuid NOT NULL REFERENCES credbound.oauth_grants(id), used_at timestamptz, expires_at timestamptz NOT NULL, data_json jsonb NOT NULL);
 CREATE TABLE credbound.oauth_access_tokens (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), prefix text NOT NULL UNIQUE, grant_id uuid NOT NULL REFERENCES credbound.oauth_grants(id), data_json jsonb NOT NULL);
+CREATE TABLE credbound.oauth_client_access_tokens (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), prefix text NOT NULL UNIQUE, client_record_id uuid NOT NULL REFERENCES credbound.oauth_clients(id), data_json jsonb NOT NULL);
 CREATE TABLE credbound.oauth_refresh_tokens (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), family_id uuid NOT NULL CHECK (substring(family_id::text from 15 for 1) = '7' AND substring(family_id::text from 20 for 1) IN ('8', '9', 'a', 'b')), prefix text NOT NULL UNIQUE, grant_id uuid NOT NULL REFERENCES credbound.oauth_grants(id), used_at timestamptz, revoked_at timestamptz, expires_at timestamptz NOT NULL, data_json jsonb NOT NULL);
 CREATE INDEX oauth_refresh_family_idx ON credbound.oauth_refresh_tokens(family_id);
+CREATE TABLE credbound.sessions (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), user_id uuid NOT NULL REFERENCES credbound.users(id), method text NOT NULL, level smallint NOT NULL, authenticated_at timestamptz NOT NULL, second_factor_required boolean NOT NULL DEFAULT false, user_agent text NOT NULL DEFAULT '', ip_address text NOT NULL DEFAULT '', digest bytea NOT NULL, created_at timestamptz NOT NULL, last_seen_at timestamptz NOT NULL, expires_at timestamptz NOT NULL, revoked_at timestamptz);
+CREATE INDEX sessions_user_idx ON credbound.sessions(user_id, created_at DESC, id DESC);
+CREATE TABLE credbound.workspace_domains (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), workspace_id uuid NOT NULL REFERENCES credbound.workspaces(id), domain text NOT NULL UNIQUE, challenge text NOT NULL, confirmed_at timestamptz, auto_join boolean NOT NULL DEFAULT false, auto_join_role text NOT NULL DEFAULT '', sso_provider_configuration_id uuid, enforce_sso boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL);
+CREATE INDEX workspace_domains_workspace_idx ON credbound.workspace_domains(workspace_id, created_at DESC, id DESC);
+CREATE TABLE credbound.consumed_ceremonies (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), expires_at timestamptz NOT NULL);
+
+-- Index added for query paths that had no usable index (see the audit in
+-- ADR-003): user-scoped lookups behind composite keys, revocation cascades,
+-- the ceremony prune, and the unfiltered listings' ordering.
+CREATE INDEX users_page_idx ON credbound.users(created_at DESC, id DESC);
+CREATE INDEX workspaces_page_idx ON credbound.workspaces(created_at DESC, id DESC);
+CREATE INDEX memberships_user_idx ON credbound.memberships(user_id);
+CREATE INDEX memberships_page_idx ON credbound.memberships(workspace_id, created_at DESC, user_id DESC);
+CREATE INDEX pats_workspace_idx ON credbound.personal_access_tokens(workspace_id) WHERE workspace_id IS NOT NULL;
+CREATE INDEX scim_users_user_idx ON credbound.scim_users(user_id);
+CREATE INDEX workspace_invitations_accepted_user_idx ON credbound.workspace_invitations(accepted_user_id) WHERE accepted_user_id IS NOT NULL;
+CREATE INDEX oauth_access_tokens_grant_idx ON credbound.oauth_access_tokens(grant_id);
+CREATE INDEX oauth_refresh_grant_idx ON credbound.oauth_refresh_tokens(grant_id);
+CREATE INDEX oauth_grants_client_idx ON credbound.oauth_grants(client_record_id);
+CREATE INDEX oauth_grants_resource_idx ON credbound.oauth_grants(resource_id);
+CREATE INDEX oauth_grants_created_idx ON credbound.oauth_grants(created_at DESC, id DESC);
+CREATE INDEX oauth_initial_access_tokens_issuer_idx ON credbound.oauth_initial_access_tokens(issuer_id);
+CREATE INDEX consumed_ceremonies_expiry_idx ON credbound.consumed_ceremonies(expires_at);

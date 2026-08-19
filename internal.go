@@ -17,24 +17,6 @@ func normalizeEmail(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
-func validUUIDv7(value string) bool {
-	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' || value[14] != '7' {
-		return false
-	}
-	if !strings.ContainsRune("89ab", rune(value[19])) {
-		return false
-	}
-	for index, character := range value {
-		if index == 8 || index == 13 || index == 18 || index == 23 {
-			continue
-		}
-		if !strings.ContainsRune("0123456789abcdef", character) {
-			return false
-		}
-	}
-	return true
-}
-
 func validSSOProviderKind(kind SSOProviderKind) bool {
 	switch kind {
 	case SSOProviderGoogle, SSOProviderGitHub, SSOProviderMicrosoft, SSOProviderOIDC, SSOProviderSAML:
@@ -52,7 +34,7 @@ func randomBytes(source io.Reader, size int) ([]byte, error) {
 	return b, nil
 }
 
-func (m *Manager) newID() (string, error) {
+func (m *Manager) newID() (UUID, error) {
 	// UUIDv7 layout from RFC 9562: 48-bit Unix milliseconds, version 7,
 	// 12-bit monotonic sequence, RFC variant, then 62 random bits.
 	m.idMu.Lock()
@@ -69,7 +51,7 @@ func (m *Manager) newID() (string, error) {
 	}
 	b, err := randomBytes(m.random, 16)
 	if err != nil {
-		return "", err
+		return UUID{}, err
 	}
 	timestamp := uint64(m.idUnixMilli)
 	for index := 5; index >= 0; index-- {
@@ -79,8 +61,7 @@ func (m *Manager) newID() (string, error) {
 	b[6] = 0x70 | byte(m.idSequence>>8)
 	b[7] = byte(m.idSequence)
 	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+	return UUID(b), nil
 }
 
 func digest(key []byte, value string) []byte {
@@ -89,14 +70,49 @@ func digest(key []byte, value string) []byte {
 	return h.Sum(nil)
 }
 
-func (m *Manager) seal(plaintext []byte) ([]byte, error) {
-	block, err := aes.NewCipher(m.secretKey)
+// tokenDigest computes the stored digest of a single-use token under the
+// HKDF-derived HMAC key.
+func (m *Manager) tokenDigest(value string) []byte {
+	return digest(m.digestKey, value)
+}
+
+// matchTokenDigest verifies a stored token digest against the digest-key
+// ring (active first, then retired SecretKeys), each in constant time, so a
+// rotation keeps outstanding sessions and email proofs valid. Digests
+// written under the raw SecretKey before the key separation are no longer
+// accepted: every token digest guards a single-use credential whose TTL
+// expired long before this window closed.
+func (m *Manager) matchTokenDigest(stored []byte, value string) bool {
+	return matchDigestRing(stored, m.readDigestKeys, value)
+}
+
+// matchDigestRing reports whether the stored digest matches the value under
+// any key of the ring, comparing in constant time per key.
+func matchDigestRing(stored []byte, keys [][]byte, value string) bool {
+	for _, key := range keys {
+		if hmac.Equal(stored, digest(key, value)) {
+			return true
+		}
+	}
+	return false
+}
+
+func newGCM(key []byte) (cipher.AEAD, error) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("create cipher: %w", err)
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return nil, fmt.Errorf("create gcm: %w", err)
+	}
+	return gcm, nil
+}
+
+func (m *Manager) seal(plaintext []byte) ([]byte, error) {
+	gcm, err := newGCM(m.sealKey)
+	if err != nil {
+		return nil, err
 	}
 	nonce, err := randomBytes(m.random, gcm.NonceSize())
 	if err != nil {
@@ -106,30 +122,52 @@ func (m *Manager) seal(plaintext []byte) ([]byte, error) {
 }
 
 func (m *Manager) open(ciphertext []byte) ([]byte, error) {
-	block, err := aes.NewCipher(m.secretKey)
-	if err != nil {
-		return nil, fmt.Errorf("create cipher: %w", err)
+	// The ring holds the active seal key first, then keys derived from the
+	// retired SecretKeys, then the raw active and retired keys for data
+	// sealed before the key separation. Unlike token digests, sealed
+	// credentials live for years, so the raw legacy window stays open until
+	// v1 ships a re-seal migration; new data always seals under the active
+	// derived key.
+	for _, key := range m.readSealKeys {
+		gcm, err := newGCM(key)
+		if err != nil {
+			return nil, err
+		}
+		if len(ciphertext) < gcm.NonceSize() {
+			return nil, ErrInvalidCredentials
+		}
+		plaintext, err := gcm.Open(nil, ciphertext[:gcm.NonceSize()], ciphertext[gcm.NonceSize():], nil)
+		if err == nil {
+			return plaintext, nil
+		}
 	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("create gcm: %w", err)
-	}
-	if len(ciphertext) < gcm.NonceSize() {
-		return nil, ErrInvalidCredentials
-	}
-	plaintext, err := gcm.Open(nil, ciphertext[:gcm.NonceSize()], ciphertext[gcm.NonceSize():], nil)
-	if err != nil {
-		return nil, ErrInvalidCredentials
-	}
-	return plaintext, nil
+	return nil, ErrInvalidCredentials
 }
 
 type ceremonyContinuation struct {
-	UserID    string    `json:"uid"`
-	Operation string    `json:"op"`
+	// ID is the single-use ceremony identity consumed by the success
+	// commit; continuations sealed before ceremony ids existed carry none
+	// and stay bounded by the TTL alone.
+	ID        UUID   `json:"id,omitzero"`
+	UserID    UUID   `json:"uid"`
+	Operation string `json:"op"`
+	// Name carries whatever the ceremony needs to remember: a passkey's
+	// display name for a registration, the addressed record's identifier
+	// for an email challenge. It stays text because those are not the
+	// same kind of value.
 	Name      string    `json:"name,omitempty"`
 	ExpiresAt time.Time `json:"exp"`
 	Session   []byte    `json:"session"`
+}
+
+// consumption reports the single-use ceremony this continuation carries,
+// or nil for a continuation sealed before ceremony ids existed, which stays
+// bounded by its TTL alone.
+func (c ceremonyContinuation) consumption() *CeremonyConsumption {
+	if c.ID == (UUID{}) {
+		return nil
+	}
+	return &CeremonyConsumption{ID: c.ID, ExpiresAt: c.ExpiresAt}
 }
 
 func (m *Manager) encodeContinuation(value ceremonyContinuation) (string, error) {
@@ -154,7 +192,13 @@ func (m *Manager) decodeContinuation(raw, operation string) (ceremonyContinuatio
 		return ceremonyContinuation{}, ErrInvalidCredentials
 	}
 	var value ceremonyContinuation
-	if err := json.Unmarshal(payload, &value); err != nil || value.Operation != operation || value.UserID == "" {
+	if err := json.Unmarshal(payload, &value); err != nil || value.Operation != operation {
+		return ceremonyContinuation{}, ErrInvalidCredentials
+	}
+	// Only a discoverable ceremony is legitimately anonymous at Begin: the
+	// account is resolved from the assertion itself. Everywhere else an
+	// empty user id marks a decoy continuation, which must fail here.
+	if value.UserID == (UUID{}) && operation != passkeyDiscoverable {
 		return ceremonyContinuation{}, ErrInvalidCredentials
 	}
 	if !m.now().Before(value.ExpiresAt) {

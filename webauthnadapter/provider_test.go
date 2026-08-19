@@ -12,6 +12,43 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 )
 
+func TestBeginDecoyAuthentication(t *testing.T) {
+	provider := newProvider(t, 2)
+	ctx := context.Background()
+	parse := func(seed string) protocol.CredentialAssertion {
+		t.Helper()
+		options, session, err := provider.BeginDecoyAuthentication(ctx, []byte(seed))
+		if err != nil || len(options) == 0 || len(session) == 0 {
+			t.Fatalf("decoy(%q) = %s, %x, %v", seed, options, session, err)
+		}
+		var assertion protocol.CredentialAssertion
+		if err := json.Unmarshal(options, &assertion); err != nil {
+			t.Fatal(err)
+		}
+		return assertion
+	}
+	// Structurally a real assertion challenge: user verification required and
+	// exactly one allowed credential.
+	first := parse("seed-a")
+	if first.Response.UserVerification != protocol.VerificationRequired {
+		t.Fatalf("user verification = %q", first.Response.UserVerification)
+	}
+	if len(first.Response.AllowedCredentials) != 1 {
+		t.Fatalf("allowed credentials = %d, want 1", len(first.Response.AllowedCredentials))
+	}
+	// Stable for the same address, distinct across addresses, so probes cannot
+	// tell a decoy from a real challenge by its variation.
+	firstID := string(first.Response.AllowedCredentials[0].CredentialID)
+	if firstID != string(parse("seed-a").Response.AllowedCredentials[0].CredentialID) {
+		t.Fatal("decoy credential id not stable for the same seed")
+	}
+	if firstID == string(parse("seed-b").Response.AllowedCredentials[0].CredentialID) {
+		t.Fatal("decoy credential id must differ across seeds")
+	}
+}
+
+// TestRegistrationOptionsRequireUserVerification proves the user-verification
+// clause of AUTH-003: registration options always demand user verification.
 func TestRegistrationOptionsRequireUserVerification(t *testing.T) {
 	provider := newProvider(t, 2)
 	input := emptyUser()
@@ -58,7 +95,7 @@ func TestCredentialConversionAndErrors(t *testing.T) {
 	if copyID[0] == converted.WebAuthnID()[0] {
 		t.Fatal("WebAuthn ID was not cloned")
 	}
-	if _, err := provider.convertUser(userWith(credbound.Passkey{CredentialID: []byte("credential"), CredentialJSON: []byte("bad")})); err == nil {
+	if _, err := provider.convertUser(userWith(credbound.Passkey{CredentialID: []byte("credential"), CredentialJSON: []byte("00000000-0000-4000-8000-000000000000")})); err == nil {
 		t.Fatal("invalid credential JSON accepted")
 	}
 	if _, err := provider.convertUser(userWith(credbound.Passkey{CredentialID: []byte("other"), CredentialJSON: encoded})); err == nil {
@@ -102,10 +139,10 @@ func TestProviderValidationAndMalformedFinishes(t *testing.T) {
 	if _, _, err := provider.FinishAuthentication(ctx, emptyUser(), nil, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled authentication finish = %v", err)
 	}
-	if _, _, err := provider.FinishRegistration(context.Background(), emptyUser(), []byte("bad"), []byte("bad")); err == nil {
+	if _, _, err := provider.FinishRegistration(context.Background(), emptyUser(), []byte("00000000-0000-4000-8000-000000000000"), []byte("00000000-0000-4000-8000-000000000000")); err == nil {
 		t.Fatal("malformed registration session accepted")
 	}
-	if _, err := unmarshalSession([]byte("bad")); err == nil {
+	if _, err := unmarshalSession([]byte("00000000-0000-4000-8000-000000000000")); err == nil {
 		t.Fatal("malformed session accepted")
 	}
 }
@@ -185,11 +222,33 @@ func TestConversionAndSessionFailuresAcrossCeremonies(t *testing.T) {
 	if _, _, err := provider.BeginAuthentication(ctx, emptyUser()); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled authentication begin = %v", err)
 	}
-	if _, _, err := provider.FinishAuthentication(context.Background(), emptyUser(), []byte("bad"), nil); err == nil {
+	if _, _, err := provider.FinishAuthentication(context.Background(), emptyUser(), []byte("00000000-0000-4000-8000-000000000000"), nil); err == nil {
 		t.Fatal("malformed authentication session accepted")
 	}
 	if _, _, err := marshalCeremony(make(chan int), &webauthn.SessionData{}); err == nil {
 		t.Fatal("unmarshalable ceremony options accepted")
+	}
+}
+
+// TestFinishAuthenticationRejectsCloneWarning ensures a regressed signature
+// counter (which go-webauthn signals via CloneWarning rather than an error) is
+// rejected instead of silently authenticating a possibly cloned authenticator.
+func TestFinishAuthenticationRejectsCloneWarning(t *testing.T) {
+	credential := webauthn.Credential{ID: []byte("credential"), PublicKey: []byte("public-key")}
+	credential.Authenticator.CloneWarning = true
+	encoded, err := json.Marshal(credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &Provider{
+		webAuthn: &fakeEngine{credential: &credential}, userHandleKey: bytes(32), maxCredentials: 2,
+		parseAssertion: func([]byte) (*protocol.ParsedCredentialAssertionData, error) {
+			return &protocol.ParsedCredentialAssertionData{}, nil
+		},
+	}
+	input := userWith(credbound.Passkey{CredentialID: credential.ID, CredentialJSON: encoded})
+	if _, _, err := provider.FinishAuthentication(context.Background(), input, []byte(`{}`), []byte(`{}`)); !errors.Is(err, credbound.ErrPasskeyCloneDetected) {
+		t.Fatalf("clone warning not rejected: %v", err)
 	}
 }
 
@@ -207,9 +266,81 @@ func newProvider(t *testing.T, max int) *Provider {
 	return provider
 }
 
+func TestDiscoverableCeremonies(t *testing.T) {
+	ctx := context.Background()
+	credential := webauthn.Credential{ID: []byte("credential"), PublicKey: []byte("public-key")}
+	encoded, err := json.Marshal(credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := &fakeEngine{credential: &credential, handlerRawID: credential.ID}
+	provider := &Provider{
+		webAuthn: backend, userHandleKey: bytes(32), maxCredentials: 2,
+		parseAssertion: func([]byte) (*protocol.ParsedCredentialAssertionData, error) {
+			return &protocol.ParsedCredentialAssertionData{}, nil
+		},
+	}
+	input := userWith(credbound.Passkey{CredentialID: credential.ID, CredentialJSON: encoded})
+	converted, err := provider.convertUser(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend.handlerUserHandle = converted.id
+	lookup := func(_ context.Context, credentialID []byte) (credbound.PasskeyUser, error) {
+		if string(credentialID) != "credential" {
+			return credbound.PasskeyUser{}, credbound.ErrNotFound
+		}
+		return input, nil
+	}
+
+	if options, session, err := provider.BeginDiscoverableAuthentication(ctx); err != nil || len(options) == 0 || len(session) == 0 {
+		t.Fatalf("begin discoverable = %s, %s, %v", options, session, err)
+	}
+	credentialID, updated, err := provider.FinishDiscoverableAuthentication(ctx, []byte(`{}`), []byte(`{}`), lookup)
+	if err != nil || string(credentialID) != "credential" || len(updated) == 0 {
+		t.Fatalf("finish discoverable = %q, %s, %v", credentialID, updated, err)
+	}
+
+	// An asserted user handle that is not the HMAC of the resolved account's
+	// ID must fail: a tampered handle can never rebind the assertion.
+	backend.handlerUserHandle = []byte("tampered")
+	if _, _, err := provider.FinishDiscoverableAuthentication(ctx, []byte(`{}`), []byte(`{}`), lookup); err == nil {
+		t.Fatal("mismatched user handle accepted")
+	}
+	backend.handlerUserHandle = converted.id
+
+	// A lookup miss (unknown credential) propagates as a failure.
+	backend.handlerRawID = []byte("unknown")
+	if _, _, err := provider.FinishDiscoverableAuthentication(ctx, []byte(`{}`), []byte(`{}`), lookup); err == nil {
+		t.Fatal("unknown credential accepted")
+	}
+	backend.handlerRawID = credential.ID
+
+	// A clone-warned validation is rejected like the email-first flow.
+	cloned := credential
+	cloned.Authenticator.CloneWarning = true
+	backend.credential = &cloned
+	if _, _, err := provider.FinishDiscoverableAuthentication(ctx, []byte(`{}`), []byte(`{}`), lookup); !errors.Is(err, credbound.ErrPasskeyCloneDetected) {
+		t.Fatalf("clone warning = %v", err)
+	}
+	backend.credential = &credential
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := provider.BeginDiscoverableAuthentication(canceled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled begin = %v", err)
+	}
+	if _, _, err := provider.FinishDiscoverableAuthentication(canceled, nil, nil, lookup); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled finish = %v", err)
+	}
+	if _, _, err := provider.FinishDiscoverableAuthentication(ctx, []byte("00000000-0000-4000-8000-000000000000"), []byte(`{}`), lookup); err == nil {
+		t.Fatal("malformed session accepted")
+	}
+}
+
 func emptyUser() credbound.PasskeyUser {
 	return credbound.PasskeyUser{
-		User:        credbound.User{ID: "0198b463-0000-7000-8000-000000000001", Email: "user@example.com", DisplayName: "User"},
+		User:        credbound.User{ID: credbound.MustParseUUID("0198b463-0000-7000-8000-000000000001"), Email: "user@example.com", DisplayName: "User"},
 		Credentials: func(func(credbound.Passkey, error) bool) {},
 	}
 }
@@ -223,8 +354,10 @@ func userWith(passkey credbound.Passkey) credbound.PasskeyUser {
 func bytes(size int) []byte { return []byte(strings.Repeat("k", size)) }
 
 type fakeEngine struct {
-	credential *webauthn.Credential
-	err        error
+	credential        *webauthn.Credential
+	err               error
+	handlerRawID      []byte
+	handlerUserHandle []byte
 }
 
 func (f *fakeEngine) BeginRegistration(webauthn.User, ...webauthn.RegistrationOption) (*protocol.CredentialCreation, *webauthn.SessionData, error) {
@@ -243,5 +376,26 @@ func (f *fakeEngine) BeginLogin(webauthn.User, ...webauthn.LoginOption) (*protoc
 	return &protocol.CredentialAssertion{}, &webauthn.SessionData{}, nil
 }
 func (f *fakeEngine) ValidateLogin(webauthn.User, webauthn.SessionData, *protocol.ParsedCredentialAssertionData) (*webauthn.Credential, error) {
+	return f.credential, f.err
+}
+func (f *fakeEngine) BeginDiscoverableLogin(...webauthn.LoginOption) (*protocol.CredentialAssertion, *webauthn.SessionData, error) {
+	if f.err != nil {
+		return nil, nil, f.err
+	}
+	return &protocol.CredentialAssertion{}, &webauthn.SessionData{}, nil
+}
+func (f *fakeEngine) ValidateDiscoverableLogin(handler webauthn.DiscoverableUserHandler, _ webauthn.SessionData, _ *protocol.ParsedCredentialAssertionData) (*webauthn.Credential, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.handlerRawID != nil {
+		user, err := handler(f.handlerRawID, f.handlerUserHandle)
+		if err != nil {
+			return nil, err
+		}
+		if user == nil {
+			return nil, errors.New("nil user")
+		}
+	}
 	return f.credential, f.err
 }
