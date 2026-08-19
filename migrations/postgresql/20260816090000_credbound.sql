@@ -15,6 +15,10 @@ CREATE TABLE credbound.users (
     updated_at timestamptz NOT NULL
 );
 
+-- The instance-wide user listing pages on (created_at, id); without this the
+-- keyset scan degrades to a full sort of the table.
+CREATE INDEX users_page_idx ON credbound.users(created_at DESC, id DESC);
+
 CREATE TABLE credbound.user_emails (
     id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')),
     user_id uuid NOT NULL REFERENCES credbound.users(id) ON DELETE CASCADE,
@@ -43,6 +47,8 @@ CREATE TABLE credbound.workspaces (
     updated_at timestamptz NOT NULL
 );
 
+CREATE INDEX workspaces_page_idx ON credbound.workspaces(created_at DESC, id DESC);
+
 CREATE TABLE credbound.memberships (
     workspace_id uuid NOT NULL REFERENCES credbound.workspaces(id) ON DELETE CASCADE,
     user_id uuid NOT NULL REFERENCES credbound.users(id) ON DELETE CASCADE,
@@ -51,6 +57,11 @@ CREATE TABLE credbound.memberships (
     updated_at timestamptz NOT NULL,
     PRIMARY KEY (workspace_id, user_id)
 );
+
+-- The primary key leads on workspace_id, so the user-scoped lookups (the
+-- sole-admin and orphaned-workspace guards, and the workspace listing's
+-- EXISTS) have nothing to search on without this.
+CREATE INDEX memberships_user_idx ON credbound.memberships(user_id);
 
 CREATE TABLE credbound.instance_administrators (
     user_id uuid PRIMARY KEY REFERENCES credbound.users(id) ON DELETE CASCADE,
@@ -114,6 +125,8 @@ CREATE TABLE credbound.personal_access_tokens (
     revoked_at timestamptz
 );
 CREATE INDEX pats_user_order_idx ON credbound.personal_access_tokens(user_id, created_at DESC, id DESC);
+-- Workspace-wide revocation; partial because most tokens are not scoped.
+CREATE INDEX pats_workspace_idx ON credbound.personal_access_tokens(workspace_id) WHERE workspace_id IS NOT NULL;
 
 CREATE TABLE credbound.audit_events (
     id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')),

@@ -53,3 +53,20 @@ CREATE INDEX sessions_user_idx ON credbound.sessions(user_id, created_at DESC, i
 CREATE TABLE credbound.workspace_domains (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), workspace_id uuid NOT NULL REFERENCES credbound.workspaces(id), domain text NOT NULL UNIQUE, challenge text NOT NULL, confirmed_at timestamptz, auto_join boolean NOT NULL DEFAULT false, auto_join_role text NOT NULL DEFAULT '', sso_provider_configuration_id text NOT NULL DEFAULT '', enforce_sso boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL);
 CREATE INDEX workspace_domains_workspace_idx ON credbound.workspace_domains(workspace_id, created_at DESC, id DESC);
 CREATE TABLE credbound.consumed_ceremonies (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), expires_at timestamptz NOT NULL);
+
+-- Index added for query paths that had no usable index (see the audit in
+-- ADR-003): user-scoped lookups behind composite keys, revocation cascades,
+-- the ceremony prune, and the unfiltered listings' ordering.
+CREATE INDEX users_page_idx ON credbound.users(created_at DESC, id DESC);
+CREATE INDEX workspaces_page_idx ON credbound.workspaces(created_at DESC, id DESC);
+CREATE INDEX memberships_user_idx ON credbound.memberships(user_id);
+CREATE INDEX pats_workspace_idx ON credbound.personal_access_tokens(workspace_id) WHERE workspace_id IS NOT NULL;
+CREATE INDEX scim_users_user_idx ON credbound.scim_users(user_id);
+CREATE INDEX workspace_invitations_accepted_user_idx ON credbound.workspace_invitations(accepted_user_id) WHERE accepted_user_id IS NOT NULL;
+CREATE INDEX oauth_access_tokens_grant_idx ON credbound.oauth_access_tokens(grant_id);
+CREATE INDEX oauth_refresh_grant_idx ON credbound.oauth_refresh_tokens(grant_id);
+CREATE INDEX oauth_grants_client_idx ON credbound.oauth_grants(client_record_id);
+CREATE INDEX oauth_grants_resource_idx ON credbound.oauth_grants(resource_id);
+CREATE INDEX oauth_grants_created_idx ON credbound.oauth_grants(created_at DESC, id DESC);
+CREATE INDEX oauth_initial_access_tokens_issuer_idx ON credbound.oauth_initial_access_tokens(issuer_id);
+CREATE INDEX consumed_ceremonies_expiry_idx ON credbound.consumed_ceremonies(expires_at);

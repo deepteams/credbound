@@ -48,6 +48,9 @@ CREATE TABLE credbound.scim_users (
 );
 CREATE UNIQUE INDEX scim_users_external_id_idx ON credbound.scim_users(configuration_id, external_id) WHERE external_id IS NOT NULL;
 CREATE INDEX scim_users_page_idx ON credbound.scim_users(configuration_id, created_at DESC, id DESC);
+-- The unique key leads on configuration_id, so anonymization and the
+-- per-user link listing need their own user-scoped index.
+CREATE INDEX scim_users_user_idx ON credbound.scim_users(user_id);
 
 CREATE TABLE credbound.scim_groups (
     id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')),

@@ -17,6 +17,9 @@ CREATE INDEX credbound_email_authentications_user_idx ON credbound_email_authent
 CREATE TABLE credbound_workspace_invitations (id TEXT PRIMARY KEY CHECK (length(id) = 36 AND id = lower(id) AND substr(id, 15, 1) = '7' AND substr(id, 20, 1) GLOB '[89ab]' AND replace(id, '-', '') NOT GLOB '*[^0-9a-f]*'), workspace_id TEXT NOT NULL REFERENCES credbound_workspaces(id), email TEXT NOT NULL, role TEXT NOT NULL, invited_by TEXT NOT NULL REFERENCES credbound_users(id), digest BLOB NOT NULL, created_at DATETIME NOT NULL, expires_at DATETIME NOT NULL, accepted_at DATETIME, accepted_user_id TEXT, revoked_at DATETIME);
 CREATE UNIQUE INDEX credbound_workspace_invitations_pending_idx ON credbound_workspace_invitations(workspace_id, email) WHERE accepted_at IS NULL AND revoked_at IS NULL;
 CREATE INDEX credbound_workspace_invitations_page_idx ON credbound_workspace_invitations(workspace_id, created_at DESC, id DESC);
+-- Anonymization scrubs a user's accepted invitations; partial because only
+-- accepted rows carry the column.
+CREATE INDEX credbound_workspace_invitations_accepted_user_idx ON credbound_workspace_invitations(accepted_user_id) WHERE accepted_user_id IS NOT NULL;
 
 -- +goose Down
 DROP TABLE credbound_workspace_invitations;

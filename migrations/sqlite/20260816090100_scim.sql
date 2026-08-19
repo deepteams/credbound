@@ -13,6 +13,10 @@ CREATE TABLE credbound_memberships (
 INSERT INTO credbound_memberships (workspace_id, user_id, role, status, provisioning_source, created_at, updated_at)
 SELECT workspace_id, user_id, role, 'active', 'local', created_at, updated_at FROM credbound_memberships_legacy;
 DROP TABLE credbound_memberships_legacy;
+-- The primary key leads on workspace_id, so the user-scoped lookups (the
+-- sole-admin and orphaned-workspace guards, and the workspace listing's
+-- EXISTS) have nothing to search on without this.
+CREATE INDEX credbound_memberships_user_idx ON credbound_memberships(user_id);
 
 ALTER TABLE credbound_audit_events ADD COLUMN actor_kind TEXT NOT NULL DEFAULT 'user'
     CHECK (actor_kind IN ('user', 'service', 'system'));
@@ -59,6 +63,9 @@ CREATE TABLE credbound_scim_users (
 );
 CREATE UNIQUE INDEX credbound_scim_users_external_id_idx ON credbound_scim_users(configuration_id, external_id) WHERE external_id IS NOT NULL;
 CREATE INDEX credbound_scim_users_page_idx ON credbound_scim_users(configuration_id, created_at DESC, id DESC);
+-- The unique key leads on configuration_id, so anonymization and the
+-- per-user link listing need their own user-scoped index.
+CREATE INDEX credbound_scim_users_user_idx ON credbound_scim_users(user_id);
 
 CREATE TABLE credbound_scim_groups (
     id TEXT PRIMARY KEY CHECK (length(id) = 36 AND id = lower(id) AND substr(id, 15, 1) = '7' AND substr(id, 20, 1) GLOB '[89ab]' AND replace(id, '-', '') NOT GLOB '*[^0-9a-f]*'),

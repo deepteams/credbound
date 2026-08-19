@@ -32,6 +32,9 @@ CREATE INDEX credbound_oauth_issuers_page_idx ON credbound_oauth_issuers(created
 CREATE INDEX credbound_oauth_resources_page_idx ON credbound_oauth_resources(workspace_id, created_at DESC, id DESC);
 CREATE INDEX credbound_oauth_clients_page_idx ON credbound_oauth_clients(issuer_id, created_at DESC, id DESC);
 CREATE INDEX credbound_oauth_grants_page_idx ON credbound_oauth_grants(user_id, workspace_id, created_at DESC, id DESC);
+-- The page index leads on user_id, so the unfiltered grant listing cannot
+-- use it and needs the ordering index of its own.
+CREATE INDEX credbound_oauth_grants_created_idx ON credbound_oauth_grants(created_at DESC, id DESC);
 
 -- +goose Down
 DROP TRIGGER credbound_oauth_grants_lifecycle_not_null_update;
@@ -42,6 +45,7 @@ DROP TRIGGER credbound_oauth_resources_lifecycle_not_null_update;
 DROP TRIGGER credbound_oauth_resources_lifecycle_not_null_insert;
 DROP TRIGGER credbound_oauth_issuers_lifecycle_not_null_update;
 DROP TRIGGER credbound_oauth_issuers_lifecycle_not_null_insert;
+DROP INDEX credbound_oauth_grants_created_idx;
 DROP INDEX credbound_oauth_grants_page_idx;
 DROP INDEX credbound_oauth_clients_page_idx;
 DROP INDEX credbound_oauth_resources_page_idx;

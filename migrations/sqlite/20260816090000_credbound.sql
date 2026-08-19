@@ -20,6 +20,10 @@ CREATE TABLE credbound_users (
     updated_at DATETIME NOT NULL
 );
 
+-- The instance-wide user listing pages on (created_at, id); without this the
+-- keyset scan degrades to a full sort of the table.
+CREATE INDEX credbound_users_page_idx ON credbound_users(created_at DESC, id DESC);
+
 CREATE TABLE credbound_user_emails (
     id TEXT PRIMARY KEY CHECK (
         length(id) = 36 AND id = lower(id) AND
@@ -57,6 +61,8 @@ CREATE TABLE credbound_workspaces (
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
 );
+
+CREATE INDEX credbound_workspaces_page_idx ON credbound_workspaces(created_at DESC, id DESC);
 
 CREATE TABLE credbound_memberships (
     workspace_id TEXT NOT NULL REFERENCES credbound_workspaces(id) ON DELETE CASCADE,
@@ -149,6 +155,8 @@ CREATE TABLE credbound_personal_access_tokens (
     revoked_at DATETIME
 );
 CREATE INDEX credbound_pats_user_order_idx ON credbound_personal_access_tokens(user_id, created_at DESC, id DESC);
+-- Workspace-wide revocation; partial because most tokens are not scoped.
+CREATE INDEX credbound_pats_workspace_idx ON credbound_personal_access_tokens(workspace_id) WHERE workspace_id IS NOT NULL;
 
 CREATE TABLE credbound_audit_events (
     id TEXT PRIMARY KEY CHECK (

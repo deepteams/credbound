@@ -20,8 +20,12 @@ CREATE INDEX oauth_issuers_page_idx ON credbound.oauth_issuers(created_at DESC, 
 CREATE INDEX oauth_resources_page_idx ON credbound.oauth_resources(workspace_id, created_at DESC, id DESC);
 CREATE INDEX oauth_clients_page_idx ON credbound.oauth_clients(issuer_id, created_at DESC, id DESC);
 CREATE INDEX oauth_grants_page_idx ON credbound.oauth_grants(user_id, workspace_id, created_at DESC, id DESC);
+-- oauth_grants_page_idx leads on user_id, so the unfiltered grant listing
+-- cannot use it and needs the ordering index of its own.
+CREATE INDEX oauth_grants_created_idx ON credbound.oauth_grants(created_at DESC, id DESC);
 
 -- +goose Down
+DROP INDEX credbound.oauth_grants_created_idx;
 DROP INDEX credbound.oauth_grants_page_idx;
 DROP INDEX credbound.oauth_clients_page_idx;
 DROP INDEX credbound.oauth_resources_page_idx;

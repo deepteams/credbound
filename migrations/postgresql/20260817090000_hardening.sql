@@ -17,6 +17,9 @@ CREATE INDEX email_authentications_user_idx ON credbound.email_authentications(u
 CREATE TABLE credbound.workspace_invitations (id uuid PRIMARY KEY CHECK (substring(id::text from 15 for 1) = '7' AND substring(id::text from 20 for 1) IN ('8', '9', 'a', 'b')), workspace_id uuid NOT NULL REFERENCES credbound.workspaces(id), email text NOT NULL, role text NOT NULL, invited_by uuid NOT NULL REFERENCES credbound.users(id), digest bytea NOT NULL, created_at timestamptz NOT NULL, expires_at timestamptz NOT NULL, accepted_at timestamptz, accepted_user_id uuid, revoked_at timestamptz);
 CREATE UNIQUE INDEX workspace_invitations_pending_idx ON credbound.workspace_invitations(workspace_id, email) WHERE accepted_at IS NULL AND revoked_at IS NULL;
 CREATE INDEX workspace_invitations_page_idx ON credbound.workspace_invitations(workspace_id, created_at DESC, id DESC);
+-- Anonymization scrubs a user's accepted invitations; partial because only
+-- accepted rows carry the column.
+CREATE INDEX workspace_invitations_accepted_user_idx ON credbound.workspace_invitations(accepted_user_id) WHERE accepted_user_id IS NOT NULL;
 
 -- +goose Down
 DROP TABLE credbound.workspace_invitations;
