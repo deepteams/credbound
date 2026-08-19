@@ -36,7 +36,9 @@ type UUID = uuid.UUID
 // compact, braced and urn:uuid: spellings, but Credbound does not: those would
 // give one record several spellings that String never renders back, so a client
 // comparing or caching what it received would see identifiers that differ from
-// the ones the library returns.
+// the ones the library returns. Hexadecimal case is the one exception, since
+// String renders it back canonically; a token parser, whose input the library
+// itself issued, is stricter still and takes the rendered form alone.
 func ParseUUID(value string) (UUID, error) {
 	reject := func() (UUID, error) {
 		return UUID{}, fmt.Errorf("%w: %q is not a UUID", ErrInvalidInput, value)

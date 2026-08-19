@@ -182,8 +182,8 @@ func FuzzValidUUIDv7(f *testing.F) {
 		if !validUUIDv7(id) {
 			return
 		}
-		// Parsing accepts either case and several spellings; String is what
-		// normalizes, so the invariants below hold on the rendered form.
+		// Parsing accepts either case; String is what normalizes, so the
+		// invariants below hold on the rendered form.
 		canonical := id.String()
 		if len(canonical) != 36 {
 			t.Fatalf("rendered identifier %q is not 36 characters", canonical)

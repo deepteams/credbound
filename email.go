@@ -346,13 +346,19 @@ func parseEmailVerification(raw string) (UUID, bool) {
 // token, so this is where it is parsed back: a token whose identifier is
 // malformed, or not one Credbound minted, is rejected here rather than reaching
 // a store lookup.
+//
+// The identifier has to be the exact text String renders, which is stricter
+// than ParseUUID alone: that one tolerates uppercase hexadecimal, a spelling
+// the issuing side never produces. Accepting it would make one token valid
+// under many spellings, and anything keyed by the token as sent — a replay
+// guard, a rate limiter, a log — would see them as different tokens.
 func parseSecretToken(prefix, raw string) (UUID, bool) {
 	parts := strings.SplitN(raw, "_", 3)
 	if len(parts) != 3 || parts[0] != prefix || len(parts[2]) != 43 {
 		return UUID{}, false
 	}
 	id, err := ParseUUID(parts[1])
-	if err != nil || !validUUIDv7(id) {
+	if err != nil || id.String() != parts[1] || !validUUIDv7(id) {
 		return UUID{}, false
 	}
 	secret, err := base64.RawURLEncoding.DecodeString(parts[2])
