@@ -59,3 +59,26 @@ jobs:
         uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
         with:
           go-package: ./...
+
+  # The seed corpora already run inside `go test`; this job spends a bounded
+  # budget looking for new inputs. It is advisory: a discovery writes the
+  # failing input under testdata/fuzz, where it becomes a permanent seed once
+  # committed.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Fuzz the untrusted-input parsers
+        run: |
+          set -euo pipefail
+          for package in . ./memory ./sqlstore/sqlite ./sqlstore/postgresql ./password ./scimhttp ./oauthhttp ./samladapter; do
+            for target in $(go test "$package" -list '^Fuzz' | grep '^Fuzz' || true); do
+              echo "::group::$package $target"
+              go test "$package" -run "^${target}$" -fuzz "^${target}$" -fuzztime=40s
+              echo "::endgroup::"
+            done
+          done

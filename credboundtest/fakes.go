@@ -117,6 +117,52 @@ func (Passkeys) FinishAuthentication(_ context.Context, _ credbound.PasskeyUser,
 	return []byte("credential"), []byte(`{"id":"credential","counter":1}`), nil
 }
 
+// DiscoverablePasskeys extends the Passkeys fake with usernameless sign-in
+// over discoverable credentials. Install it explicitly when a test exercises
+// BeginDiscoverablePasskeyAuthentication, since the plain Passkeys fake — like
+// a provider that does not implement the optional port — makes those flows
+// return credbound.ErrNotSupported:
+//
+//	manager := credboundtest.NewManager(t, credboundtest.WithConfig(func(cfg *credbound.Config) {
+//		cfg.Passkeys = credboundtest.DiscoverablePasskeys{}
+//	}))
+//
+// FinishDiscoverableAuthentication resolves the fixed credential through the
+// lookup, so the manager's account resolution and its user-handle check are
+// exercised rather than bypassed.
+type DiscoverablePasskeys struct{ Passkeys }
+
+var (
+	_ credbound.PasskeyProvider             = DiscoverablePasskeys{}
+	_ credbound.DiscoverablePasskeyProvider = DiscoverablePasskeys{}
+)
+
+// BeginDiscoverableAuthentication returns fixed request options and the
+// session that FinishDiscoverableAuthentication expects back.
+func (DiscoverablePasskeys) BeginDiscoverableAuthentication(context.Context) (json.RawMessage, []byte, error) {
+	return json.RawMessage(`{"publicKey":{}}`), []byte("discoverable-session"), nil
+}
+
+// FinishDiscoverableAuthentication validates the session issued by
+// BeginDiscoverableAuthentication, accepts exactly
+// []byte(ValidPasskeyResponse), and resolves the fixed credential through
+// lookup, surfacing the ErrNotFound of an unknown credential.
+func (DiscoverablePasskeys) FinishDiscoverableAuthentication(ctx context.Context, session, response []byte, lookup credbound.PasskeyUserLookup) (credentialID, credentialJSON []byte, err error) {
+	if string(session) != "discoverable-session" || string(response) != ValidPasskeyResponse {
+		return nil, nil, errors.New("credboundtest: invalid discoverable ceremony")
+	}
+	user, err := lookup(ctx, []byte("credential"))
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, credentialErr := range user.Credentials {
+		if credentialErr != nil {
+			return nil, nil, credentialErr
+		}
+	}
+	return []byte("credential"), []byte(`{"id":"credential","counter":2}`), nil
+}
+
 // NewDeterministicRandom returns an io.Reader emitting a fixed byte sequence,
 // so identifiers and tokens are reproducible across runs. It is the default
 // random source of NewManager and is, by design, not cryptographically

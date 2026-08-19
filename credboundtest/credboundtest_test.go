@@ -2,7 +2,9 @@ package credboundtest_test
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -156,5 +158,147 @@ func TestCredboundtestWithConfig(t *testing.T) {
 	})
 	if err != nil || result.Authentication.UserID == "" || result.ExistingAccount {
 		t.Fatalf("signup through WithConfig = %#v, %v", result, err)
+	}
+}
+
+// blockingPolicy refuses one known-breached password, mirroring a HIBP
+// integration.
+type blockingPolicy struct{ breached string }
+
+func (p blockingPolicy) ValidatePassword(_ context.Context, password string) error {
+	if password == p.breached {
+		return fmt.Errorf("%w: password found in a breach corpus", credbound.ErrInvalidInput)
+	}
+	return nil
+}
+
+// stubSSOProvider is the smallest provider the manager accepts; the ceremony
+// itself is covered by the adapter packages.
+type stubSSOProvider struct{ id string }
+
+func (p stubSSOProvider) ConfigurationID() string       { return p.id }
+func (stubSSOProvider) Kind() credbound.SSOProviderKind { return credbound.SSOProviderOIDC }
+func (stubSSOProvider) Begin(context.Context, credbound.SSORequest) (credbound.SSOProviderChallenge, error) {
+	return credbound.SSOProviderChallenge{RedirectURL: "https://idp.example.com/authorize", Session: []byte("session")}, nil
+}
+
+func (stubSSOProvider) Finish(context.Context, []byte, []byte) (credbound.SSOClaims, error) {
+	return credbound.SSOClaims{Issuer: "https://idp.example.com", Subject: "subject", Email: "user@example.com", EmailVerified: true}, nil
+}
+
+// TestCredboundtestRemainingOptions covers the options a host reaches for once
+// its tests go past the happy path: an unpredictable random source, a password
+// policy, registered SSO providers, and an absolute clock move. They shipped
+// without a single test, which is a poor promise for the package hosts are
+// told to build their own suites on.
+func TestCredboundtestRemainingOptions(t *testing.T) {
+	ctx := context.Background()
+
+	// WithRandom: crypto/rand makes two managers mint different identifiers,
+	// where the deterministic default repeats them.
+	first := credboundtest.NewManager(t, credboundtest.WithRandom(rand.Reader))
+	second := credboundtest.NewManager(t, credboundtest.WithRandom(rand.Reader))
+	firstRoot, _ := credboundtest.Bootstrap(t, first)
+	secondRoot, _ := credboundtest.Bootstrap(t, second)
+	if firstRoot.UserID == secondRoot.UserID {
+		t.Fatal("WithRandom(crypto/rand) produced the same identifier twice")
+	}
+	deterministicFirst := credboundtest.NewManager(t)
+	deterministicSecond := credboundtest.NewManager(t)
+	deterministicRoot, _ := credboundtest.Bootstrap(t, deterministicFirst)
+	repeatedRoot, _ := credboundtest.Bootstrap(t, deterministicSecond)
+	if deterministicRoot.UserID != repeatedRoot.UserID {
+		t.Fatalf("the default random source is not deterministic: %q then %q", deterministicRoot.UserID, repeatedRoot.UserID)
+	}
+
+	// WithPasswordPolicy: the vetting port rejects the password before any
+	// account is created.
+	policy := blockingPolicy{breached: "correct horse battery staple"}
+	vetted := credboundtest.NewManager(t, credboundtest.WithPasswordPolicy(policy))
+	if _, _, err := vetted.Bootstrap(ctx, credbound.BootstrapInput{
+		Email: "root@example.com", DisplayName: "Root", Password: policy.breached, WorkspaceName: "Main",
+	}); !errors.Is(err, credbound.ErrInvalidInput) {
+		t.Fatalf("breached password = %v", err)
+	}
+	if _, _, err := vetted.Bootstrap(ctx, credbound.BootstrapInput{
+		Email: "root@example.com", DisplayName: "Root", Password: "another correct horse battery", WorkspaceName: "Main",
+	}); err != nil {
+		t.Fatalf("vetted password: %v", err)
+	}
+
+	// WithSSOProviders: a registered provider is reachable by its
+	// configuration identifier, an unknown one is not.
+	provider := stubSSOProvider{id: "0198b463-0000-7000-8000-0000000000aa"}
+	sso := credboundtest.NewManager(t, credboundtest.WithSSOProviders(provider))
+	credboundtest.Bootstrap(t, sso)
+	if _, err := sso.BeginSSO(ctx, provider.id); err != nil {
+		t.Fatalf("begin sso: %v", err)
+	}
+	if _, err := sso.BeginSSO(ctx, "0198b463-0000-7000-8000-0000000000bb"); err == nil {
+		t.Fatal("an unregistered provider started a ceremony")
+	}
+
+	// Clock.Set moves to an absolute instant, expiring a step-up that
+	// Advance would have to walk to.
+	clock := credboundtest.NewClock(credboundtest.DefaultStartTime)
+	timed := credboundtest.NewManager(t, credboundtest.WithClock(clock))
+	root, workspace := credboundtest.Bootstrap(t, timed)
+	stale := credboundtest.AAL2(root.UserID, clock.Now())
+	clock.Set(credboundtest.DefaultStartTime.Add(48 * time.Hour))
+	if !clock.Now().Equal(credboundtest.DefaultStartTime.Add(48 * time.Hour)) {
+		t.Fatalf("Set moved the clock to %v", clock.Now())
+	}
+	if _, err := timed.CreatePAT(ctx, stale, credbound.CreatePATInput{
+		Name: "ci", WorkspaceID: workspace.ID, Scopes: []string{"read"},
+	}); !errors.Is(err, credbound.ErrStepUpRequired) {
+		t.Fatalf("stale step-up after Set = %v", err)
+	}
+}
+
+// TestCredboundtestDiscoverablePasskeys covers the usernameless fake: the
+// plain Passkeys double leaves the flow unsupported, and the discoverable one
+// completes a ceremony through the manager's credential lookup.
+func TestCredboundtestDiscoverablePasskeys(t *testing.T) {
+	ctx := context.Background()
+	plain := credboundtest.NewManager(t)
+	credboundtest.Bootstrap(t, plain)
+	if _, err := plain.BeginDiscoverablePasskeyAuthentication(ctx); !errors.Is(err, credbound.ErrNotSupported) {
+		t.Fatalf("plain fake discoverable = %v", err)
+	}
+
+	clock := credboundtest.NewClock(credboundtest.DefaultStartTime)
+	manager := credboundtest.NewManager(t, credboundtest.WithClock(clock), credboundtest.WithConfig(func(cfg *credbound.Config) {
+		cfg.Passkeys = credboundtest.DiscoverablePasskeys{}
+	}))
+	root, _ := credboundtest.Bootstrap(t, manager)
+	actor := credboundtest.AAL2(root.UserID, clock.Now())
+
+	// A discoverable ceremony that resolves no credential fails: the fake
+	// surfaces the manager's lookup rather than answering on its own.
+	orphan, err := manager.BeginDiscoverablePasskeyAuthentication(ctx)
+	if err != nil {
+		t.Fatalf("begin discoverable without a passkey: %v", err)
+	}
+	if _, err := manager.FinishDiscoverablePasskeyAuthentication(ctx, orphan.Continuation, []byte(credboundtest.ValidPasskeyResponse)); err == nil {
+		t.Fatal("a discoverable ceremony resolved an account with no passkey")
+	}
+
+	challenge, err := manager.BeginPasskeyRegistration(ctx, actor, "laptop")
+	if err != nil {
+		t.Fatalf("begin registration: %v", err)
+	}
+	if _, err := manager.FinishPasskeyRegistration(ctx, actor, challenge.Continuation, []byte(credboundtest.ValidPasskeyResponse)); err != nil {
+		t.Fatalf("finish registration: %v", err)
+	}
+	discoverable, err := manager.BeginDiscoverablePasskeyAuthentication(ctx)
+	if err != nil {
+		t.Fatalf("begin discoverable: %v", err)
+	}
+	authn, err := manager.FinishDiscoverablePasskeyAuthentication(ctx, discoverable.Continuation, []byte(credboundtest.ValidPasskeyResponse))
+	if err != nil || authn.UserID != root.UserID || authn.Level != credbound.AAL2 {
+		t.Fatalf("finish discoverable = %#v, %v", authn, err)
+	}
+	if _, err := manager.FinishDiscoverablePasskeyAuthentication(ctx, discoverable.Continuation, []byte("wrong")); err == nil {
+		t.Fatal("a wrong client response completed the ceremony")
 	}
 }

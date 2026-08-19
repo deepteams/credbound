@@ -9,6 +9,13 @@ breaking changes may land in any release and are called out explicitly.
 
 ### Added
 
+- `credboundtest.DiscoverablePasskeys` extends the passkey fake with
+  usernameless sign-in over discoverable credentials, so a host can test
+  `BeginDiscoverablePasskeyAuthentication` and
+  `FinishDiscoverablePasskeyAuthentication` without a real authenticator.
+  The plain `Passkeys` fake keeps returning `ErrNotSupported` for those
+  flows, mirroring a provider that does not implement the optional port.
+
 - `Config.SessionTouchInterval` coarsens the write every successful
   `AuthenticateSession` used to perform (last-seen touch plus audit event)
   to at most one write per session per interval, without giving up instant
@@ -39,6 +46,21 @@ breaking changes may land in any release and are called out explicitly.
   accepted-invitation addresses in the same transaction.
 
 ### Fixed
+
+- `max_age` values large enough to overflow a `time.Duration` — anything
+  past roughly 292 years — wrapped to a negative duration that
+  `BeginOAuthAuthorization` reads as "no freshness constraint at all",
+  silently dropping the re-authentication an OIDC client asked for. The
+  authorization endpoint now answers `invalid_request` instead.
+
+- `memory.Store.AnonymizeUser` left the original address on the user
+  record: it tombstoned the address rows but not the `User.Email`
+  projection the SQL stores rebuild from their primary-address join, so a
+  read after anonymization still returned the personal data on that store.
+
+- `parseOAuthBearer` returned the token prefix alongside a false
+  acceptance, unlike every sibling parser; a caller reading the identifier
+  before the boolean was handed attacker-controlled input.
 
 - SCIM list responses are now assembled in memory (the page is bounded at
   100 resources) before the status line is written, so a store read or

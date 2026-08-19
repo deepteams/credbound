@@ -1056,8 +1056,14 @@ func parseOAuthBearer(marker, raw string) (string, bool) {
 	if _, err := hex.DecodeString(parts[1]); err != nil {
 		return "", false
 	}
-	secret, err := base64.RawURLEncoding.DecodeString(parts[2])
-	return parts[1], err == nil && len(secret) == 32
+	// A rejected token yields no prefix at all: every sibling parser
+	// (parsePAT, parseSCIMToken, parseSecretToken) returns the zero value on
+	// failure, and a caller that read the identifier before checking the
+	// boolean would otherwise receive attacker-controlled input.
+	if secret, err := base64.RawURLEncoding.DecodeString(parts[2]); err != nil || len(secret) != 32 {
+		return "", false
+	}
+	return parts[1], true
 }
 
 func validateIssuerURL(raw string) (string, error) {

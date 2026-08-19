@@ -1442,7 +1442,6 @@ func (s *Store) AnonymizeUser(ctx context.Context, userID string, at time.Time, 
 	user.DisplayName = ""
 	user.Disabled = true
 	user.UpdatedAt = at
-	s.users[userID] = cloneUser(user)
 	for id, email := range s.emailAddresses {
 		if email.UserID != userID {
 			continue
@@ -1455,7 +1454,14 @@ func (s *Store) AnonymizeUser(ctx context.Context, userID string, at time.Time, 
 		s.emailAddresses[id] = cloneEmail(email)
 		s.emails[tombstone] = userID
 		s.emailIDs[tombstone] = id
+		// The user record projects its primary address, which the SQL
+		// stores obtain from a join; the in-memory copy has to follow the
+		// tombstone or the scrubbed address would survive in every read.
+		if email.Primary {
+			user.Email = tombstone
+		}
 	}
+	s.users[userID] = cloneUser(user)
 	for id, identity := range s.ssoIdentities {
 		if identity.UserID == userID {
 			identity.Email = ""

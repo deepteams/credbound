@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -466,8 +467,8 @@ func bearerToken(r *http.Request) string {
 // parseMaxAge reads the OIDC max_age request parameter, a non-negative number
 // of seconds. Absent is (0, true) — no constraint. max_age=0 maps to the
 // smallest positive duration so any prior authentication is stale, forcing
-// re-authentication as the spec requires. A malformed or negative value is
-// (0, false).
+// re-authentication as the spec requires. A malformed, negative, or
+// unrepresentable value is (0, false).
 func parseMaxAge(raw string) (time.Duration, bool) {
 	if raw == "" {
 		return 0, true
@@ -478,6 +479,13 @@ func parseMaxAge(raw string) (time.Duration, bool) {
 	}
 	if seconds == 0 {
 		return time.Nanosecond, true
+	}
+	// Beyond roughly 292 years the nanosecond duration overflows into a
+	// negative value, which the authorization path reads as "no freshness
+	// constraint" — the exact opposite of what the client asked for. Such a
+	// value is refused rather than silently dropped.
+	if int64(seconds) > int64(math.MaxInt64/int64(time.Second)) {
+		return 0, false
 	}
 	return time.Duration(seconds) * time.Second, true
 }

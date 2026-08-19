@@ -322,7 +322,10 @@ reporting in [`SECURITY.md`](SECURITY.md).
 The [`credboundtest`](credboundtest) package builds a fully wired `Manager` for
 host-service tests: in-memory store, fast fake password hasher, deterministic
 clock and randomness, and TOTP/passkey fakes whose ceremonies succeed with
-fixed inputs. Nothing in it is safe for production.
+fixed inputs. `DiscoverablePasskeys` replaces the passkey fake when the test
+covers usernameless sign-in, and `WithStore` points the manager at a
+migration-applied SQLite or PostgreSQL store when persistence itself is under
+test. Nothing in it is safe for production.
 
 ```go
 func TestSignIn(t *testing.T) {

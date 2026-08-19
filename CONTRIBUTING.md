@@ -43,6 +43,16 @@ Requirements and conventions:
   paths must not enable account enumeration.
 - The PostgreSQL integration test runs when `CREDBOUND_POSTGRES_DSN` is set;
   CI provides a PostgreSQL service.
+- Store behavior is contract-tested once for every engine:
+  `internal/storetest` holds the Manager-level flows, and `memory`,
+  `sqlstore/sqlite` and `sqlstore/postgresql` each run all of them. A change
+  to a store — or a new store — belongs in that suite rather than in a
+  per-engine test, so the engines cannot drift apart.
+- Parsers that read untrusted input ship with a fuzz target, and a failing
+  input found by fuzzing is committed under `testdata/fuzz` as a permanent
+  seed. A change to the exported surface is acknowledged by regenerating
+  `testdata/api.txt` (`go test -run TestPublicAPISurface -update-api`) and
+  noting the change in `CHANGELOG.md`.
 
 ## Pull requests
 

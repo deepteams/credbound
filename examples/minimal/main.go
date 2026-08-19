@@ -91,6 +91,18 @@ func main() {
 	// run hits ErrConflict, which simply means the instance already exists.
 	bootstrap(manager)
 
+	handler := newHandler(manager)
+
+	log.Println("listening on http://127.0.0.1:8080")
+	log.Fatal(http.ListenAndServe("127.0.0.1:8080", handler))
+}
+
+// newHandler builds the HTTP layer over a Manager: password sign-in behind a
+// cookie-bound server-side session, the authenticated identity, and sign-out.
+// It is separate from main so a test can drive the same routes over
+// httptest — the example is what most integrations start from, so its
+// behavior is worth pinning rather than only reading.
+func newHandler(manager *credbound.Manager) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /signin", func(w http.ResponseWriter, r *http.Request) {
 		authn, err := manager.AuthenticatePassword(r.Context(), r.FormValue("email"), r.FormValue("password"))
@@ -169,10 +181,7 @@ func main() {
 	// real client from X-Forwarded-For instead of recording the proxy:
 	//
 	//	credbound.HTTPRequestMetadata(mux, netip.MustParsePrefix("10.0.0.0/8"))
-	handler := credbound.HTTPRequestMetadata(mux)
-
-	log.Println("listening on http://127.0.0.1:8080")
-	log.Fatal(http.ListenAndServe("127.0.0.1:8080", handler))
+	return credbound.HTTPRequestMetadata(mux)
 }
 
 // secretFromEnv reads a hex-encoded secret of exactly size bytes. When the
