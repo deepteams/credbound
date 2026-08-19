@@ -195,9 +195,9 @@ ON CONFLICT (user_id) DO UPDATE SET hash = excluded.hash, updated_at = excluded.
 UPDATE credbound.password_credentials SET hash = $2, updated_at = $3 WHERE user_id = $1 AND hash = @previous_hash;
 
 -- name: CountUserAuthenticationMethods :one
-SELECT (SELECT COUNT(*) FROM credbound.password_credentials p WHERE p.user_id = $1)
+SELECT CAST((SELECT COUNT(*) FROM credbound.password_credentials p WHERE p.user_id = $1)
      + (SELECT COUNT(*) FROM credbound.passkeys k WHERE k.user_id = $1)
-     + (SELECT COUNT(*) FROM credbound.sso_identities i WHERE i.user_id = $1) AS methods;
+     + (SELECT COUNT(*) FROM credbound.sso_identities i WHERE i.user_id = $1) AS bigint) AS methods;
 
 -- name: InsertWorkspace :exec
 INSERT INTO credbound.workspaces (id, name, created_at, updated_at, disabled_at, require_mfa) VALUES ($1, $2, $3, $4, $5, $6);

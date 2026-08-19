@@ -34,6 +34,20 @@ Requirements and conventions:
   `events_generated.go` from `genevents`, and the PostgreSQL store is derived
   from the SQLite store by `genpostgresstore`. Change the source (SQL files,
   `events.go`, the SQLite store, or the generators) and run `make generate`.
+- The two SQL stores share one implementation. `sqlstore/sqlite` is the source
+  and every file in it is dialect-neutral except `dialect.go` and `doc.go`;
+  `genpostgresstore` only re-points a copy of the rest at the `postgresql`
+  package. Three things keep that possible, and a change that breaks any of
+  them belongs in `dialect.go` rather than in the generator:
+  - the two sqlc layers expose identical Go types (the `overrides` in
+    `sqlc.yaml` map SQLite's 0/1 integers and TEXT JSON onto PostgreSQL's
+    `boolean` and `jsonb`, and widen PostgreSQL's narrow integers);
+  - hand-written statements are phrased portably — `?` placeholders, a boolean
+    cursor guard rather than `? = ''`, and `nullableUUID` instead of an empty
+    string — and PostgreSQL rewrites them in its `translate`;
+  - every read-then-write invariant is guarded by a `Lock*` query that is a
+    plain read on SQLite (whose write mutex serializes mutations) and
+    `SELECT … FOR UPDATE` on PostgreSQL.
 - PostgreSQL objects live in the dedicated `credbound` schema; migrations use
   timestamp versions and are forward-only once released — a correction is a
   new migration, never an edit.

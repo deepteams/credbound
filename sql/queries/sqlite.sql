@@ -190,6 +190,10 @@ INSERT INTO credbound_workspaces (id, name, created_at, updated_at, disabled_at,
 -- name: GetWorkspace :one
 SELECT id, name, created_at, updated_at, disabled_at, require_mfa FROM credbound_workspaces WHERE id = ?1;
 
+-- name: LockWorkspace :one
+-- Plain read on SQLite; FOR UPDATE on PostgreSQL.
+SELECT id FROM credbound_workspaces WHERE id = ?1;
+
 -- name: UpdateWorkspace :execrows
 UPDATE credbound_workspaces SET name = ?2, updated_at = ?3, require_mfa = ?4 WHERE id = ?1;
 
@@ -238,6 +242,21 @@ DELETE FROM credbound_memberships WHERE workspace_id = ?1 AND user_id = ?2;
 INSERT INTO credbound_instance_administrators (user_id, role, created_at, updated_at)
 VALUES (?1, ?2, ?3, ?4)
 ON CONFLICT (user_id) DO UPDATE SET role = excluded.role, updated_at = excluded.updated_at;
+
+-- name: LockRootAdministrators :many
+-- SQLite serializes mutations on a single writer, so this is a plain read;
+-- the PostgreSQL counterpart takes FOR UPDATE on the same rows.
+SELECT user_id FROM credbound_instance_administrators
+WHERE role = 'root'
+ORDER BY user_id;
+
+-- name: LockUserAdminWorkspaces :many
+-- Plain read on SQLite; FOR UPDATE OF w on PostgreSQL.
+SELECT w.id
+FROM credbound_workspaces w
+JOIN credbound_memberships m ON m.workspace_id = w.id
+WHERE m.user_id = ?1 AND m.role = 'admin' AND m.status = 'active'
+ORDER BY w.id;
 
 -- name: GetInstanceAdministrator :one
 SELECT user_id, role, created_at, updated_at FROM credbound_instance_administrators WHERE user_id = ?1;
@@ -443,6 +462,10 @@ UPDATE credbound_oauth_issuers SET data_json = ?3 WHERE id = ?1 AND issuer = ?2;
 
 -- name: OAuthUpdateIssuerJSON :execrows
 UPDATE credbound_oauth_issuers SET data_json = ?2 WHERE id = ?1;
+
+-- name: OAuthLockIssuer :one
+-- Plain read on SQLite; FOR UPDATE on PostgreSQL.
+SELECT id FROM credbound_oauth_issuers WHERE id = ?1;
 
 -- name: OAuthIssuerJSONByID :one
 SELECT data_json FROM credbound_oauth_issuers WHERE id = ?1;

@@ -36,7 +36,7 @@ func (s *Store) CreateSession(ctx context.Context, session credbound.Session, cr
 		}
 		return mapError(q.InsertSession(ctx, db.InsertSessionParams{
 			ID: session.ID, UserID: session.UserID, Method: string(session.Method), Level: int64(session.Level),
-			AuthenticatedAt: session.AuthenticatedAt, SecondFactorRequired: boolValue(session.SecondFactorRequired),
+			AuthenticatedAt: session.AuthenticatedAt, SecondFactorRequired: session.SecondFactorRequired,
 			UserAgent: session.UserAgent, IpAddress: session.IPAddress, Digest: session.Digest,
 			CreatedAt: session.CreatedAt, LastSeenAt: session.LastSeenAt, ExpiresAt: session.ExpiresAt,
 		}))
@@ -111,10 +111,10 @@ func (s *Store) Sessions(ctx context.Context, userID string, page credbound.Page
 			return
 		}
 		// The digest is deliberately not selected: listings never expose it.
-		rows, err := s.db.QueryContext(streamCtx, `SELECT id, user_id, method, level, authenticated_at, second_factor_required, user_agent, ip_address, created_at, last_seen_at, expires_at, revoked_at
+		rows, err := s.query(streamCtx, `SELECT id, user_id, method, level, authenticated_at, second_factor_required, user_agent, ip_address, created_at, last_seen_at, expires_at, revoked_at
 FROM credbound_sessions
-WHERE user_id = ? AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, userID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)
+WHERE user_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
+ORDER BY created_at DESC, id DESC LIMIT ?`, userID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.Session]{}, mapError(err))
 			return
@@ -149,7 +149,7 @@ ORDER BY created_at DESC, id DESC LIMIT ?`, userID, cursor.ID, cursor.Time, curs
 func sessionFromRow(row db.CredboundSession) credbound.Session {
 	return credbound.Session{
 		ID: row.ID, UserID: row.UserID, Method: credbound.AuthMethod(row.Method), Level: credbound.AssuranceLevel(row.Level),
-		AuthenticatedAt: row.AuthenticatedAt, SecondFactorRequired: row.SecondFactorRequired == 1,
+		AuthenticatedAt: row.AuthenticatedAt, SecondFactorRequired: row.SecondFactorRequired,
 		UserAgent: row.UserAgent, IPAddress: row.IpAddress, Digest: row.Digest,
 		CreatedAt: row.CreatedAt, LastSeenAt: row.LastSeenAt, ExpiresAt: row.ExpiresAt, RevokedAt: timePointer(row.RevokedAt),
 	}
@@ -159,13 +159,13 @@ func scanSession(row scanner) (credbound.Session, error) {
 	var value credbound.Session
 	var method string
 	var level int64
-	var secondFactor int64
+	var secondFactor bool
 	var revoked sql.NullTime
 	if err := row.Scan(&value.ID, &value.UserID, &method, &level, &value.AuthenticatedAt, &secondFactor, &value.UserAgent, &value.IPAddress, &value.CreatedAt, &value.LastSeenAt, &value.ExpiresAt, &revoked); err != nil {
 		return credbound.Session{}, err
 	}
 	value.Method, value.Level = credbound.AuthMethod(method), credbound.AssuranceLevel(level)
-	value.SecondFactorRequired = secondFactor == 1
+	value.SecondFactorRequired = secondFactor
 	value.RevokedAt = timePointer(revoked)
 	return value, nil
 }

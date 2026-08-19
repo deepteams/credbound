@@ -55,7 +55,7 @@ type CredboundEmailIssuance struct {
 }
 
 type CredboundInstance struct {
-	Singleton     int64     `json:"singleton"`
+	Singleton     bool      `json:"singleton"`
 	InitializedAt time.Time `json:"initialized_at"`
 }
 
@@ -87,7 +87,7 @@ type CredboundOauthAccessToken struct {
 	ID       string `json:"id"`
 	Prefix   string `json:"prefix"`
 	GrantID  string `json:"grant_id"`
-	DataJson string `json:"data_json"`
+	DataJson []byte `json:"data_json"`
 }
 
 type CredboundOauthAuthorizationCode struct {
@@ -96,7 +96,7 @@ type CredboundOauthAuthorizationCode struct {
 	GrantID   string       `json:"grant_id"`
 	UsedAt    sql.NullTime `json:"used_at"`
 	ExpiresAt time.Time    `json:"expires_at"`
-	DataJson  string       `json:"data_json"`
+	DataJson  []byte       `json:"data_json"`
 }
 
 type CredboundOauthClient struct {
@@ -104,14 +104,14 @@ type CredboundOauthClient struct {
 	IssuerID  string    `json:"issuer_id"`
 	ClientID  string    `json:"client_id"`
 	CreatedAt time.Time `json:"created_at"`
-	DataJson  string    `json:"data_json"`
+	DataJson  []byte    `json:"data_json"`
 }
 
 type CredboundOauthClientAccessToken struct {
 	ID             string `json:"id"`
 	Prefix         string `json:"prefix"`
 	ClientRecordID string `json:"client_record_id"`
-	DataJson       string `json:"data_json"`
+	DataJson       []byte `json:"data_json"`
 }
 
 type CredboundOauthGrant struct {
@@ -121,7 +121,7 @@ type CredboundOauthGrant struct {
 	UserID         string    `json:"user_id"`
 	WorkspaceID    string    `json:"workspace_id"`
 	CreatedAt      time.Time `json:"created_at"`
-	DataJson       string    `json:"data_json"`
+	DataJson       []byte    `json:"data_json"`
 }
 
 type CredboundOauthInitialAccessToken struct {
@@ -132,14 +132,14 @@ type CredboundOauthInitialAccessToken struct {
 	MaxRegistrations  int64        `json:"max_registrations"`
 	ExpiresAt         time.Time    `json:"expires_at"`
 	RevokedAt         sql.NullTime `json:"revoked_at"`
-	DataJson          string       `json:"data_json"`
+	DataJson          []byte       `json:"data_json"`
 }
 
 type CredboundOauthIssuer struct {
 	ID        string    `json:"id"`
 	Issuer    string    `json:"issuer"`
 	CreatedAt time.Time `json:"created_at"`
-	DataJson  string    `json:"data_json"`
+	DataJson  []byte    `json:"data_json"`
 }
 
 type CredboundOauthRefreshToken struct {
@@ -150,7 +150,7 @@ type CredboundOauthRefreshToken struct {
 	UsedAt    sql.NullTime `json:"used_at"`
 	RevokedAt sql.NullTime `json:"revoked_at"`
 	ExpiresAt time.Time    `json:"expires_at"`
-	DataJson  string       `json:"data_json"`
+	DataJson  []byte       `json:"data_json"`
 }
 
 type CredboundOauthResource struct {
@@ -159,7 +159,7 @@ type CredboundOauthResource struct {
 	WorkspaceID string    `json:"workspace_id"`
 	Resource    string    `json:"resource"`
 	CreatedAt   time.Time `json:"created_at"`
-	DataJson    string    `json:"data_json"`
+	DataJson    []byte    `json:"data_json"`
 }
 
 type CredboundPasskey struct {
@@ -194,7 +194,7 @@ type CredboundPersonalAccessToken struct {
 	Prefix      string         `json:"prefix"`
 	Digest      []byte         `json:"digest"`
 	WorkspaceID sql.NullString `json:"workspace_id"`
-	ScopesJson  string         `json:"scopes_json"`
+	ScopesJson  []byte         `json:"scopes_json"`
 	CreatedAt   time.Time      `json:"created_at"`
 	ExpiresAt   sql.NullTime   `json:"expires_at"`
 	LastUsedAt  sql.NullTime   `json:"last_used_at"`
@@ -210,10 +210,10 @@ type CredboundRecoveryCode struct {
 type CredboundScimConfiguration struct {
 	ID                    string    `json:"id"`
 	WorkspaceID           string    `json:"workspace_id"`
-	Enabled               int64     `json:"enabled"`
+	Enabled               bool      `json:"enabled"`
 	DefaultRole           string    `json:"default_role"`
-	TrustDirectoryEmails  int64     `json:"trust_directory_emails"`
-	GroupRoleMappingsJson string    `json:"group_role_mappings_json"`
+	TrustDirectoryEmails  bool      `json:"trust_directory_emails"`
+	GroupRoleMappingsJson []byte    `json:"group_role_mappings_json"`
 	CreatedAt             time.Time `json:"created_at"`
 	UpdatedAt             time.Time `json:"updated_at"`
 }
@@ -234,7 +234,7 @@ type CredboundScimGroup struct {
 	ConfigurationID string         `json:"configuration_id"`
 	ExternalID      sql.NullString `json:"external_id"`
 	DisplayName     string         `json:"display_name"`
-	MemberIdsJson   string         `json:"member_ids_json"`
+	MemberIdsJson   []byte         `json:"member_ids_json"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
 	DeletedAt       sql.NullTime   `json:"deleted_at"`
@@ -247,9 +247,9 @@ type CredboundScimUser struct {
 	ExternalID         sql.NullString `json:"external_id"`
 	NormalizedUserName string         `json:"normalized_user_name"`
 	DisplayName        string         `json:"display_name"`
-	EmailsJson         string         `json:"emails_json"`
-	ProfileJson        string         `json:"profile_json"`
-	Active             int64          `json:"active"`
+	EmailsJson         []byte         `json:"emails_json"`
+	ProfileJson        []byte         `json:"profile_json"`
+	Active             bool           `json:"active"`
 	CreatedAt          time.Time      `json:"created_at"`
 	UpdatedAt          time.Time      `json:"updated_at"`
 	DeprovisionedAt    sql.NullTime   `json:"deprovisioned_at"`
@@ -261,7 +261,7 @@ type CredboundSession struct {
 	Method               string       `json:"method"`
 	Level                int64        `json:"level"`
 	AuthenticatedAt      time.Time    `json:"authenticated_at"`
-	SecondFactorRequired int64        `json:"second_factor_required"`
+	SecondFactorRequired bool         `json:"second_factor_required"`
 	UserAgent            string       `json:"user_agent"`
 	IpAddress            string       `json:"ip_address"`
 	Digest               []byte       `json:"digest"`
@@ -286,7 +286,7 @@ type CredboundSsoIdentity struct {
 type CredboundTotpFactor struct {
 	UserID          string    `json:"user_id"`
 	EncryptedSecret []byte    `json:"encrypted_secret"`
-	Active          int64     `json:"active"`
+	Active          bool      `json:"active"`
 	LastUsedStep    int64     `json:"last_used_step"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
@@ -295,7 +295,7 @@ type CredboundTotpFactor struct {
 type CredboundUser struct {
 	ID          string       `json:"id"`
 	DisplayName string       `json:"display_name"`
-	Disabled    int64        `json:"disabled"`
+	Disabled    bool         `json:"disabled"`
 	LastSeenAt  sql.NullTime `json:"last_seen_at"`
 	CreatedAt   time.Time    `json:"created_at"`
 	UpdatedAt   time.Time    `json:"updated_at"`
@@ -305,7 +305,7 @@ type CredboundUserEmail struct {
 	ID                    string       `json:"id"`
 	UserID                string       `json:"user_id"`
 	Address               string       `json:"address"`
-	IsPrimary             int64        `json:"is_primary"`
+	IsPrimary             bool         `json:"is_primary"`
 	VerifiedAt            sql.NullTime `json:"verified_at"`
 	VerificationDigest    []byte       `json:"verification_digest"`
 	VerificationExpiresAt sql.NullTime `json:"verification_expires_at"`
@@ -319,7 +319,7 @@ type CredboundWorkspace struct {
 	CreatedAt  time.Time    `json:"created_at"`
 	UpdatedAt  time.Time    `json:"updated_at"`
 	DisabledAt sql.NullTime `json:"disabled_at"`
-	RequireMfa int64        `json:"require_mfa"`
+	RequireMfa bool         `json:"require_mfa"`
 }
 
 type CredboundWorkspaceDomain struct {
@@ -328,10 +328,10 @@ type CredboundWorkspaceDomain struct {
 	Domain                     string       `json:"domain"`
 	Challenge                  string       `json:"challenge"`
 	ConfirmedAt                sql.NullTime `json:"confirmed_at"`
-	AutoJoin                   int64        `json:"auto_join"`
+	AutoJoin                   bool         `json:"auto_join"`
 	AutoJoinRole               string       `json:"auto_join_role"`
 	SsoProviderConfigurationID string       `json:"sso_provider_configuration_id"`
-	EnforceSso                 int64        `json:"enforce_sso"`
+	EnforceSso                 bool         `json:"enforce_sso"`
 	CreatedAt                  time.Time    `json:"created_at"`
 	UpdatedAt                  time.Time    `json:"updated_at"`
 }

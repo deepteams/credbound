@@ -1,20 +1,3 @@
-// Package sqlite implements every Credbound persistence port — Store plus
-// the optional SessionStore, SignupStore, DomainStore, SCIMStore,
-// EmailThrottleStore and OAuthStore capabilities — on SQLite through
-// database/sql and
-// sqlc-generated queries, committing each mutation's hash-chained audit
-// event atomically with the change.
-//
-// Open the database with the modernc.org/sqlite driver using a DSN that
-// carries "_pragma=foreign_keys(1)" and "_texttotime=1" (New probes both
-// and rejects a misconfigured DSN), apply the schema from the module's
-// migrations directory, and wire the store into credbound.Config.Store:
-//
-//	db, err := sql.Open("sqlite", "file:auth.db?_pragma=foreign_keys(1)&_texttotime=1")
-//	store, err := sqlite.New(db)
-//
-// TransactionHook callbacks can regain the raw *sql.Tx through TxFrom to
-// append host writes to a Credbound commit.
 package sqlite
 
 import (
@@ -25,146 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/deepteams/credbound"
 	db "github.com/deepteams/credbound/internal/sqlc/sqlite"
-	sqlitedriver "modernc.org/sqlite"
 )
-
-// sqliteConstraint is the primary result code shared by every constraint
-// violation (UNIQUE, PRIMARY KEY, CHECK, FOREIGN KEY, NOT NULL); the extended
-// code carries it in its low byte.
-const sqliteConstraint = 19
-
-// Store is the SQLite-backed implementation of the Credbound persistence
-// ports. It is safe for concurrent use: mutations run inside transactions
-// that commit the audit event atomically with the change, and list
-// operations stream rows under a per-query timeout (WithStreamTimeout).
-// Method semantics, sentinel errors and pagination behavior are specified
-// on the credbound port interfaces.
-type Store struct {
-	db            *sql.DB
-	queries       *db.Queries
-	streamTimeout time.Duration
-	// writeMu serializes mutations. SQLite is a single-writer database with no
-	// row-level locking, so the read-then-write invariant checks inside a
-	// mutation (last root administrator, sole workspace admin, the singleton
-	// audit chain head) are only safe if mutations do not interleave. Holding
-	// this for the duration of each write transaction guarantees that within a
-	// process; reads never take it, so streaming list operations stay
-	// concurrent. Across processes sharing one database file, open the
-	// connection with "_txlock=immediate" so the file-level write lock provides
-	// the same guarantee.
-	//
-	// It is held across the TransactionHook callback, so a hook must append to
-	// the commit's transaction through TxFrom and must not call back into a
-	// Store mutation — doing so self-deadlocks on this non-reentrant mutex (it
-	// would also be a nested-transaction error on the same connection).
-	writeMu sync.Mutex
-}
-
-// Tx is the SQLite transaction capability exposed only during a Credbound
-// TransactionHook. SQL returns nil after the callback has completed.
-type Tx struct {
-	sqlTx atomic.Pointer[sql.Tx]
-	audit credbound.AuditEvent
-}
-
-func newTx(sqlTx *sql.Tx, audit credbound.AuditEvent) *Tx {
-	handle := &Tx{audit: audit}
-	handle.sqlTx.Store(sqlTx)
-	return handle
-}
-
-// Kind reports credbound.StoreSQLite.
-func (t *Tx) Kind() credbound.StoreKind { return credbound.StoreSQLite }
-
-// Audit returns the audit event being committed with this transaction.
-func (t *Tx) Audit() credbound.AuditEvent { return t.audit }
-
-// SQL returns the live transaction so a hook can append host writes to the
-// commit, or nil once the hook callback has completed.
-func (t *Tx) SQL() *sql.Tx {
-	if t == nil {
-		return nil
-	}
-	return t.sqlTx.Load()
-}
-
-func (t *Tx) close() {
-	if t != nil {
-		t.sqlTx.Store(nil)
-	}
-}
-
-// TxFrom converts a generic Credbound transaction into the live SQLite
-// capability. It returns false for another store or an expired callback.
-func TxFrom(tx credbound.Tx) (*Tx, bool) {
-	handle, ok := tx.(*Tx)
-	if !ok || handle.SQL() == nil {
-		return nil, false
-	}
-	return handle, true
-}
-
-// Option customizes a Store during New.
-type Option func(*Store)
-
-// WithStreamTimeout overrides the 30 second per-query timeout that bounds
-// streaming list operations. New rejects non-positive values.
-func WithStreamTimeout(timeout time.Duration) Option {
-	return func(store *Store) { store.streamTimeout = timeout }
-}
-
-// New wraps an already-opened SQLite database. The store issues no PRAGMAs
-// itself: the connection must be opened with the modernc.org/sqlite driver
-// and a DSN carrying "_pragma=foreign_keys(1)" (referential integrity,
-// which the revocation cascades depend on) and "_texttotime=1" (TEXT
-// timestamp scanning):
-//
-//	sql.Open("sqlite", "file:auth.db?_pragma=foreign_keys(1)&_texttotime=1")
-//
-// New probes the connection and reports ErrInvalidInput when either
-// parameter is missing, so a misconfigured DSN fails construction instead
-// of corrupting behavior quietly at runtime.
-func New(database *sql.DB, options ...Option) (*Store, error) {
-	if database == nil {
-		return nil, fmt.Errorf("%w: sqlite database is required", credbound.ErrInvalidInput)
-	}
-	store := &Store{db: database, queries: db.New(database), streamTimeout: 30 * time.Second}
-	for _, option := range options {
-		option(store)
-	}
-	if store.streamTimeout <= 0 {
-		return nil, fmt.Errorf("%w: stream timeout must be positive", credbound.ErrInvalidInput)
-	}
-	if err := verifyConnection(database); err != nil {
-		return nil, err
-	}
-	return store, nil
-}
-
-// verifyConnection probes the DSN parameters the store depends on.
-// foreign_keys is per-connection in SQLite, so only a DSN pragma — applied
-// by the driver to every pooled connection — makes the check meaningful
-// beyond the probed connection.
-func verifyConnection(database *sql.DB) error {
-	var enforced int
-	if err := database.QueryRow("PRAGMA foreign_keys").Scan(&enforced); err != nil {
-		return fmt.Errorf("probe sqlite foreign_keys: %w", err)
-	}
-	if enforced != 1 {
-		return fmt.Errorf("%w: the sqlite DSN must carry _pragma=foreign_keys(1)", credbound.ErrInvalidInput)
-	}
-	var probe time.Time
-	if err := database.QueryRow("SELECT CAST('2000-01-02 03:04:05' AS TEXT)").Scan(&probe); err != nil {
-		return fmt.Errorf("%w: the sqlite DSN must carry _texttotime=1", credbound.ErrInvalidInput)
-	}
-	return nil
-}
 
 // Bootstrap atomically creates the first user with its primary email,
 // password, workspace, admin membership and root administrator; once the
@@ -183,7 +31,7 @@ func (s *Store) Bootstrap(ctx context.Context, user credbound.User, email credbo
 		if err := q.InsertPassword(ctx, db.InsertPasswordParams{UserID: password.UserID, Hash: password.Hash, UpdatedAt: password.UpdatedAt}); err != nil {
 			return mapError(err)
 		}
-		if err := q.InsertWorkspace(ctx, db.InsertWorkspaceParams{ID: workspace.ID, Name: workspace.Name, CreatedAt: workspace.CreatedAt, UpdatedAt: workspace.UpdatedAt, DisabledAt: nullableTime(workspace.DisabledAt), RequireMfa: boolValue(workspace.RequireMFA)}); err != nil {
+		if err := q.InsertWorkspace(ctx, db.InsertWorkspaceParams{ID: workspace.ID, Name: workspace.Name, CreatedAt: workspace.CreatedAt, UpdatedAt: workspace.UpdatedAt, DisabledAt: nullableTime(workspace.DisabledAt), RequireMfa: workspace.RequireMFA}); err != nil {
 			return mapError(err)
 		}
 		if err := upsertMembership(ctx, q, membership); err != nil {
@@ -230,7 +78,7 @@ func (s *Store) CreateSignup(ctx context.Context, user credbound.User, email cre
 		if err := q.InsertPassword(ctx, db.InsertPasswordParams{UserID: password.UserID, Hash: password.Hash, UpdatedAt: password.UpdatedAt}); err != nil {
 			return mapError(err)
 		}
-		if err := q.InsertWorkspace(ctx, db.InsertWorkspaceParams{ID: workspace.ID, Name: workspace.Name, CreatedAt: workspace.CreatedAt, UpdatedAt: workspace.UpdatedAt, DisabledAt: nullableTime(workspace.DisabledAt), RequireMfa: boolValue(workspace.RequireMFA)}); err != nil {
+		if err := q.InsertWorkspace(ctx, db.InsertWorkspaceParams{ID: workspace.ID, Name: workspace.Name, CreatedAt: workspace.CreatedAt, UpdatedAt: workspace.UpdatedAt, DisabledAt: nullableTime(workspace.DisabledAt), RequireMfa: workspace.RequireMFA}); err != nil {
 			return mapError(err)
 		}
 		return upsertMembership(ctx, q, membership)
@@ -265,6 +113,15 @@ func (s *Store) SetUserDisabled(ctx context.Context, userID string, disabled boo
 			return mapError(err)
 		}
 		if disabled {
+			// Lock the rows this read-then-write check depends on. They are
+			// plain reads on SQLite, whose write lock already serializes
+			// mutations, and SELECT … FOR UPDATE on PostgreSQL.
+			if _, err := q.LockRootAdministrators(ctx); err != nil {
+				return mapError(err)
+			}
+			if _, err := q.LockUserAdminWorkspaces(ctx, userID); err != nil {
+				return mapError(err)
+			}
 			admin, adminErr := q.GetInstanceAdministrator(ctx, userID)
 			if adminErr != nil && !errors.Is(adminErr, sql.ErrNoRows) {
 				return mapError(adminErr)
@@ -286,11 +143,7 @@ func (s *Store) SetUserDisabled(ctx context.Context, userID string, disabled boo
 				return credbound.ErrConflict
 			}
 		}
-		disabledValue := int64(0)
-		if disabled {
-			disabledValue = 1
-		}
-		count, err := q.SetUserDisabled(ctx, db.SetUserDisabledParams{ID: userID, Disabled: disabledValue, UpdatedAt: at})
+		count, err := q.SetUserDisabled(ctx, db.SetUserDisabledParams{ID: userID, Disabled: disabled, UpdatedAt: at})
 		if err := affected(count, err); err != nil {
 			return err
 		}
@@ -322,11 +175,11 @@ func (s *Store) Users(ctx context.Context, page credbound.PageRequest) iter.Seq2
 			yield(credbound.PageEvent[credbound.User]{}, err)
 			return
 		}
-		rows, err := s.db.QueryContext(streamCtx, `SELECT u.id, e.address, u.display_name, u.disabled, u.last_seen_at, u.created_at, u.updated_at
+		rows, err := s.query(streamCtx, `SELECT u.id, e.address, u.display_name, u.disabled, u.last_seen_at, u.created_at, u.updated_at
 FROM credbound_users u
-JOIN credbound_user_emails e ON e.user_id = u.id AND e.is_primary = 1
-WHERE (? = '' OR u.created_at < ? OR (u.created_at = ? AND u.id < ?))
-ORDER BY u.created_at DESC, u.id DESC LIMIT ?`, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)
+JOIN credbound_user_emails e ON e.user_id = u.id AND e.is_primary
+WHERE (NOT ? OR u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+ORDER BY u.created_at DESC, u.id DESC LIMIT ?`, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.User]{}, mapError(err))
 			return
@@ -336,13 +189,13 @@ ORDER BY u.created_at DESC, u.id DESC LIMIT ?`, cursor.ID, cursor.Time, cursor.T
 		count := 0
 		for rows.Next() {
 			var value credbound.User
-			var disabled int64
+			var disabled bool
 			var seen sql.NullTime
 			if err := rows.Scan(&value.ID, &value.Email, &value.DisplayName, &disabled, &seen, &value.CreatedAt, &value.UpdatedAt); err != nil {
 				yield(credbound.PageEvent[credbound.User]{}, err)
 				return
 			}
-			value.Disabled, value.LastSeenAt = disabled == 1, timePointer(seen)
+			value.Disabled, value.LastSeenAt = disabled, timePointer(seen)
 			if count == page.Limit {
 				yield(credbound.EndEvent[credbound.User](credbound.PageEnd{HasMore: true, NextCursor: encodeCursor(last.CreatedAt, last.ID)}), nil)
 				return
@@ -700,7 +553,7 @@ func (s *Store) RemoveEmail(ctx context.Context, userID, emailID string, commit 
 		if email.UserID != userID {
 			return credbound.ErrNotFound
 		}
-		if email.IsPrimary == 1 {
+		if email.IsPrimary {
 			return credbound.ErrConflict
 		}
 		if email.VerifiedAt.Valid {
@@ -728,10 +581,10 @@ func (s *Store) Emails(ctx context.Context, userID string, page credbound.PageRe
 			yield(credbound.PageEvent[credbound.EmailAddress]{}, err)
 			return
 		}
-		rows, err := s.db.QueryContext(streamCtx, `SELECT id, user_id, address, is_primary, verified_at, created_at, updated_at
+		rows, err := s.query(streamCtx, `SELECT id, user_id, address, is_primary, verified_at, created_at, updated_at
 FROM credbound_user_emails
-WHERE user_id = ? AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, userID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)
+WHERE user_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
+ORDER BY created_at DESC, id DESC LIMIT ?`, userID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.EmailAddress]{}, mapError(err))
 			return
@@ -741,13 +594,13 @@ ORDER BY created_at DESC, id DESC LIMIT ?`, userID, cursor.ID, cursor.Time, curs
 		count := 0
 		for rows.Next() {
 			var value credbound.EmailAddress
-			var primary int64
+			var primary bool
 			var verified sql.NullTime
 			if err := rows.Scan(&value.ID, &value.UserID, &value.Address, &primary, &verified, &value.CreatedAt, &value.UpdatedAt); err != nil {
 				yield(credbound.PageEvent[credbound.EmailAddress]{}, err)
 				return
 			}
-			value.Primary, value.VerifiedAt = primary == 1, timePointer(verified)
+			value.Primary, value.VerifiedAt = primary, timePointer(verified)
 			if count == page.Limit {
 				yield(credbound.EndEvent[credbound.EmailAddress](credbound.PageEnd{HasMore: true, NextCursor: encodeCursor(last.CreatedAt, last.ID)}), nil)
 				return
@@ -773,7 +626,7 @@ func (s *Store) TOTPByUserID(ctx context.Context, userID string) (credbound.TOTP
 		return credbound.TOTPFactor{}, mapError(err)
 	}
 	return credbound.TOTPFactor{
-		UserID: row.UserID, EncryptedSecret: row.EncryptedSecret, Active: row.Active == 1,
+		UserID: row.UserID, EncryptedSecret: row.EncryptedSecret, Active: row.Active,
 		LastUsedStep: row.LastUsedStep, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}, nil
 }
@@ -893,7 +746,7 @@ func (s *Store) ReplaceRecoveryCodes(ctx context.Context, userID string, codes [
 		if err != nil {
 			return mapError(err)
 		}
-		if active := row.Active == 1; !active {
+		if !row.Active {
 			return credbound.ErrNotFound
 		}
 		if err := q.DeleteRecoveryCodes(ctx, userID); err != nil {
@@ -935,7 +788,7 @@ func (s *Store) Passkeys(ctx context.Context, userID string) iter.Seq2[credbound
 	return func(yield func(credbound.Passkey, error) bool) {
 		streamCtx, cancel := context.WithTimeout(ctx, s.streamTimeout)
 		defer cancel()
-		rows, err := s.db.QueryContext(streamCtx, `SELECT id, user_id, name, credential_id, credential_json, created_at, last_used_at
+		rows, err := s.query(streamCtx, `SELECT id, user_id, name, credential_id, credential_json, created_at, last_used_at
 FROM credbound_passkeys WHERE user_id = ? ORDER BY created_at, id`, userID)
 		if err != nil {
 			yield(credbound.Passkey{}, mapError(err))
@@ -1022,7 +875,7 @@ func (s *Store) CreatePAT(ctx context.Context, pat credbound.PAT, commit credbou
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		return mapError(q.InsertPAT(ctx, db.InsertPATParams{
 			ID: pat.ID, UserID: pat.UserID, Name: pat.Name, Prefix: pat.Prefix, Digest: pat.Digest,
-			WorkspaceID: nullableString(pat.WorkspaceID), ScopesJson: string(scopes), CreatedAt: pat.CreatedAt, ExpiresAt: nullableTime(pat.ExpiresAt),
+			WorkspaceID: nullableString(pat.WorkspaceID), ScopesJson: scopes, CreatedAt: pat.CreatedAt, ExpiresAt: nullableTime(pat.ExpiresAt),
 		}))
 	})
 }
@@ -1086,6 +939,15 @@ func (s *Store) RevokeUserCredentials(ctx context.Context, userID string, at tim
 func (s *Store) AnonymizeUser(ctx context.Context, userID string, at time.Time, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
 		if _, err := q.GetUserByID(ctx, userID); err != nil {
+			return mapError(err)
+		}
+		// Lock the rows this read-then-write check depends on. They are
+		// plain reads on SQLite, whose write lock already serializes
+		// mutations, and SELECT … FOR UPDATE on PostgreSQL.
+		if _, err := q.LockRootAdministrators(ctx); err != nil {
+			return mapError(err)
+		}
+		if _, err := q.LockUserAdminWorkspaces(ctx, userID); err != nil {
 			return mapError(err)
 		}
 		admin, adminErr := q.GetInstanceAdministrator(ctx, userID)
@@ -1160,10 +1022,10 @@ func (s *Store) PATs(ctx context.Context, userID string, page credbound.PageRequ
 			yield(credbound.PageEvent[credbound.PAT]{}, err)
 			return
 		}
-		rows, err := s.db.QueryContext(streamCtx, `SELECT id, user_id, name, prefix, digest, workspace_id, scopes_json, created_at, expires_at, last_used_at, revoked_at
+		rows, err := s.query(streamCtx, `SELECT id, user_id, name, prefix, digest, workspace_id, scopes_json, created_at, expires_at, last_used_at, revoked_at
 FROM credbound_personal_access_tokens
-WHERE user_id = ? AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, userID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)
+WHERE user_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
+ORDER BY created_at DESC, id DESC LIMIT ?`, userID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.PAT]{}, mapError(err))
 			return
@@ -1294,10 +1156,10 @@ func (s *Store) WorkspaceInvitations(ctx context.Context, workspaceID string, pa
 			yield(credbound.PageEvent[credbound.WorkspaceInvitation]{}, err)
 			return
 		}
-		rows, err := s.db.QueryContext(streamCtx, `SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
+		rows, err := s.query(streamCtx, `SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
 FROM credbound_workspace_invitations
-WHERE workspace_id = ? AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, workspaceID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)
+WHERE workspace_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
+ORDER BY created_at DESC, id DESC LIMIT ?`, workspaceID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.WorkspaceInvitation]{}, mapError(err))
 			return
@@ -1366,7 +1228,7 @@ func (s *Store) CreateWorkspace(ctx context.Context, workspace credbound.Workspa
 		if err := q.InsertWorkspace(ctx, db.InsertWorkspaceParams{
 			ID: workspace.ID, Name: workspace.Name, CreatedAt: workspace.CreatedAt,
 			UpdatedAt: workspace.UpdatedAt, DisabledAt: nullableTime(workspace.DisabledAt),
-			RequireMfa: boolValue(workspace.RequireMFA),
+			RequireMfa: workspace.RequireMFA,
 		}); err != nil {
 			return mapError(err)
 		}
@@ -1386,7 +1248,7 @@ func (s *Store) WorkspaceByID(ctx context.Context, workspaceID string) (credboun
 // UpdateWorkspace persists the workspace's mutable attributes.
 func (s *Store) UpdateWorkspace(ctx context.Context, workspace credbound.Workspace, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
-		count, err := q.UpdateWorkspace(ctx, db.UpdateWorkspaceParams{ID: workspace.ID, Name: workspace.Name, UpdatedAt: workspace.UpdatedAt, RequireMfa: boolValue(workspace.RequireMFA)})
+		count, err := q.UpdateWorkspace(ctx, db.UpdateWorkspaceParams{ID: workspace.ID, Name: workspace.Name, UpdatedAt: workspace.UpdatedAt, RequireMfa: workspace.RequireMFA})
 		return affected(count, err)
 	})
 }
@@ -1432,10 +1294,10 @@ func (s *Store) workspaces(ctx context.Context, userID string, page credbound.Pa
 		}
 		query := `SELECT w.id, w.name, w.created_at, w.updated_at, w.disabled_at, w.require_mfa
 FROM credbound_workspaces w
-WHERE (? = '' OR EXISTS (SELECT 1 FROM credbound_memberships m WHERE m.workspace_id = w.id AND m.user_id = ?))
-AND (? = '' OR w.created_at < ? OR (w.created_at = ? AND w.id < ?))
+WHERE (NOT ? OR EXISTS (SELECT 1 FROM credbound_memberships m WHERE m.workspace_id = w.id AND m.user_id = ?))
+AND (NOT ? OR w.created_at < ? OR (w.created_at = ? AND w.id < ?))
 ORDER BY w.created_at DESC, w.id DESC LIMIT ?`
-		rows, err := s.db.QueryContext(streamCtx, query, userID, userID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)
+		rows, err := s.query(streamCtx, query, userID != "", nullableUUID(userID), cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.Workspace]{}, mapError(err))
 			return
@@ -1446,12 +1308,12 @@ ORDER BY w.created_at DESC, w.id DESC LIMIT ?`
 		for rows.Next() {
 			var value credbound.Workspace
 			var disabled sql.NullTime
-			var requireMFA int64
+			var requireMFA bool
 			if err := rows.Scan(&value.ID, &value.Name, &value.CreatedAt, &value.UpdatedAt, &disabled, &requireMFA); err != nil {
 				yield(credbound.PageEvent[credbound.Workspace]{}, err)
 				return
 			}
-			value.DisabledAt, value.RequireMFA = timePointer(disabled), requireMFA == 1
+			value.DisabledAt, value.RequireMFA = timePointer(disabled), requireMFA
 			if count == page.Limit {
 				yield(credbound.EndEvent[credbound.Workspace](credbound.PageEnd{HasMore: true, NextCursor: encodeCursor(last.CreatedAt, last.ID)}), nil)
 				return
@@ -1487,6 +1349,9 @@ func (s *Store) Membership(ctx context.Context, workspaceID, userID string) (cre
 // deactivation revokes the member's workspace-scoped tokens.
 func (s *Store) UpsertMembership(ctx context.Context, membership credbound.Membership, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		if _, err := q.LockWorkspace(ctx, membership.WorkspaceID); err != nil {
+			return mapError(err)
+		}
 		current, err := q.GetMembership(ctx, db.GetMembershipParams{WorkspaceID: membership.WorkspaceID, UserID: membership.UserID})
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return mapError(err)
@@ -1518,6 +1383,9 @@ func (s *Store) UpsertMembership(ctx context.Context, membership credbound.Membe
 // member's workspace-scoped tokens.
 func (s *Store) RemoveMembership(ctx context.Context, workspaceID, userID string, at time.Time, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		if _, err := q.LockWorkspace(ctx, workspaceID); err != nil {
+			return mapError(err)
+		}
 		current, err := q.GetMembership(ctx, db.GetMembershipParams{WorkspaceID: workspaceID, UserID: userID})
 		if err != nil {
 			return mapError(err)
@@ -1552,10 +1420,10 @@ func (s *Store) Memberships(ctx context.Context, workspaceID string, page credbo
 			yield(credbound.PageEvent[credbound.Membership]{}, err)
 			return
 		}
-		rows, err := s.db.QueryContext(streamCtx, `SELECT workspace_id, user_id, role, status, provisioning_source, created_at, updated_at
+		rows, err := s.query(streamCtx, `SELECT workspace_id, user_id, role, status, provisioning_source, created_at, updated_at
 FROM credbound_memberships
-WHERE workspace_id = ? AND (? = '' OR created_at < ? OR (created_at = ? AND user_id < ?))
-ORDER BY created_at DESC, user_id DESC LIMIT ?`, workspaceID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)
+WHERE workspace_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND user_id < ?))
+ORDER BY created_at DESC, user_id DESC LIMIT ?`, workspaceID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.Membership]{}, mapError(err))
 			return
@@ -1617,6 +1485,11 @@ func (s *Store) InstanceAdministrators(ctx context.Context) iter.Seq2[credbound.
 // demote the last root administrator (credbound.ErrConflict).
 func (s *Store) SetInstanceRole(ctx context.Context, admin credbound.InstanceAdministrator, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		if admin.Role != credbound.InstanceRoleRoot {
+			if _, err := q.LockRootAdministrators(ctx); err != nil {
+				return mapError(err)
+			}
+		}
 		current, err := q.GetInstanceAdministrator(ctx, admin.UserID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return mapError(err)
@@ -1638,6 +1511,9 @@ func (s *Store) SetInstanceRole(ctx context.Context, admin credbound.InstanceAdm
 // the last root administrator (credbound.ErrConflict).
 func (s *Store) RemoveInstanceRole(ctx context.Context, userID string, commit credbound.Commit) error {
 	return s.mutate(ctx, commit, func(q *db.Queries) error {
+		if _, err := q.LockRootAdministrators(ctx); err != nil {
+			return mapError(err)
+		}
 		admin, err := q.GetInstanceAdministrator(ctx, userID)
 		if err != nil {
 			return mapError(err)
@@ -1738,10 +1614,10 @@ func (s *Store) SSOIdentities(ctx context.Context, userID string, page credbound
 			yield(credbound.PageEvent[credbound.SSOIdentity]{}, err)
 			return
 		}
-		rows, err := s.db.QueryContext(streamCtx, `SELECT id, user_id, provider_configuration_id, provider_kind, issuer, subject, email, created_at, last_used_at
+		rows, err := s.query(streamCtx, `SELECT id, user_id, provider_configuration_id, provider_kind, issuer, subject, email, created_at, last_used_at
 FROM credbound_sso_identities
-WHERE user_id = ? AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, userID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)
+WHERE user_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
+ORDER BY created_at DESC, id DESC LIMIT ?`, userID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.SSOIdentity]{}, mapError(err))
 			return
@@ -1805,10 +1681,10 @@ func (s *Store) auditEvents(ctx context.Context, page credbound.PageRequest, fil
 		}
 		query := `SELECT id, occurred_at, actor_kind, actor_id, action, resource_type, resource_id, workspace_id, outcome, reason, ip_address, user_agent, sequence, previous_hash, hash
 FROM credbound_audit_events
-WHERE ` + filter + ` (? = '' OR occurred_at < ? OR (occurred_at = ? AND id < ?))
+WHERE ` + filter + ` (NOT ? OR occurred_at < ? OR (occurred_at = ? AND id < ?))
 ORDER BY occurred_at DESC, id DESC LIMIT ?`
-		args := append(filterArgs, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)
-		rows, err := s.db.QueryContext(streamCtx, query, args...)
+		args := append(filterArgs, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
+		rows, err := s.query(streamCtx, query, args...)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.AuditEvent]{}, mapError(err))
 			return
@@ -1840,19 +1716,12 @@ ORDER BY occurred_at DESC, id DESC LIMIT ?`
 	}
 }
 
-// lockWrites acquires the mutation mutex and returns its release function, so a
-// mutation can serialize itself with "defer s.lockWrites()()".
-func (s *Store) lockWrites() func() {
-	s.writeMu.Lock()
-	return s.writeMu.Unlock
-}
-
 func (s *Store) mutate(ctx context.Context, commit credbound.Commit, fn func(*db.Queries) error) error {
 	return s.mutateIf(ctx, commit, func(q *db.Queries) (bool, error) { return true, fn(q) })
 }
 
 func (s *Store) mutateIf(ctx context.Context, commit credbound.Commit, fn func(*db.Queries) (bool, error)) error {
-	defer s.lockWrites()()
+	defer s.locks.write()()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return mapError(err)
@@ -1932,7 +1801,7 @@ func (s *Store) ChainedAuditEvents(ctx context.Context, afterSequence int64) ite
 	return func(yield func(credbound.AuditEvent, error) bool) {
 		streamCtx, cancel := context.WithTimeout(ctx, s.streamTimeout)
 		defer cancel()
-		rows, err := s.db.QueryContext(streamCtx, chainedAuditQuery, afterSequence)
+		rows, err := s.query(streamCtx, chainedAuditQuery, afterSequence)
 		if err != nil {
 			yield(credbound.AuditEvent{}, mapError(err))
 			return
@@ -1971,23 +1840,15 @@ func scanAuditEvent(rows rowScanner) (credbound.AuditEvent, error) {
 }
 
 func insertUser(ctx context.Context, q *db.Queries, user credbound.User) error {
-	disabled := int64(0)
-	if user.Disabled {
-		disabled = 1
-	}
 	return mapError(q.InsertUser(ctx, db.InsertUserParams{
-		ID: user.ID, DisplayName: user.DisplayName, Disabled: disabled, LastSeenAt: nullableTime(user.LastSeenAt),
+		ID: user.ID, DisplayName: user.DisplayName, Disabled: user.Disabled, LastSeenAt: nullableTime(user.LastSeenAt),
 		CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt,
 	}))
 }
 
 func insertEmail(ctx context.Context, q *db.Queries, email credbound.EmailAddress, verification credbound.EmailVerificationCredential) error {
-	primary := int64(0)
-	if email.Primary {
-		primary = 1
-	}
 	return mapError(q.InsertUserEmail(ctx, db.InsertUserEmailParams{
-		ID: email.ID, UserID: email.UserID, Address: email.Address, IsPrimary: primary,
+		ID: email.ID, UserID: email.UserID, Address: email.Address, IsPrimary: email.Primary,
 		VerifiedAt: nullableTime(email.VerifiedAt), VerificationDigest: verification.Digest,
 		VerificationExpiresAt: nullableTime(zeroTimePointer(verification.ExpiresAt)),
 		CreatedAt:             email.CreatedAt, UpdatedAt: email.UpdatedAt,
@@ -2029,37 +1890,29 @@ func auditParams(event credbound.AuditEvent) db.InsertAuditParams {
 
 func userFromEmailRow(row db.GetUserByEmailRow) credbound.User {
 	return credbound.User{
-		ID: row.ID, Email: row.Email, DisplayName: row.DisplayName, Disabled: row.Disabled == 1,
+		ID: row.ID, Email: row.Email, DisplayName: row.DisplayName, Disabled: row.Disabled,
 		LastSeenAt: timePointer(row.LastSeenAt), CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
 }
 
 func userFromIDRow(row db.GetUserByIDRow) credbound.User {
 	return credbound.User{
-		ID: row.ID, Email: row.Email, DisplayName: row.DisplayName, Disabled: row.Disabled == 1,
+		ID: row.ID, Email: row.Email, DisplayName: row.DisplayName, Disabled: row.Disabled,
 		LastSeenAt: timePointer(row.LastSeenAt), CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
 }
 
 func workspaceFromRow(row db.CredboundWorkspace) credbound.Workspace {
 	return credbound.Workspace{
-		ID: row.ID, Name: row.Name, RequireMFA: row.RequireMfa == 1,
+		ID: row.ID, Name: row.Name, RequireMFA: row.RequireMfa,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		DisabledAt: timePointer(row.DisabledAt),
 	}
 }
 
-// boolValue converts a policy flag to its SQLite representation.
-func boolValue(value bool) int64 {
-	if value {
-		return 1
-	}
-	return 0
-}
-
 func emailFromRow(row db.CredboundUserEmail) credbound.EmailAddress {
 	return credbound.EmailAddress{
-		ID: row.ID, UserID: row.UserID, Address: row.Address, Primary: row.IsPrimary == 1,
+		ID: row.ID, UserID: row.UserID, Address: row.Address, Primary: row.IsPrimary,
 		VerifiedAt: timePointer(row.VerifiedAt), CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
 }
@@ -2074,7 +1927,7 @@ func ssoFromRow(row db.CredboundSsoIdentity) credbound.SSOIdentity {
 
 func patFromRow(row db.CredboundPersonalAccessToken) (credbound.PAT, error) {
 	var scopes []string
-	if err := json.Unmarshal([]byte(row.ScopesJson), &scopes); err != nil {
+	if err := json.Unmarshal(row.ScopesJson, &scopes); err != nil {
 		return credbound.PAT{}, err
 	}
 	return credbound.PAT{
@@ -2089,12 +1942,12 @@ type scanner interface{ Scan(...any) error }
 func scanPAT(row scanner) (credbound.PAT, error) {
 	var value credbound.PAT
 	var workspace sql.NullString
-	var scopes string
+	var scopes []byte
 	var expires, lastUsed, revoked sql.NullTime
 	if err := row.Scan(&value.ID, &value.UserID, &value.Name, &value.Prefix, &value.Digest, &workspace, &scopes, &value.CreatedAt, &expires, &lastUsed, &revoked); err != nil {
 		return credbound.PAT{}, err
 	}
-	if err := json.Unmarshal([]byte(scopes), &value.Scopes); err != nil {
+	if err := json.Unmarshal(scopes, &value.Scopes); err != nil {
 		return credbound.PAT{}, err
 	}
 	value.WorkspaceID = workspace.String
@@ -2136,22 +1989,6 @@ func affected(count int64, err error) error {
 		return credbound.ErrNotFound
 	}
 	return nil
-}
-
-func mapError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return credbound.ErrNotFound
-	}
-	// Classify a constraint violation by the driver's typed result code rather
-	// than a message substring, which was locale-fragile and wording-fragile.
-	var sqliteErr *sqlitedriver.Error
-	if errors.As(err, &sqliteErr) && sqliteErr.Code()&0xff == sqliteConstraint {
-		return fmt.Errorf("%w: %v", credbound.ErrConflict, err)
-	}
-	return err
 }
 
 type cursor struct {

@@ -16,7 +16,7 @@ import (
 // URL reports credbound.ErrConflict.
 func (s *Store) CreateOAuthIssuer(ctx context.Context, value credbound.OAuthIssuer, commit credbound.Commit) error {
 	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
-		data, err := oauthParam(value)
+		data, err := oauthJSON(value)
 		if err != nil {
 			return err
 		}
@@ -36,7 +36,7 @@ func (s *Store) SetOAuthIssuerDisabled(ctx context.Context, id string, disabled 
 			value.DisabledAt = &at
 		}
 		value.UpdatedAt = at
-		data, err := oauthParam(value)
+		data, err := oauthJSON(value)
 		if err != nil {
 			return err
 		}
@@ -53,7 +53,7 @@ func (s *Store) SetOAuthIssuerDisabled(ctx context.Context, id string, disabled 
 // UpdateOAuthIssuer persists the issuer's mutable attributes.
 func (s *Store) UpdateOAuthIssuer(ctx context.Context, value credbound.OAuthIssuer, commit credbound.Commit) error {
 	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
-		data, err := oauthParam(value)
+		data, err := oauthJSON(value)
 		if err != nil {
 			return err
 		}
@@ -74,7 +74,7 @@ func (s *Store) OAuthIssuerByURL(ctx context.Context, issuer string) (credbound.
 // OAuthIssuers streams all issuers, newest first, as one cursor page.
 func (s *Store) OAuthIssuers(ctx context.Context, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthIssuer], error] {
 	return oauthPage(s, ctx, `SELECT data_json, created_at, id FROM credbound_oauth_issuers
-WHERE (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
+WHERE (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
 ORDER BY created_at DESC, id DESC LIMIT ?`, nil, page, func(value credbound.OAuthIssuer) credbound.OAuthIssuer { return value })
 }
 
@@ -82,7 +82,7 @@ ORDER BY created_at DESC, id DESC LIMIT ?`, nil, page, func(value credbound.OAut
 // or URI reports credbound.ErrConflict.
 func (s *Store) CreateOAuthProtectedResource(ctx context.Context, value credbound.OAuthProtectedResource, commit credbound.Commit) error {
 	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
-		data, err := oauthParam(value)
+		data, err := oauthJSON(value)
 		if err != nil {
 			return err
 		}
@@ -102,7 +102,7 @@ func (s *Store) SetOAuthProtectedResourceDisabled(ctx context.Context, id string
 			value.DisabledAt = &at
 		}
 		value.UpdatedAt = at
-		data, err := oauthParam(value)
+		data, err := oauthJSON(value)
 		if err != nil {
 			return err
 		}
@@ -130,7 +130,7 @@ func (s *Store) OAuthProtectedResourceByURI(ctx context.Context, resource string
 // workspace, newest first, as one cursor page.
 func (s *Store) OAuthProtectedResources(ctx context.Context, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthProtectedResource], error] {
 	return oauthPage(s, ctx, `SELECT data_json, created_at, id FROM credbound_oauth_resources
-WHERE workspace_id = ? AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
+WHERE workspace_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
 ORDER BY created_at DESC, id DESC LIMIT ?`, []any{workspaceID}, page, func(value credbound.OAuthProtectedResource) credbound.OAuthProtectedResource { return value })
 }
 
@@ -144,6 +144,14 @@ func (s *Store) CreateOAuthClient(ctx context.Context, value credbound.OAuthClie
 			return err
 		}
 		if value.Source == credbound.OAuthClientDCR && issuer.DCRMode == credbound.OAuthDCROpen {
+			// Open registration counts existing clients then inserts, with no
+			// indexed guard, so the issuer row is locked first: without it two
+			// concurrent registrations could each read a stale count and
+			// overrun the limit. The lock is a plain read on SQLite, whose
+			// write lock already serializes mutations.
+			if _, err := q.OAuthLockIssuer(ctx, value.IssuerID); err != nil {
+				return mapError(err)
+			}
 			records, err := q.OAuthClientJSONsByIssuer(ctx, value.IssuerID)
 			if err != nil {
 				return mapError(err)
@@ -172,7 +180,7 @@ func (s *Store) CreateOAuthClient(ctx context.Context, value credbound.OAuthClie
 			}
 			previousCount := token.RegistrationCount
 			token.RegistrationCount++
-			tokenData, err := oauthParam(token)
+			tokenData, err := oauthJSON(token)
 			if err != nil {
 				return err
 			}
@@ -183,7 +191,7 @@ func (s *Store) CreateOAuthClient(ctx context.Context, value credbound.OAuthClie
 				return credbound.ErrConflict
 			}
 		}
-		data, err := oauthParam(value)
+		data, err := oauthJSON(value)
 		if err != nil {
 			return err
 		}
@@ -195,7 +203,7 @@ func (s *Store) CreateOAuthClient(ctx context.Context, value credbound.OAuthClie
 // Client Identifier Metadata Document.
 func (s *Store) UpsertOAuthCIMDClient(ctx context.Context, value credbound.OAuthClient, commit credbound.Commit) error {
 	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
-		data, err := oauthParam(value)
+		data, err := oauthJSON(value)
 		if err != nil {
 			return err
 		}
@@ -215,7 +223,7 @@ func (s *Store) SetOAuthClientDisabled(ctx context.Context, id string, disabled 
 			value.DisabledAt = &at
 		}
 		value.UpdatedAt = at
-		data, err := oauthParam(value)
+		data, err := oauthJSON(value)
 		if err != nil {
 			return err
 		}
@@ -246,7 +254,7 @@ func (s *Store) RotateOAuthClientCredentials(ctx context.Context, id string, sec
 			value.MetadataHash = metadataHash
 		}
 		value.UpdatedAt = at
-		data, err := oauthParam(value)
+		data, err := oauthJSON(value)
 		if err != nil {
 			return err
 		}
@@ -268,7 +276,7 @@ func (s *Store) OAuthClientByClientID(ctx context.Context, issuerID, clientID st
 // page.
 func (s *Store) OAuthClients(ctx context.Context, issuerID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthClient], error] {
 	return oauthPage(s, ctx, `SELECT data_json, created_at, id FROM credbound_oauth_clients
-WHERE issuer_id = ? AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
+WHERE issuer_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
 ORDER BY created_at DESC, id DESC LIMIT ?`, []any{issuerID}, page, func(value credbound.OAuthClient) credbound.OAuthClient {
 		value.SecretDigest = nil
 		return value
@@ -279,7 +287,7 @@ ORDER BY created_at DESC, id DESC LIMIT ?`, []any{issuerID}, page, func(value cr
 // dynamic client registration.
 func (s *Store) CreateOAuthInitialAccessToken(ctx context.Context, value credbound.OAuthInitialAccessToken, commit credbound.Commit) error {
 	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
-		data, err := oauthParam(value)
+		data, err := oauthJSON(value)
 		if err != nil {
 			return err
 		}
@@ -326,7 +334,7 @@ func (s *Store) RevokeOAuthInitialAccessToken(ctx context.Context, id string, at
 			return err
 		}
 		value.RevokedAt = &at
-		data, err := oauthParam(value)
+		data, err := oauthJSON(value)
 		if err != nil {
 			return err
 		}
@@ -338,14 +346,14 @@ func (s *Store) RevokeOAuthInitialAccessToken(ctx context.Context, id string, at
 // authorization code.
 func (s *Store) CreateOAuthGrantAndCode(ctx context.Context, grant credbound.OAuthGrant, code credbound.OAuthAuthorizationCode, commit credbound.Commit) error {
 	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
-		grantData, err := oauthParam(grant)
+		grantData, err := oauthJSON(grant)
 		if err != nil {
 			return err
 		}
 		if err := q.OAuthInsertGrant(ctx, db.OAuthInsertGrantParams{ID: grant.ID, ClientRecordID: grant.ClientRecordID, ResourceID: grant.ResourceID, UserID: grant.UserID, WorkspaceID: grant.WorkspaceID, CreatedAt: grant.CreatedAt, DataJson: grantData}); err != nil {
 			return mapError(err)
 		}
-		codeData, err := oauthParam(code)
+		codeData, err := oauthJSON(code)
 		if err != nil {
 			return err
 		}
@@ -368,9 +376,9 @@ func (s *Store) RevokeOAuthGrant(ctx context.Context, id string, at time.Time, c
 // newest first, as one cursor page.
 func (s *Store) OAuthGrants(ctx context.Context, userID, workspaceID string, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthGrant], error] {
 	return oauthPage(s, ctx, `SELECT data_json, created_at, id FROM credbound_oauth_grants
-WHERE (? = '' OR user_id = ?) AND (? = '' OR workspace_id = ?)
-AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, []any{userID, userID, workspaceID, workspaceID}, page, func(value credbound.OAuthGrant) credbound.OAuthGrant { return value })
+WHERE (NOT ? OR user_id = ?) AND (NOT ? OR workspace_id = ?)
+AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
+ORDER BY created_at DESC, id DESC LIMIT ?`, []any{userID != "", nullableUUID(userID), workspaceID != "", nullableUUID(workspaceID)}, page, func(value credbound.OAuthGrant) credbound.OAuthGrant { return value })
 }
 
 // OAuthAuthorizationCodeByPrefix returns the authorization code record
@@ -389,7 +397,7 @@ func (s *Store) ConsumeOAuthAuthorizationCode(ctx context.Context, codeID string
 			return err
 		}
 		code.UsedAt = &usedAt
-		data, err := oauthParam(code)
+		data, err := oauthJSON(code)
 		if err != nil {
 			return err
 		}
@@ -416,7 +424,7 @@ func (s *Store) OAuthAccessTokenByPrefix(ctx context.Context, prefix string) (cr
 // CreateOAuthClientAccessToken stores a client-credentials access token.
 func (s *Store) CreateOAuthClientAccessToken(ctx context.Context, value credbound.OAuthClientAccessToken, commit credbound.Commit) error {
 	return s.oauthMutate(ctx, commit, func(_ *sql.Tx, q *db.Queries) error {
-		data, err := oauthParam(value)
+		data, err := oauthJSON(value)
 		if err != nil {
 			return err
 		}
@@ -439,7 +447,7 @@ func (s *Store) RevokeOAuthClientAccessToken(ctx context.Context, id string, at 
 			return err
 		}
 		value.RevokedAt = &at
-		data, err := oauthParam(value)
+		data, err := oauthJSON(value)
 		if err != nil {
 			return err
 		}
@@ -479,7 +487,7 @@ func (s *Store) RotateOAuthRefreshToken(ctx context.Context, previousID string, 
 			return credbound.ErrConflict
 		}
 		previous.UsedAt, previous.ReplacedByID = &usedAt, refresh.ID
-		data, err := oauthParam(previous)
+		data, err := oauthJSON(previous)
 		if err != nil {
 			return err
 		}
@@ -502,7 +510,7 @@ func (s *Store) RevokeOAuthAccessToken(ctx context.Context, id string, at time.T
 			return err
 		}
 		value.RevokedAt = &at
-		data, err := oauthParam(value)
+		data, err := oauthJSON(value)
 		if err != nil {
 			return err
 		}
@@ -599,7 +607,7 @@ func (s *Store) revokeOAuthGrant(ctx context.Context, q *db.Queries, id string, 
 		return err
 	}
 	grant.RevokedAt, grant.UpdatedAt = &at, at
-	data, err := oauthParam(grant)
+	data, err := oauthJSON(grant)
 	if err != nil {
 		return err
 	}
@@ -619,7 +627,7 @@ func (s *Store) revokeOAuthGrant(ctx context.Context, q *db.Queries, id string, 
 			return err
 		}
 		value.RevokedAt = &at
-		data, err := oauthParam(value)
+		data, err := oauthJSON(value)
 		if err != nil {
 			return err
 		}
@@ -644,7 +652,7 @@ func (s *Store) revokeOAuthAccessTokens(ctx context.Context, q *db.Queries, gran
 			continue
 		}
 		value.RevokedAt = &at
-		data, err := oauthParam(value)
+		data, err := oauthJSON(value)
 		if err != nil {
 			return err
 		}
@@ -666,8 +674,8 @@ func oauthPage[T any](s *Store, ctx context.Context, query string, filterArgs []
 			return
 		}
 		args := append([]any(nil), filterArgs...)
-		args = append(args, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)
-		rows, err := s.db.QueryContext(streamCtx, oauthQuery(query), args...)
+		args = append(args, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
+		rows, err := s.query(streamCtx, query, args...)
 		if err != nil {
 			var zero credbound.PageEvent[T]
 			yield(zero, mapError(err))
@@ -711,10 +719,11 @@ func oauthPage[T any](s *Store, ctx context.Context, query string, filterArgs []
 }
 
 func (s *Store) oauthMutate(ctx context.Context, commit credbound.Commit, fn func(*sql.Tx, *db.Queries) error) error {
-	// Serialize with every other mutation: OAuth writes also append to the
-	// singleton audit chain and run read-then-write invariant checks (the DCR
-	// registration count), which the writeMu contract protects.
-	defer s.lockWrites()()
+	// OAuth writes also append to the singleton audit chain and run
+	// read-then-write invariant checks (the DCR registration count). On SQLite
+	// the write lock serializes them process-wide; on PostgreSQL it is a no-op
+	// and the same invariants rest on the row locks taken inside the callback.
+	defer s.locks.write()()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return mapError(err)
@@ -766,7 +775,7 @@ func oauthDecode[T any](raw any) (T, error) {
 }
 
 func insertOAuthAccessToken(ctx context.Context, q *db.Queries, value credbound.OAuthAccessToken) error {
-	data, err := oauthParam(value)
+	data, err := oauthJSON(value)
 	if err != nil {
 		return err
 	}
@@ -774,7 +783,7 @@ func insertOAuthAccessToken(ctx context.Context, q *db.Queries, value credbound.
 }
 
 func insertOAuthRefreshToken(ctx context.Context, q *db.Queries, value credbound.OAuthRefreshToken) error {
-	data, err := oauthParam(value)
+	data, err := oauthJSON(value)
 	if err != nil {
 		return err
 	}
@@ -790,15 +799,5 @@ func oauthJSON(value any) ([]byte, error) {
 	}
 	return raw, nil
 }
-
-func oauthParam(value any) (string, error) {
-	raw, err := oauthJSON(value)
-	if err != nil {
-		return "", err
-	}
-	return string(raw), nil
-}
-
-func oauthQuery(query string) string { return query }
 
 var _ credbound.OAuthStore = (*Store)(nil)

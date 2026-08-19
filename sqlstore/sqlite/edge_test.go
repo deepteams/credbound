@@ -283,7 +283,7 @@ func TestInternalMappingAndScanErrors(t *testing.T) {
 	if err := mapError(boom); !errors.Is(err, boom) || mapError(nil) != nil {
 		t.Fatal(err)
 	}
-	if _, err := patFromRow(db.CredboundPersonalAccessToken{ScopesJson: "{"}); err == nil {
+	if _, err := patFromRow(db.CredboundPersonalAccessToken{ScopesJson: []byte("{")}); err == nil {
 		t.Fatal("invalid stored scopes accepted")
 	}
 	if _, err := scanPAT(scannerFunc(func(...any) error { return boom })); !errors.Is(err, boom) {
@@ -295,7 +295,7 @@ func TestInternalMappingAndScanErrors(t *testing.T) {
 		*(dest[2].(*string)) = "name"
 		*(dest[3].(*string)) = "prefix"
 		*(dest[4].(*[]byte)) = []byte("digest")
-		*(dest[6].(*string)) = "{"
+		*(dest[6].(*[]byte)) = []byte("{")
 		*(dest[7].(*time.Time)) = time.Now()
 		return nil
 	})

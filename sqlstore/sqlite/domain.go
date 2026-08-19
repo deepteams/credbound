@@ -24,9 +24,9 @@ func (s *Store) CreateWorkspaceDomain(ctx context.Context, domain credbound.Work
 		}
 		return mapError(q.InsertWorkspaceDomain(ctx, db.InsertWorkspaceDomainParams{
 			ID: domain.ID, WorkspaceID: domain.WorkspaceID, Domain: domain.Domain, Challenge: domain.Challenge,
-			ConfirmedAt: nullableTime(domain.ConfirmedAt), AutoJoin: boolValue(domain.AutoJoin),
+			ConfirmedAt: nullableTime(domain.ConfirmedAt), AutoJoin: domain.AutoJoin,
 			AutoJoinRole: string(domain.AutoJoinRole), SsoProviderConfigurationID: domain.SSOProviderConfigurationID,
-			EnforceSso: boolValue(domain.EnforceSSO), CreatedAt: domain.CreatedAt, UpdatedAt: domain.UpdatedAt,
+			EnforceSso: domain.EnforceSSO, CreatedAt: domain.CreatedAt, UpdatedAt: domain.UpdatedAt,
 		}))
 	})
 }
@@ -79,8 +79,8 @@ func (s *Store) UpdateWorkspaceDomainPolicy(ctx context.Context, id string, poli
 			return mapError(err)
 		}
 		count, err := q.UpdateWorkspaceDomainPolicy(ctx, db.UpdateWorkspaceDomainPolicyParams{
-			ID: id, AutoJoin: boolValue(policy.AutoJoin), AutoJoinRole: string(policy.AutoJoinRole),
-			SsoProviderConfigurationID: policy.SSOProviderConfigurationID, EnforceSso: boolValue(policy.EnforceSSO),
+			ID: id, AutoJoin: policy.AutoJoin, AutoJoinRole: string(policy.AutoJoinRole),
+			SsoProviderConfigurationID: policy.SSOProviderConfigurationID, EnforceSso: policy.EnforceSSO,
 			UpdatedAt: at,
 		})
 		if err != nil {
@@ -114,10 +114,10 @@ func (s *Store) WorkspaceDomains(ctx context.Context, workspaceID string, page c
 			yield(credbound.PageEvent[credbound.WorkspaceDomain]{}, err)
 			return
 		}
-		rows, err := s.db.QueryContext(streamCtx, `SELECT id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at
+		rows, err := s.query(streamCtx, `SELECT id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at
 FROM credbound_workspace_domains
-WHERE workspace_id = ? AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
-ORDER BY created_at DESC, id DESC LIMIT ?`, workspaceID, cursor.ID, cursor.Time, cursor.Time, cursor.ID, page.Limit+1)
+WHERE workspace_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
+ORDER BY created_at DESC, id DESC LIMIT ?`, workspaceID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.WorkspaceDomain]{}, mapError(err))
 			return
@@ -174,23 +174,23 @@ func (s *Store) JITProvisionSSOUser(ctx context.Context, user credbound.User, em
 func workspaceDomainFromRow(row db.CredboundWorkspaceDomain) credbound.WorkspaceDomain {
 	return credbound.WorkspaceDomain{
 		ID: row.ID, WorkspaceID: row.WorkspaceID, Domain: row.Domain, Challenge: row.Challenge,
-		ConfirmedAt: timePointer(row.ConfirmedAt), AutoJoin: row.AutoJoin == 1,
+		ConfirmedAt: timePointer(row.ConfirmedAt), AutoJoin: row.AutoJoin,
 		AutoJoinRole: credbound.Role(row.AutoJoinRole), SSOProviderConfigurationID: row.SsoProviderConfigurationID,
-		EnforceSSO: row.EnforceSso == 1, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		EnforceSSO: row.EnforceSso, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
 }
 
 func scanWorkspaceDomain(row scanner) (credbound.WorkspaceDomain, error) {
 	var value credbound.WorkspaceDomain
 	var role string
-	var autoJoin, enforceSSO int64
+	var autoJoin, enforceSSO bool
 	var confirmed sql.NullTime
 	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.Domain, &value.Challenge, &confirmed, &autoJoin, &role, &value.SSOProviderConfigurationID, &enforceSSO, &value.CreatedAt, &value.UpdatedAt); err != nil {
 		return credbound.WorkspaceDomain{}, err
 	}
 	value.ConfirmedAt = timePointer(confirmed)
 	value.AutoJoinRole = credbound.Role(role)
-	value.AutoJoin, value.EnforceSSO = autoJoin == 1, enforceSSO == 1
+	value.AutoJoin, value.EnforceSSO = autoJoin, enforceSSO
 	return value, nil
 }
 

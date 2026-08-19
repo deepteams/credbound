@@ -19,6 +19,20 @@ sql:
             go_type:
               import: database/sql
               type: NullString
+          # SQLite has one integer width, so PostgreSQL's narrower integers are
+          # widened to int64 here. Both stores then share identical parameter
+          # and row types, which is what lets the PostgreSQL store be derived
+          # from the SQLite one without per-field conversions.
+          - db_type: pg_catalog.int2
+            go_type: int64
+          - db_type: pg_catalog.int4
+            go_type: int64
+          # jsonb maps to json.RawMessage by default; []byte is the same
+          # underlying type and is what the SQLite TEXT columns map to.
+          - db_type: jsonb
+            go_type:
+              type: byte
+              slice: true
   - name: sqlite
     engine: sqlite
     schema: sql/schema/sqlite.sql
@@ -30,3 +44,61 @@ sql:
         sql_package: database/sql
         emit_empty_slices: false
         emit_json_tags: true
+        # SQLite stores booleans as 0/1 integers and JSON documents as TEXT,
+        # where PostgreSQL has native boolean and jsonb. Mapping the SQLite
+        # columns onto the PostgreSQL Go types keeps both stores' generated
+        # types identical; the driver converts on the wire. Every entry here
+        # mirrors a boolean or jsonb column in sql/schema/postgresql.sql.
+        overrides:
+          - column: credbound_instance.singleton
+            go_type: bool
+          - column: credbound_users.disabled
+            go_type: bool
+          - column: credbound_user_emails.is_primary
+            go_type: bool
+          - column: credbound_workspaces.require_mfa
+            go_type: bool
+          - column: credbound_totp_factors.active
+            go_type: bool
+          - column: credbound_sessions.second_factor_required
+            go_type: bool
+          - column: credbound_workspace_domains.auto_join
+            go_type: bool
+          - column: credbound_workspace_domains.enforce_sso
+            go_type: bool
+          - column: credbound_scim_configurations.enabled
+            go_type: bool
+          - column: credbound_scim_configurations.trust_directory_emails
+            go_type: bool
+          - column: credbound_scim_users.active
+            go_type: bool
+          - column: credbound_personal_access_tokens.scopes_json
+            go_type: &json
+              type: byte
+              slice: true
+          - column: credbound_scim_configurations.group_role_mappings_json
+            go_type: *json
+          - column: credbound_scim_users.emails_json
+            go_type: *json
+          - column: credbound_scim_users.profile_json
+            go_type: *json
+          - column: credbound_scim_groups.member_ids_json
+            go_type: *json
+          - column: credbound_oauth_issuers.data_json
+            go_type: *json
+          - column: credbound_oauth_resources.data_json
+            go_type: *json
+          - column: credbound_oauth_clients.data_json
+            go_type: *json
+          - column: credbound_oauth_initial_access_tokens.data_json
+            go_type: *json
+          - column: credbound_oauth_grants.data_json
+            go_type: *json
+          - column: credbound_oauth_authorization_codes.data_json
+            go_type: *json
+          - column: credbound_oauth_access_tokens.data_json
+            go_type: *json
+          - column: credbound_oauth_client_access_tokens.data_json
+            go_type: *json
+          - column: credbound_oauth_refresh_tokens.data_json
+            go_type: *json

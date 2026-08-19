@@ -44,7 +44,7 @@ func (s *Store) UpdateSCIMConfiguration(ctx context.Context, configuration credb
 			return err
 		}
 		count, err := q.UpdateSCIMConfiguration(ctx, db.UpdateSCIMConfigurationParams{
-			ID: configuration.ID, DefaultRole: string(configuration.DefaultRole), TrustDirectoryEmails: sqlBool(configuration.TrustDirectoryEmails),
+			ID: configuration.ID, DefaultRole: string(configuration.DefaultRole), TrustDirectoryEmails: configuration.TrustDirectoryEmails,
 			GroupRoleMappingsJson: mappings, UpdatedAt: configuration.UpdatedAt, WorkspaceID: configuration.WorkspaceID,
 		})
 		if err := affected(count, err); err != nil {
@@ -180,7 +180,7 @@ func (s *Store) UpdateSCIMUser(ctx context.Context, link credbound.SCIMUser, mem
 		}
 		count, err := q.UpdateSCIMUser(ctx, db.UpdateSCIMUserParams{
 			ConfigurationID: link.ConfigurationID, ID: link.ID, ExternalID: nullableString(link.ExternalID),
-			NormalizedUserName: link.UserName, DisplayName: link.DisplayName, EmailsJson: emails, ProfileJson: profile, Active: sqlBool(link.Active),
+			NormalizedUserName: link.UserName, DisplayName: link.DisplayName, EmailsJson: emails, ProfileJson: profile, Active: link.Active,
 			UpdatedAt: link.UpdatedAt, DeprovisionedAt: nullableTime(link.DeprovisionedAt),
 		})
 		if err := affected(count, err); err != nil {
@@ -209,12 +209,12 @@ func (s *Store) SCIMUsers(ctx context.Context, configurationID string, filter cr
 			yield(credbound.PageEvent[credbound.SCIMUser]{}, err)
 			return
 		}
-		query, args, err := postgresSCIMUserListQuery(configurationID, filter, cursor, page.Limit+1)
+		query, args, err := scimUserListQuery(configurationID, filter, cursor, page.Limit+1)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.SCIMUser]{}, err)
 			return
 		}
-		rows, err := s.rows.Query(streamCtx, query, args...)
+		rows, err := s.query(streamCtx, query, args...)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.SCIMUser]{}, mapError(err))
 			return
@@ -317,12 +317,12 @@ func (s *Store) SCIMGroups(ctx context.Context, configurationID string, filter c
 			yield(credbound.PageEvent[credbound.SCIMGroup]{}, err)
 			return
 		}
-		query, args, err := postgresSCIMGroupListQuery(configurationID, filter, cursor, page.Limit+1)
+		query, args, err := scimGroupListQuery(configurationID, filter, cursor, page.Limit+1)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.SCIMGroup]{}, err)
 			return
 		}
-		rows, err := s.rows.Query(streamCtx, query, args...)
+		rows, err := s.query(streamCtx, query, args...)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.SCIMGroup]{}, mapError(err))
 			return
@@ -359,8 +359,8 @@ func insertSCIMConfiguration(ctx context.Context, q *db.Queries, value credbound
 		return err
 	}
 	return mapError(q.InsertSCIMConfiguration(ctx, db.InsertSCIMConfigurationParams{
-		ID: value.ID, WorkspaceID: value.WorkspaceID, Enabled: sqlBool(value.Enabled), DefaultRole: string(value.DefaultRole),
-		TrustDirectoryEmails: sqlBool(value.TrustDirectoryEmails), GroupRoleMappingsJson: mappings, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+		ID: value.ID, WorkspaceID: value.WorkspaceID, Enabled: value.Enabled, DefaultRole: string(value.DefaultRole),
+		TrustDirectoryEmails: value.TrustDirectoryEmails, GroupRoleMappingsJson: mappings, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}))
 }
 
@@ -378,17 +378,17 @@ func insertSCIMUser(ctx context.Context, q *db.Queries, value credbound.SCIMUser
 	}
 	return mapError(q.InsertSCIMUser(ctx, db.InsertSCIMUserParams{
 		ID: value.ID, ConfigurationID: value.ConfigurationID, UserID: value.UserID, ExternalID: nullableString(value.ExternalID),
-		NormalizedUserName: value.UserName, DisplayName: value.DisplayName, EmailsJson: emails, ProfileJson: profile, Active: sqlBool(value.Active),
+		NormalizedUserName: value.UserName, DisplayName: value.DisplayName, EmailsJson: emails, ProfileJson: profile, Active: value.Active,
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt, DeprovisionedAt: nullableTime(value.DeprovisionedAt),
 	}))
 }
 
 func scimConfigurationFromRow(row db.CredboundScimConfiguration) (credbound.SCIMConfiguration, error) {
-	return decodeSCIMConfiguration(row.ID, row.WorkspaceID, row.Enabled, row.DefaultRole, row.TrustDirectoryEmails, []byte(row.GroupRoleMappingsJson), row.CreatedAt, row.UpdatedAt)
+	return decodeSCIMConfiguration(row.ID, row.WorkspaceID, row.Enabled, row.DefaultRole, row.TrustDirectoryEmails, row.GroupRoleMappingsJson, row.CreatedAt, row.UpdatedAt)
 }
 
 func scimConfigurationFromCredentialRow(row db.GetSCIMConfigurationByCredentialPrefixRow) (credbound.SCIMConfiguration, error) {
-	return decodeSCIMConfiguration(row.ID, row.WorkspaceID, row.Enabled, row.DefaultRole, row.TrustDirectoryEmails, []byte(row.GroupRoleMappingsJson), row.CreatedAt, row.UpdatedAt)
+	return decodeSCIMConfiguration(row.ID, row.WorkspaceID, row.Enabled, row.DefaultRole, row.TrustDirectoryEmails, row.GroupRoleMappingsJson, row.CreatedAt, row.UpdatedAt)
 }
 
 func decodeSCIMConfiguration(id, workspaceID string, enabled bool, defaultRole string, trust bool, mappingsJSON []byte, createdAt, updatedAt time.Time) (credbound.SCIMConfiguration, error) {
@@ -403,7 +403,7 @@ func decodeSCIMConfiguration(id, workspaceID string, enabled bool, defaultRole s
 }
 
 func scimUserFromRow(row db.CredboundScimUser) (credbound.SCIMUser, error) {
-	return decodeSCIMUser(row.ID, row.ConfigurationID, row.UserID, row.ExternalID.String, row.NormalizedUserName, row.DisplayName, []byte(row.EmailsJson), []byte(row.ProfileJson), row.Active, row.CreatedAt, row.UpdatedAt, row.DeprovisionedAt)
+	return decodeSCIMUser(row.ID, row.ConfigurationID, row.UserID, row.ExternalID.String, row.NormalizedUserName, row.DisplayName, row.EmailsJson, row.ProfileJson, row.Active, row.CreatedAt, row.UpdatedAt, row.DeprovisionedAt)
 }
 
 type scimUserProfile struct {
@@ -436,7 +436,7 @@ func decodeSCIMUser(id, configurationID, userID, externalID, userName, displayNa
 }
 
 func scimGroupFromRow(row db.CredboundScimGroup) (credbound.SCIMGroup, error) {
-	return decodeSCIMGroup(row.ID, row.ConfigurationID, row.ExternalID.String, row.DisplayName, []byte(row.MemberIdsJson), row.CreatedAt, row.UpdatedAt, row.DeletedAt)
+	return decodeSCIMGroup(row.ID, row.ConfigurationID, row.ExternalID.String, row.DisplayName, row.MemberIdsJson, row.CreatedAt, row.UpdatedAt, row.DeletedAt)
 }
 
 func decodeSCIMGroup(id, configurationID, externalID, displayName string, membersJSON []byte, createdAt, updatedAt time.Time, deleted sql.NullTime) (credbound.SCIMGroup, error) {
@@ -460,7 +460,7 @@ func scanSCIMUser(row scanner) (credbound.SCIMUser, error) {
 	if err := row.Scan(&id, &configurationID, &userID, &external, &userName, &displayName, &emails, &profile, &active, &createdAt, &updatedAt, &deprovisioned); err != nil {
 		return credbound.SCIMUser{}, err
 	}
-	return decodeSCIMUser(id, configurationID, userID, external.String, userName, displayName, []byte(emails), []byte(profile), active, createdAt, updatedAt, deprovisioned)
+	return decodeSCIMUser(id, configurationID, userID, external.String, userName, displayName, emails, profile, active, createdAt, updatedAt, deprovisioned)
 }
 
 func scanSCIMGroup(row scanner) (credbound.SCIMGroup, error) {
@@ -472,29 +472,23 @@ func scanSCIMGroup(row scanner) (credbound.SCIMGroup, error) {
 	if err := row.Scan(&id, &configurationID, &external, &displayName, &members, &createdAt, &updatedAt, &deleted); err != nil {
 		return credbound.SCIMGroup{}, err
 	}
-	return decodeSCIMGroup(id, configurationID, external.String, displayName, []byte(members), createdAt, updatedAt, deleted)
+	return decodeSCIMGroup(id, configurationID, external.String, displayName, members, createdAt, updatedAt, deleted)
 }
 
-func postgresSCIMUserListQuery(configurationID string, filter credbound.SCIMFilter, cursor cursor, limit int) (string, []any, error) {
+func scimUserListQuery(configurationID string, filter credbound.SCIMFilter, cursor cursor, limit int) (string, []any, error) {
 	query := `SELECT id, configuration_id, user_id, external_id, normalized_user_name, display_name, emails_json, profile_json, active, created_at, updated_at, deprovisioned_at
-FROM credbound.scim_users WHERE configuration_id = $1 AND deprovisioned_at IS NULL`
+FROM credbound_scim_users WHERE configuration_id = ? AND deprovisioned_at IS NULL`
 	args := []any{configurationID}
-	next := 2
-	add := func(fragment string, value any) {
-		query += fmt.Sprintf(fragment, next)
-		args = append(args, value)
-		next++
-	}
 	switch filter.Attribute {
 	case "":
 	case "id":
-		add(" AND id::text = $%d", filter.Value)
+		query, args = query+scimIDFilter, append(args, filter.Value)
 	case "externalId":
-		add(" AND external_id = $%d", filter.Value)
+		query, args = query+` AND external_id = ?`, append(args, filter.Value)
 	case "userName":
-		add(" AND normalized_user_name = $%d", strings.ToLower(strings.TrimSpace(filter.Value)))
+		query, args = query+` AND normalized_user_name = ?`, append(args, strings.ToLower(strings.TrimSpace(filter.Value)))
 	case "emails.value":
-		add(" AND EXISTS (SELECT 1 FROM jsonb_array_elements(emails_json) e WHERE e->>'value' = $%d)", strings.ToLower(strings.TrimSpace(filter.Value)))
+		query, args = query+scimEmailFilter, append(args, strings.ToLower(strings.TrimSpace(filter.Value)))
 	case "active":
 		value := false
 		if strings.EqualFold(filter.Value, "true") {
@@ -502,40 +496,34 @@ FROM credbound.scim_users WHERE configuration_id = $1 AND deprovisioned_at IS NU
 		} else if !strings.EqualFold(filter.Value, "false") {
 			return "", nil, fmt.Errorf("%w: invalid active filter", credbound.ErrInvalidInput)
 		}
-		add(" AND active = $%d", value)
+		query, args = query+` AND active = ?`, append(args, value)
 	default:
 		return "", nil, fmt.Errorf("%w: unsupported SCIM user filter", credbound.ErrInvalidInput)
 	}
-	query += fmt.Sprintf(" AND (NOT $%d OR created_at < $%d OR (created_at = $%d AND id < $%d)) ORDER BY created_at DESC, id DESC LIMIT $%d", next, next+1, next+2, next+3, next+4)
+	query += ` AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT ?`
 	args = append(args, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), limit)
 	return query, args, nil
 }
 
-func postgresSCIMGroupListQuery(configurationID string, filter credbound.SCIMFilter, cursor cursor, limit int) (string, []any, error) {
+func scimGroupListQuery(configurationID string, filter credbound.SCIMFilter, cursor cursor, limit int) (string, []any, error) {
 	query := `SELECT id, configuration_id, external_id, display_name, member_ids_json, created_at, updated_at, deleted_at
-FROM credbound.scim_groups WHERE configuration_id = $1 AND deleted_at IS NULL`
+FROM credbound_scim_groups WHERE configuration_id = ? AND deleted_at IS NULL`
 	args := []any{configurationID}
-	next := 2
 	switch filter.Attribute {
 	case "":
 	case "id":
-		query += fmt.Sprintf(" AND id::text = $%d", next)
-		args, next = append(args, filter.Value), next+1
+		query, args = query+scimIDFilter, append(args, filter.Value)
 	case "externalId":
-		query += fmt.Sprintf(" AND external_id = $%d", next)
-		args, next = append(args, filter.Value), next+1
+		query, args = query+` AND external_id = ?`, append(args, filter.Value)
 	case "displayName":
-		query += fmt.Sprintf(" AND display_name = $%d", next)
-		args, next = append(args, filter.Value), next+1
+		query, args = query+` AND display_name = ?`, append(args, filter.Value)
 	default:
 		return "", nil, fmt.Errorf("%w: unsupported SCIM group filter", credbound.ErrInvalidInput)
 	}
-	query += fmt.Sprintf(" AND (NOT $%d OR created_at < $%d OR (created_at = $%d AND id < $%d)) ORDER BY created_at DESC, id DESC LIMIT $%d", next, next+1, next+2, next+3, next+4)
+	query += ` AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT ?`
 	args = append(args, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), limit)
 	return query, args, nil
 }
-
-func sqlBool(value bool) bool { return value }
 
 // SCIMConfigurations streams the workspace's provisioning domains, oldest
 // first.

@@ -22,11 +22,8 @@ func TestOAuthJSONHelpersRejectUnsupportedAndInvalidData(t *testing.T) {
 		t.Fatalf("query error = %v", err)
 	}
 	// A store must never panic the host: an unmarshalable record surfaces as
-	// an error through oauthJSON and oauthParam.
+	// an error through oauthJSON.
 	if _, err := oauthJSON(func() {}); err == nil {
 		t.Fatal("unsupported OAuth JSON value accepted")
-	}
-	if _, err := oauthParam(func() {}); err == nil {
-		t.Fatal("unsupported OAuth JSON parameter accepted")
 	}
 }

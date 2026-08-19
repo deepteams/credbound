@@ -26,9 +26,9 @@ func (s *Store) CreateWorkspaceDomain(ctx context.Context, domain credbound.Work
 		}
 		return mapError(q.InsertWorkspaceDomain(ctx, db.InsertWorkspaceDomainParams{
 			ID: domain.ID, WorkspaceID: domain.WorkspaceID, Domain: domain.Domain, Challenge: domain.Challenge,
-			ConfirmedAt: nullableTime(domain.ConfirmedAt), AutoJoin: boolValue(domain.AutoJoin),
+			ConfirmedAt: nullableTime(domain.ConfirmedAt), AutoJoin: domain.AutoJoin,
 			AutoJoinRole: string(domain.AutoJoinRole), SsoProviderConfigurationID: domain.SSOProviderConfigurationID,
-			EnforceSso: boolValue(domain.EnforceSSO), CreatedAt: domain.CreatedAt, UpdatedAt: domain.UpdatedAt,
+			EnforceSso: domain.EnforceSSO, CreatedAt: domain.CreatedAt, UpdatedAt: domain.UpdatedAt,
 		}))
 	})
 }
@@ -81,8 +81,8 @@ func (s *Store) UpdateWorkspaceDomainPolicy(ctx context.Context, id string, poli
 			return mapError(err)
 		}
 		count, err := q.UpdateWorkspaceDomainPolicy(ctx, db.UpdateWorkspaceDomainPolicyParams{
-			ID: id, AutoJoin: boolValue(policy.AutoJoin), AutoJoinRole: string(policy.AutoJoinRole),
-			SsoProviderConfigurationID: policy.SSOProviderConfigurationID, EnforceSso: boolValue(policy.EnforceSSO),
+			ID: id, AutoJoin: policy.AutoJoin, AutoJoinRole: string(policy.AutoJoinRole),
+			SsoProviderConfigurationID: policy.SSOProviderConfigurationID, EnforceSso: policy.EnforceSSO,
 			UpdatedAt: at,
 		})
 		if err != nil {
@@ -116,10 +116,10 @@ func (s *Store) WorkspaceDomains(ctx context.Context, workspaceID string, page c
 			yield(credbound.PageEvent[credbound.WorkspaceDomain]{}, err)
 			return
 		}
-		rows, err := s.rows.Query(streamCtx, `SELECT id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at
-FROM credbound.workspace_domains
-WHERE workspace_id = $1 AND (NOT $2 OR created_at < $3 OR (created_at = $4 AND id < $5))
-ORDER BY created_at DESC, id DESC LIMIT $6`, workspaceID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
+		rows, err := s.query(streamCtx, `SELECT id, workspace_id, domain, challenge, confirmed_at, auto_join, auto_join_role, sso_provider_configuration_id, enforce_sso, created_at, updated_at
+FROM credbound_workspace_domains
+WHERE workspace_id = ? AND (NOT ? OR created_at < ? OR (created_at = ? AND id < ?))
+ORDER BY created_at DESC, id DESC LIMIT ?`, workspaceID, cursor.ID != "", cursor.Time, cursor.Time, nullableUUID(cursor.ID), page.Limit+1)
 		if err != nil {
 			yield(credbound.PageEvent[credbound.WorkspaceDomain]{}, mapError(err))
 			return

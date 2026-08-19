@@ -6,12 +6,11 @@ package postgresql
 
 import (
 	"database/sql"
-	"encoding/json"
 	"time"
 )
 
 type CredboundAuditChain struct {
-	Singleton int32  `json:"singleton"`
+	Singleton int64  `json:"singleton"`
 	Sequence  int64  `json:"sequence"`
 	HeadHash  []byte `json:"head_hash"`
 }
@@ -85,82 +84,82 @@ type CredboundMembership struct {
 }
 
 type CredboundOauthAccessToken struct {
-	ID       string          `json:"id"`
-	Prefix   string          `json:"prefix"`
-	GrantID  string          `json:"grant_id"`
-	DataJson json.RawMessage `json:"data_json"`
+	ID       string `json:"id"`
+	Prefix   string `json:"prefix"`
+	GrantID  string `json:"grant_id"`
+	DataJson []byte `json:"data_json"`
 }
 
 type CredboundOauthAuthorizationCode struct {
-	ID        string          `json:"id"`
-	Prefix    string          `json:"prefix"`
-	GrantID   string          `json:"grant_id"`
-	UsedAt    sql.NullTime    `json:"used_at"`
-	ExpiresAt time.Time       `json:"expires_at"`
-	DataJson  json.RawMessage `json:"data_json"`
+	ID        string       `json:"id"`
+	Prefix    string       `json:"prefix"`
+	GrantID   string       `json:"grant_id"`
+	UsedAt    sql.NullTime `json:"used_at"`
+	ExpiresAt time.Time    `json:"expires_at"`
+	DataJson  []byte       `json:"data_json"`
 }
 
 type CredboundOauthClient struct {
-	ID        string          `json:"id"`
-	IssuerID  string          `json:"issuer_id"`
-	ClientID  string          `json:"client_id"`
-	CreatedAt time.Time       `json:"created_at"`
-	DataJson  json.RawMessage `json:"data_json"`
+	ID        string    `json:"id"`
+	IssuerID  string    `json:"issuer_id"`
+	ClientID  string    `json:"client_id"`
+	CreatedAt time.Time `json:"created_at"`
+	DataJson  []byte    `json:"data_json"`
 }
 
 type CredboundOauthClientAccessToken struct {
-	ID             string          `json:"id"`
-	Prefix         string          `json:"prefix"`
-	ClientRecordID string          `json:"client_record_id"`
-	DataJson       json.RawMessage `json:"data_json"`
+	ID             string `json:"id"`
+	Prefix         string `json:"prefix"`
+	ClientRecordID string `json:"client_record_id"`
+	DataJson       []byte `json:"data_json"`
 }
 
 type CredboundOauthGrant struct {
-	ID             string          `json:"id"`
-	ClientRecordID string          `json:"client_record_id"`
-	ResourceID     string          `json:"resource_id"`
-	UserID         string          `json:"user_id"`
-	WorkspaceID    string          `json:"workspace_id"`
-	CreatedAt      time.Time       `json:"created_at"`
-	DataJson       json.RawMessage `json:"data_json"`
+	ID             string    `json:"id"`
+	ClientRecordID string    `json:"client_record_id"`
+	ResourceID     string    `json:"resource_id"`
+	UserID         string    `json:"user_id"`
+	WorkspaceID    string    `json:"workspace_id"`
+	CreatedAt      time.Time `json:"created_at"`
+	DataJson       []byte    `json:"data_json"`
 }
 
 type CredboundOauthInitialAccessToken struct {
-	ID                string          `json:"id"`
-	IssuerID          string          `json:"issuer_id"`
-	Prefix            string          `json:"prefix"`
-	RegistrationCount int32           `json:"registration_count"`
-	MaxRegistrations  int32           `json:"max_registrations"`
-	ExpiresAt         time.Time       `json:"expires_at"`
-	RevokedAt         sql.NullTime    `json:"revoked_at"`
-	DataJson          json.RawMessage `json:"data_json"`
+	ID                string       `json:"id"`
+	IssuerID          string       `json:"issuer_id"`
+	Prefix            string       `json:"prefix"`
+	RegistrationCount int64        `json:"registration_count"`
+	MaxRegistrations  int64        `json:"max_registrations"`
+	ExpiresAt         time.Time    `json:"expires_at"`
+	RevokedAt         sql.NullTime `json:"revoked_at"`
+	DataJson          []byte       `json:"data_json"`
 }
 
 type CredboundOauthIssuer struct {
-	ID        string          `json:"id"`
-	Issuer    string          `json:"issuer"`
-	CreatedAt time.Time       `json:"created_at"`
-	DataJson  json.RawMessage `json:"data_json"`
+	ID        string    `json:"id"`
+	Issuer    string    `json:"issuer"`
+	CreatedAt time.Time `json:"created_at"`
+	DataJson  []byte    `json:"data_json"`
 }
 
 type CredboundOauthRefreshToken struct {
-	ID        string          `json:"id"`
-	FamilyID  string          `json:"family_id"`
-	Prefix    string          `json:"prefix"`
-	GrantID   string          `json:"grant_id"`
-	UsedAt    sql.NullTime    `json:"used_at"`
-	RevokedAt sql.NullTime    `json:"revoked_at"`
-	ExpiresAt time.Time       `json:"expires_at"`
-	DataJson  json.RawMessage `json:"data_json"`
+	ID        string       `json:"id"`
+	FamilyID  string       `json:"family_id"`
+	Prefix    string       `json:"prefix"`
+	GrantID   string       `json:"grant_id"`
+	UsedAt    sql.NullTime `json:"used_at"`
+	RevokedAt sql.NullTime `json:"revoked_at"`
+	ExpiresAt time.Time    `json:"expires_at"`
+	DataJson  []byte       `json:"data_json"`
 }
 
 type CredboundOauthResource struct {
-	ID          string          `json:"id"`
-	IssuerID    string          `json:"issuer_id"`
-	WorkspaceID string          `json:"workspace_id"`
-	Resource    string          `json:"resource"`
-	CreatedAt   time.Time       `json:"created_at"`
-	DataJson    json.RawMessage `json:"data_json"`
+	ID          string    `json:"id"`
+	IssuerID    string    `json:"issuer_id"`
+	WorkspaceID string    `json:"workspace_id"`
+	Resource    string    `json:"resource"`
+	CreatedAt   time.Time `json:"created_at"`
+	DataJson    []byte    `json:"data_json"`
 }
 
 type CredboundPasskey struct {
@@ -189,17 +188,17 @@ type CredboundPasswordReset struct {
 }
 
 type CredboundPersonalAccessToken struct {
-	ID          string          `json:"id"`
-	UserID      string          `json:"user_id"`
-	Name        string          `json:"name"`
-	Prefix      string          `json:"prefix"`
-	Digest      []byte          `json:"digest"`
-	WorkspaceID sql.NullString  `json:"workspace_id"`
-	ScopesJson  json.RawMessage `json:"scopes_json"`
-	CreatedAt   time.Time       `json:"created_at"`
-	ExpiresAt   sql.NullTime    `json:"expires_at"`
-	LastUsedAt  sql.NullTime    `json:"last_used_at"`
-	RevokedAt   sql.NullTime    `json:"revoked_at"`
+	ID          string         `json:"id"`
+	UserID      string         `json:"user_id"`
+	Name        string         `json:"name"`
+	Prefix      string         `json:"prefix"`
+	Digest      []byte         `json:"digest"`
+	WorkspaceID sql.NullString `json:"workspace_id"`
+	ScopesJson  []byte         `json:"scopes_json"`
+	CreatedAt   time.Time      `json:"created_at"`
+	ExpiresAt   sql.NullTime   `json:"expires_at"`
+	LastUsedAt  sql.NullTime   `json:"last_used_at"`
+	RevokedAt   sql.NullTime   `json:"revoked_at"`
 }
 
 type CredboundRecoveryCode struct {
@@ -209,14 +208,14 @@ type CredboundRecoveryCode struct {
 }
 
 type CredboundScimConfiguration struct {
-	ID                    string          `json:"id"`
-	WorkspaceID           string          `json:"workspace_id"`
-	Enabled               bool            `json:"enabled"`
-	DefaultRole           string          `json:"default_role"`
-	TrustDirectoryEmails  bool            `json:"trust_directory_emails"`
-	GroupRoleMappingsJson json.RawMessage `json:"group_role_mappings_json"`
-	CreatedAt             time.Time       `json:"created_at"`
-	UpdatedAt             time.Time       `json:"updated_at"`
+	ID                    string    `json:"id"`
+	WorkspaceID           string    `json:"workspace_id"`
+	Enabled               bool      `json:"enabled"`
+	DefaultRole           string    `json:"default_role"`
+	TrustDirectoryEmails  bool      `json:"trust_directory_emails"`
+	GroupRoleMappingsJson []byte    `json:"group_role_mappings_json"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 type CredboundScimCredential struct {
@@ -231,36 +230,36 @@ type CredboundScimCredential struct {
 }
 
 type CredboundScimGroup struct {
-	ID              string          `json:"id"`
-	ConfigurationID string          `json:"configuration_id"`
-	ExternalID      sql.NullString  `json:"external_id"`
-	DisplayName     string          `json:"display_name"`
-	MemberIdsJson   json.RawMessage `json:"member_ids_json"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
-	DeletedAt       sql.NullTime    `json:"deleted_at"`
+	ID              string         `json:"id"`
+	ConfigurationID string         `json:"configuration_id"`
+	ExternalID      sql.NullString `json:"external_id"`
+	DisplayName     string         `json:"display_name"`
+	MemberIdsJson   []byte         `json:"member_ids_json"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	DeletedAt       sql.NullTime   `json:"deleted_at"`
 }
 
 type CredboundScimUser struct {
-	ID                 string          `json:"id"`
-	ConfigurationID    string          `json:"configuration_id"`
-	UserID             string          `json:"user_id"`
-	ExternalID         sql.NullString  `json:"external_id"`
-	NormalizedUserName string          `json:"normalized_user_name"`
-	DisplayName        string          `json:"display_name"`
-	EmailsJson         json.RawMessage `json:"emails_json"`
-	ProfileJson        json.RawMessage `json:"profile_json"`
-	Active             bool            `json:"active"`
-	CreatedAt          time.Time       `json:"created_at"`
-	UpdatedAt          time.Time       `json:"updated_at"`
-	DeprovisionedAt    sql.NullTime    `json:"deprovisioned_at"`
+	ID                 string         `json:"id"`
+	ConfigurationID    string         `json:"configuration_id"`
+	UserID             string         `json:"user_id"`
+	ExternalID         sql.NullString `json:"external_id"`
+	NormalizedUserName string         `json:"normalized_user_name"`
+	DisplayName        string         `json:"display_name"`
+	EmailsJson         []byte         `json:"emails_json"`
+	ProfileJson        []byte         `json:"profile_json"`
+	Active             bool           `json:"active"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
+	DeprovisionedAt    sql.NullTime   `json:"deprovisioned_at"`
 }
 
 type CredboundSession struct {
 	ID                   string       `json:"id"`
 	UserID               string       `json:"user_id"`
 	Method               string       `json:"method"`
-	Level                int16        `json:"level"`
+	Level                int64        `json:"level"`
 	AuthenticatedAt      time.Time    `json:"authenticated_at"`
 	SecondFactorRequired bool         `json:"second_factor_required"`
 	UserAgent            string       `json:"user_agent"`
