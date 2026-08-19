@@ -16,7 +16,6 @@ packages=(
   "./otelobserver"
   "./scimhttp"
   "./sqlstore/postgresql"
-  "./sqlstore/sqlite"
 )
 cover_packages=(
   "$module"
@@ -31,7 +30,6 @@ cover_packages=(
   "$module/webauthnadapter"
   "$module/otelobserver"
   "$module/scimhttp"
-  "$module/sqlstore/sqlite"
 )
 
 raw_profile="$(mktemp "${TMPDIR:-/tmp}/credbound-coverage-raw.XXXXXX")"

@@ -19,8 +19,8 @@ import (
 // Compatibility contract: the required method set may grow in minor releases
 // as features ship, so implementing Store from scratch means tracking every
 // release. External stores that want to stay compile-compatible across
-// upgrades should embed one of the shipped implementations (sqlstore/sqlite,
-// sqlstore/postgresql, memory) in a struct and override only the methods
+// upgrades should embed one of the shipped implementations
+// (sqlstore/postgresql, memory) in a struct and override only the methods
 // they need.
 type Store interface {
 	IdentityStore

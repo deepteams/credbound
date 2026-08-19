@@ -19,7 +19,6 @@ type StoreKind string
 
 const (
 	StoreMemory     StoreKind = "memory"
-	StoreSQLite     StoreKind = "sqlite"
 	StorePostgreSQL StoreKind = "postgresql"
 )
 

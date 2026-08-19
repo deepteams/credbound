@@ -13,26 +13,14 @@ import (
 // bookkeepingTable records which embedded migration files have been applied,
 // together with the SHA-256 checksum of the content that was applied. It is
 // deliberately distinct from goose's version table: pick either goose
-// (pointed at SQLite()/PostgreSQL()) or ApplySQLite/ApplyPostgreSQL for a
-// given database, never both.
+// (pointed at PostgreSQL()) or ApplyPostgreSQL for a given database, never
+// both.
 const bookkeepingTable = "credbound_migrations"
 
 // advisoryLockKey identifies the PostgreSQL advisory lock that serializes
 // concurrent ApplyPostgreSQL runs across instances. Arbitrary but stable —
 // it must never change once released.
 const advisoryLockKey = int64(0x6372656462756e64)
-
-// ApplySQLite applies every embedded SQLite migration that has not run yet,
-// in filename order, each inside its own transaction together with its
-// bookkeeping row. It is idempotent across restarts and is the minimal
-// alternative for hosts that do not run goose. Concurrent runs are safe:
-// SQLite's single-writer file lock serializes them and each migration
-// re-checks its bookkeeping row inside the transaction. A migration file
-// whose content changed after it was applied fails with a checksum error
-// instead of being silently ignored.
-func ApplySQLite(ctx context.Context, db *sql.DB) error {
-	return apply(ctx, db, SQLite(), sqlitePlaceholder, nil)
-}
 
 // ApplyPostgreSQL applies every embedded PostgreSQL migration that has not
 // run yet, in filename order, each inside its own transaction together with
@@ -48,7 +36,6 @@ func ApplyPostgreSQL(ctx context.Context, db *sql.DB) error {
 	return apply(ctx, db, PostgreSQL(), postgresPlaceholder, acquirePostgreSQLLock)
 }
 
-func sqlitePlaceholder(int) string     { return "?" }
 func postgresPlaceholder(n int) string { return fmt.Sprintf("$%d", n) }
 
 // acquirePostgreSQLLock takes the migration advisory lock on a dedicated
@@ -120,7 +107,7 @@ func apply(ctx context.Context, db *sql.DB, fsys fs.FS, placeholder func(int) st
 			return fmt.Errorf("migrations: begin %s: %w", entry.Name(), err)
 		}
 		// Re-check inside the transaction: an instance that started before the
-		// lock was taken (SQLite has none) may have applied this migration
+		// lock was taken may have applied this migration
 		// after the read above; the bookkeeping primary key backstops any
 		// residual race by failing the duplicate insert.
 		var count int

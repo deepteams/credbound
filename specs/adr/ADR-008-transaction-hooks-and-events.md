@@ -49,7 +49,7 @@ result.
 
 ### Transaction port
 
-The `Tx` port exposes only the store type and upcoming audit. The SQLite and
+The `Tx` port exposes only the store type and upcoming audit. The
 PostgreSQL adapters provide a typed `TxFrom` that gives access to the real
 `*sql.Tx`. The token is valid only during the callback, cannot be retained, and
 cannot be used from another goroutine.
@@ -66,7 +66,7 @@ type Commit struct {
 The host service can write atomically only to tables sharing Credbound's database
 and engine. An integration must support every store it enables. The in-memory
 store provides a token without an external handle; shared business writes are
-tested with SQLite and PostgreSQL.
+tested with PostgreSQL.
 
 ### Bootstrap and workspace
 
@@ -138,7 +138,7 @@ operation results. Store adapters gain a new transactional contract, and the
 `Store` interface undergoes an intentional breaking change while the library is
 still in its initial version.
 
-Hooks extend lock duration, particularly under SQLite; they must remain short,
+Hooks extend lock duration; they must remain short,
 honor the context, and never perform external I/O or invoke another `Manager`
 mutation.
 

@@ -75,7 +75,7 @@ jobs:
       - name: Fuzz the untrusted-input parsers
         run: |
           set -euo pipefail
-          for package in . ./memory ./sqlstore/sqlite ./sqlstore/postgresql ./password ./scimhttp ./oauthhttp ./samladapter; do
+          for package in . ./memory ./sqlstore/postgresql ./password ./scimhttp ./oauthhttp ./samladapter; do
             for target in $(go test "$package" -list '^Fuzz' | grep '^Fuzz' || true); do
               echo "::group::$package $target"
               go test "$package" -run "^${target}$" -fuzz "^${target}$" -fuzztime=40s

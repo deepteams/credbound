@@ -106,7 +106,7 @@ retiring symmetric secret.
 
 - Hosts no longer write identity tables directly for ordinary lifecycle work.
 - Security-sensitive cascades and the last-administrator invariant are enforced
-inside a store transaction for both SQLite and PostgreSQL.
+inside a store transaction.
 - PostgreSQL locks the affected root-administrator set and workspace rows while
   evaluating these invariants, so concurrent demotions or disablements cannot
   both pass a stale count.

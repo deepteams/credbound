@@ -1,6 +1,6 @@
 // Package storetest runs the store-independent behavioral conformance suite
 // of Credbound: the same Manager-level flows executed against every store
-// implementation, so a divergence between the in-memory, SQLite and
+// implementation, so a divergence between the in-memory and
 // PostgreSQL backends fails a test instead of reaching production.
 //
 // The root package's own tests exercise the Manager against the in-memory
@@ -14,7 +14,7 @@
 // store per call:
 //
 //	func TestConformance(t *testing.T) {
-//		storetest.Run(t, storetest.Factory{Name: "sqlite", New: newStore})
+//		storetest.Run(t, storetest.Factory{Name: "postgresql", New: newStore})
 //	}
 //
 // Nothing here is safe outside tests: the managers it builds use the

@@ -4,32 +4,33 @@ import (
 	"context"
 	"database/sql"
 	"io/fs"
+	"os"
 	"slices"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/deepteams/credbound/migrations"
-	_ "modernc.org/sqlite"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
 // Migrations were covered for the forward path only: idempotence, concurrency
 // and drift. The Down sections shipped untested even though goose users can
 // run them, and the README's promise that timestamped files interleave with a
-// host's own migrations was never exercised. These tests cover both, plus the
-// parity between the two engines' migration sets.
+// host's own migrations was never exercised. These tests cover both.
 
-// TestSQLiteMigrationsRollBack applies every migration and then rolls them
-// back in reverse order, which is what `goose down` does. A Down section with
-// a typo, or one that forgets an object its Up created, fails here instead of
-// during an incident.
-func TestSQLiteMigrationsRollBack(t *testing.T) {
+// TestMigrationsRollBack applies every migration and then rolls them back in
+// reverse order, which is what `goose down` does. A Down section with a typo,
+// or one that forgets an object its Up created, fails here instead of during
+// an incident.
+func TestMigrationsRollBack(t *testing.T) {
 	ctx := context.Background()
-	database := openSQLite(t, "rollback_test")
+	database := openPostgreSQL(t)
 
-	files := migrationFiles(t, migrations.SQLite())
+	files := migrationFiles(t, migrations.PostgreSQL())
 	for _, file := range files {
-		if _, err := database.ExecContext(ctx, upSection(t, migrations.SQLite(), file)); err != nil {
+		if _, err := database.ExecContext(ctx, upSection(t, migrations.PostgreSQL(), file)); err != nil {
 			t.Fatalf("apply %s: %v", file, err)
 		}
 	}
@@ -39,7 +40,7 @@ func TestSQLiteMigrationsRollBack(t *testing.T) {
 
 	slices.Reverse(files)
 	for _, file := range files {
-		down := downSection(t, migrations.SQLite(), file)
+		down := downSection(t, migrations.PostgreSQL(), file)
 		if strings.TrimSpace(down) == "" {
 			t.Fatalf("%s ships no Down section", file)
 		}
@@ -53,7 +54,7 @@ func TestSQLiteMigrationsRollBack(t *testing.T) {
 
 	// The schema must be reapplicable after a full rollback, which is what a
 	// host does when it retries a failed release.
-	if err := migrations.ApplySQLite(ctx, database); err != nil {
+	if err := migrations.ApplyPostgreSQL(ctx, database); err != nil {
 		t.Fatalf("reapply after rollback: %v", err)
 	}
 	if tables := credboundTables(t, database); len(tables) == 0 {
@@ -61,21 +62,24 @@ func TestSQLiteMigrationsRollBack(t *testing.T) {
 	}
 }
 
-// TestSQLiteMigrationsInterleaveWithHostSchema pins the claim that Credbound's
+// TestMigrationsInterleaveWithHostSchema pins the claim that Credbound's
 // timestamped migrations coexist with a host's own: applying them to a
 // database that already carries host tables and rows must leave that data
 // untouched, keep its own bookkeeping separate, and stay idempotent.
-func TestSQLiteMigrationsInterleaveWithHostSchema(t *testing.T) {
+func TestMigrationsInterleaveWithHostSchema(t *testing.T) {
 	ctx := context.Background()
-	database := openSQLite(t, "interleave_test")
+	database := openPostgreSQL(t)
 
-	if _, err := database.ExecContext(ctx, `CREATE TABLE invoices (id TEXT PRIMARY KEY, amount INTEGER NOT NULL);
+	if _, err := database.ExecContext(ctx, `CREATE TABLE invoices (id text PRIMARY KEY, amount bigint NOT NULL);
 INSERT INTO invoices VALUES ('inv-1', 4200);
-CREATE TABLE host_migrations (filename TEXT PRIMARY KEY);
+CREATE TABLE host_migrations (filename text PRIMARY KEY);
 INSERT INTO host_migrations VALUES ('20260101000000_invoices.sql');`); err != nil {
 		t.Fatalf("host schema: %v", err)
 	}
-	if err := migrations.ApplySQLite(ctx, database); err != nil {
+	t.Cleanup(func() {
+		_, _ = database.ExecContext(context.Background(), `DROP TABLE IF EXISTS invoices, host_migrations, credits`)
+	})
+	if err := migrations.ApplyPostgreSQL(ctx, database); err != nil {
 		t.Fatalf("apply over a host schema: %v", err)
 	}
 
@@ -93,10 +97,10 @@ INSERT INTO host_migrations VALUES ('20260101000000_invoices.sql');`); err != ni
 
 	// A host migration landing after Credbound's, then a second Credbound
 	// run: neither disturbs the other.
-	if _, err := database.ExecContext(ctx, `CREATE TABLE credits (id TEXT PRIMARY KEY)`); err != nil {
+	if _, err := database.ExecContext(ctx, `CREATE TABLE credits (id text PRIMARY KEY)`); err != nil {
 		t.Fatalf("later host migration: %v", err)
 	}
-	if err := migrations.ApplySQLite(ctx, database); err != nil {
+	if err := migrations.ApplyPostgreSQL(ctx, database); err != nil {
 		t.Fatalf("second run: %v", err)
 	}
 	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM credits").Scan(&hostRows); err != nil {
@@ -104,42 +108,53 @@ INSERT INTO host_migrations VALUES ('20260101000000_invoices.sql');`); err != ni
 	}
 }
 
-// TestMigrationSetsAreParallel pins the two engines against each other: a
-// migration added to one and forgotten in the other would let SQLite and
-// PostgreSQL drift apart, which no store test can catch since each engine is
-// only ever compared with itself.
-func TestMigrationSetsAreParallel(t *testing.T) {
-	sqliteFiles := migrationFiles(t, migrations.SQLite())
-	postgresFiles := migrationFiles(t, migrations.PostgreSQL())
-	if !slices.Equal(sqliteFiles, postgresFiles) {
-		t.Fatalf("migration sets diverge:\n sqlite: %v\n postgres: %v", sqliteFiles, postgresFiles)
-	}
-	if len(sqliteFiles) == 0 {
+// TestMigrationNamesInterleave pins the naming contract the README relies on:
+// every file starts with a 14-digit timestamp so lexical order is application
+// order and a host's own migrations can be sorted in between, and every file
+// carries both goose sections.
+func TestMigrationNamesInterleave(t *testing.T) {
+	files := migrationFiles(t, migrations.PostgreSQL())
+	if len(files) == 0 {
 		t.Fatal("no migration is embedded")
 	}
-	if !sort.StringsAreSorted(sqliteFiles) {
-		t.Fatalf("migration names are not in application order: %v", sqliteFiles)
+	if !sort.StringsAreSorted(files) {
+		t.Fatalf("migration names are not in application order: %v", files)
 	}
-	for _, file := range sqliteFiles {
+	for _, file := range files {
 		if len(file) < 15 || strings.IndexFunc(file[:14], func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
 			t.Fatalf("%s does not start with a 14-digit timestamp, so it cannot interleave with a host's own", file)
 		}
-		for name, filesystem := range map[string]fs.FS{"sqlite": migrations.SQLite(), "postgresql": migrations.PostgreSQL()} {
-			raw := readMigration(t, filesystem, file)
-			if !strings.Contains(raw, "-- +goose Up") || !strings.Contains(raw, "-- +goose Down") {
-				t.Fatalf("%s/%s is missing a goose section", name, file)
-			}
+		raw := readMigration(t, migrations.PostgreSQL(), file)
+		if !strings.Contains(raw, "-- +goose Up") || !strings.Contains(raw, "-- +goose Down") {
+			t.Fatalf("%s is missing a goose section", file)
 		}
 	}
 }
 
-func openSQLite(t *testing.T, name string) *sql.DB {
+// openPostgreSQL hands out a connection on a database wiped of Credbound
+// objects, so each test starts from the state a fresh deployment would.
+func openPostgreSQL(t *testing.T) *sql.DB {
 	t.Helper()
-	database, err := sql.Open("sqlite", "file:"+name+"?mode=memory&cache=shared&_pragma=foreign_keys(1)")
+	dsn := os.Getenv("CREDBOUND_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("CREDBOUND_POSTGRES_DSN is not set")
+	}
+	config, err := pgx.ParseConfig(dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
+	database := stdlib.OpenDB(*config)
 	t.Cleanup(func() { database.Close() })
+	reset := func() {
+		if _, err := database.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS credbound CASCADE`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.ExecContext(context.Background(), `DROP TABLE IF EXISTS credbound_migrations`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reset()
+	t.Cleanup(reset)
 	return database
 }
 
@@ -184,7 +199,7 @@ func downSection(t *testing.T, filesystem fs.FS, name string) string {
 func credboundTables(t *testing.T, database *sql.DB) []string {
 	t.Helper()
 	rows, err := database.QueryContext(context.Background(),
-		`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'credbound%' ORDER BY name`)
+		`SELECT table_name FROM information_schema.tables WHERE table_schema = 'credbound' ORDER BY table_name`)
 	if err != nil {
 		t.Fatal(err)
 	}

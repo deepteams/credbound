@@ -61,7 +61,7 @@ with the host service's own Goose migrations without version collisions. On
 PostgreSQL every Credbound object lives in the dedicated `credbound` schema,
 which the first migration creates; the host keeps its own tables outside that
 schema and no `search_path` configuration is required. Do not edit a migration
-that has shipped. PostgreSQL and SQLite must enable their documented
+that has shipped. PostgreSQL must enable its documented
 foreign-key behavior. Back up the database and secret-manager
 references together; a database backup without its encryption key cannot
 restore TOTP authentication.

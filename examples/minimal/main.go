@@ -1,13 +1,13 @@
-// Command minimal is a runnable, end-to-end Credbound integration: SQLite
-// persistence through the pure-Go modernc.org/sqlite driver, the embedded
-// migrations, Argon2id password hashing, and a net/http layer backed by
+// Command minimal is a runnable, end-to-end Credbound integration: PostgreSQL
+// persistence through pgx, the embedded migrations, Argon2id password hashing,
+// and a net/http layer backed by
 // Credbound's server-side session module (CreateSession, AuthenticateSession,
 // SignOut), following the "Sessions and the Authentication capability"
 // contract from the README. TOTP and passkey providers are deliberately
 // omitted to show that they are optional: the related flows simply return
 // ErrNotSupported.
 //
-//	go run ./examples/minimal
+//	CREDBOUND_POSTGRES_DSN=postgres://localhost/credbound go run ./examples/minimal
 //	curl -c jar -X POST -d 'email=root@example.com' --data-urlencode 'password=correct horse battery staple' http://127.0.0.1:8080/signin
 //	curl -b jar http://127.0.0.1:8080/me
 //	curl -b jar -X POST http://127.0.0.1:8080/signout
@@ -16,7 +16,6 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -28,8 +27,9 @@ import (
 	"github.com/deepteams/credbound"
 	"github.com/deepteams/credbound/migrations"
 	"github.com/deepteams/credbound/password"
-	sqlitestore "github.com/deepteams/credbound/sqlstore/sqlite"
-	_ "modernc.org/sqlite"
+	postgresqlstore "github.com/deepteams/credbound/sqlstore/postgresql"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
@@ -43,27 +43,29 @@ func main() {
 	patPepper := secretFromEnv("CREDBOUND_PAT_PEPPER", 32)
 	recoveryPepper := secretFromEnv("CREDBOUND_RECOVERY_PEPPER", 32)
 
-	// foreign_keys enforces the schema's referential integrity and
-	// _texttotime makes the driver scan DATETIME columns into time.Time, both
-	// of which the SQLite store relies on.
-	dsn := os.Getenv("CREDBOUND_SQLITE_DSN")
+	// One pool serves both views the store needs: the pgx pool streams
+	// paginated reads, and stdlib wraps it as the *sql.DB the transactional
+	// queries use.
+	dsn := os.Getenv("CREDBOUND_POSTGRES_DSN")
 	if dsn == "" {
-		dsn = "file:credbound-minimal.db?_pragma=foreign_keys(1)&_texttotime=1"
+		dsn = "postgres://localhost:5432/credbound?sslmode=disable"
 	}
-	database, err := sql.Open("sqlite", dsn)
+	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
-		log.Fatalf("open sqlite: %v", err)
+		log.Fatalf("open postgresql: %v", err)
 	}
+	defer pool.Close()
+	database := stdlib.OpenDBFromPool(pool)
 	defer database.Close()
 
 	// The embedded migrations must be applied before the store is used.
-	// ApplySQLite is idempotent across restarts; a host already using goose
-	// points it at migrations.SQLite() instead.
-	if err := migrations.ApplySQLite(context.Background(), database); err != nil {
+	// ApplyPostgreSQL is idempotent across restarts; a host already using goose
+	// points it at migrations.PostgreSQL() instead.
+	if err := migrations.ApplyPostgreSQL(context.Background(), database); err != nil {
 		log.Fatalf("apply migrations: %v", err)
 	}
 
-	store, err := sqlitestore.New(database)
+	store, err := postgresqlstore.New(database, pool)
 	if err != nil {
 		log.Fatalf("build store: %v", err)
 	}

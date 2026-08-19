@@ -17,5 +17,5 @@ cursors are not entity identifiers and retain their protocol-defined formats.
 ## Consequences
 
 IDs are chronologically sortable within a process without exposing a global
-counter. PostgreSQL uses the `uuid` type; SQLite uses a `TEXT` column with
+counter. PostgreSQL uses the `uuid` type, with
 application-level validation.

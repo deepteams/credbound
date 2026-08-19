@@ -45,6 +45,20 @@ breaking changes may land in any release and are called out explicitly.
   every first-party store); `AnonymizeUser` scrubs SCIM profiles and
   accepted-invitation addresses in the same transaction.
 
+### Removed
+
+- **Breaking: SQLite is no longer supported.** The `sqlstore/sqlite` package,
+  the embedded SQLite migrations (`migrations.SQLite`, `migrations.ApplySQLite`),
+  the `credbound.StoreSQLite` store kind and the `modernc.org/sqlite`
+  dependency are all gone. PostgreSQL is now the only SQL engine, which lets
+  its store use the dialect natively — typed `uuid` parameters, `jsonb`
+  operators, row-level locking and index-friendly predicates — instead of the
+  portable subset the two engines had to share. Hosts that used SQLite for
+  local development or tests should use the in-memory store (`memory.New`,
+  which `credboundtest` already defaults to) or run PostgreSQL; hosts that
+  used it in production must migrate their data to PostgreSQL before
+  upgrading, as no automated path is provided.
+
 ### Fixed
 
 - `max_age` values large enough to overflow a `time.Duration` — anything

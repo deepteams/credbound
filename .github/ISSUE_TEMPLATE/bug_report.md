@@ -17,7 +17,7 @@ the private security-advisory flow linked in SECURITY.md.
 
 ## Reproduction
 
-<!-- Minimal code or test. Mention the store (memory, SQLite, PostgreSQL). -->
+<!-- Minimal code or test. Mention the store (memory, PostgreSQL). -->
 <!-- Use synthetic values only: never paste real tokens, peppers, keys or dumps. -->
 
 ## Environment

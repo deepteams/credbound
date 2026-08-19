@@ -2,7 +2,7 @@
 
 - [ADR-001 — Transport-agnostic hexagonal core](ADR-001-hexagonal-library.md)
 - [ADR-002 — Secrets, assurance levels, and step-up](ADR-002-security-boundaries.md)
-- [ADR-003 — PostgreSQL and SQLite persistence](ADR-003-dual-database.md)
+- [ADR-003 — PostgreSQL and SQLite persistence](ADR-003-dual-database.md) (superseded by ADR-019)
 - [ADR-004 — Instance administration and local exception](ADR-004-instance-administration.md)
 - [ADR-005 — UUIDv7 identifiers](ADR-005-uuidv7.md)
 - [ADR-006 — Multiple email addresses, latest activity, and client audit](ADR-006-user-emails-and-client-audit.md)
@@ -18,3 +18,4 @@
 - [ADR-016 — Server-side sessions](ADR-016-server-side-sessions.md)
 - [ADR-017 — Verified workspace domains, JIT provisioning, and SSO enforcement](ADR-017-workspace-domains-and-jit.md)
 - [ADR-018 — First-party SAML service-provider adapter](ADR-018-samladapter.md)
+- [ADR-019 — PostgreSQL-only SQL persistence](ADR-019-postgresql-only-persistence.md)

@@ -179,7 +179,7 @@
 // require SessionStore, and verified workspace domains with JIT provisioning
 // and domain-enforced SSO require DomainStore. Absent capabilities report
 // ErrNotSupported without affecting anything else; the bundled memory,
-// SQLite and PostgreSQL stores implement all of them.
+// The PostgreSQL store implements all of them.
 //
 // # Audit
 //

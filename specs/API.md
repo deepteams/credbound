@@ -463,7 +463,7 @@ with `ErrInvalidInput` — explicit intent never degrades silently; without
 
 `SignupStore`, `SessionStore`, `DomainStore`, and `PasskeyCredentialStore`
 are optional store capabilities detected by type assertion exactly like
-`SCIMStore` and `OAuthStore`. The bundled in-memory, SQLite, and PostgreSQL
+`SCIMStore` and `OAuthStore`. The bundled in-memory and PostgreSQL
 stores implement all of them.
 
 `BeginDiscoverablePasskeyAuthentication` starts a usernameless WebAuthn
@@ -583,7 +583,7 @@ An implementation embeds `UnimplementedTransactionHook`. Hooks run sequentially
 and must not perform external I/O, invoke another `Manager` mutation, retain the
 `Tx`, or use it from another goroutine.
 
-SQLite and PostgreSQL each expose `TxFrom(credbound.Tx) (*Tx, bool)` and
+The PostgreSQL store exposes `TxFrom(credbound.Tx) (*Tx, bool)` and
 `(*Tx).SQL() *sql.Tx`. The handle becomes invalid when the callback ends.
 
 `Bootstrap` calls `ApplyUserCreate` and then `ApplyWorkspaceCreate` within its

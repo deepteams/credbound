@@ -113,7 +113,7 @@ func WithRandom(random io.Reader) Option {
 }
 
 // WithStore replaces the default in-memory store, for example with a
-// migration-applied SQLite store to test against real persistence.
+// migration-applied PostgreSQL store to test against real persistence.
 func WithStore(store credbound.Store) Option {
 	return func(s *settings) { s.store = store }
 }

@@ -27,11 +27,11 @@ irrelevant and no connection configuration is required. Index, trigger, and
 named-constraint identifiers stay unqualified (SQL does not allow qualifying
 them at creation) and drop their prefix; they inherit the table's schema.
 
-sqlc derives identical Go struct names from `credbound.users` and from
-SQLite's `credbound_users` (both become `CredboundUser`), so the generated
-PostgreSQL store keeps sharing the SQLite implementation source. The generator
-rewrites raw SQL table references with a final `credbound_` → `credbound.`
-pass; SQLite keeps the prefix because it has no schemas.
+sqlc derives Go struct names from the qualified table names, so
+`credbound.users` becomes `CredboundUser`. (This section originally also
+justified keeping those names aligned with SQLite's `credbound_users`, which
+[ADR-019](ADR-019-postgresql-only-persistence.md) made moot when SQLite was
+dropped.)
 
 Integration tests isolate by dropping and letting the first migration recreate
 the `credbound` schema; CI provides one PostgreSQL service per job.
@@ -52,5 +52,5 @@ host's historical ones by date.
   fresh migration run is required.
 - A released migration file is never edited or renumbered again (RELEASING
   policy); this reset is the exception granted by pre-release status.
-- `migrations.SQLite()`/`migrations.PostgreSQL()` and store code are otherwise
+- `migrations.PostgreSQL()` and store code are otherwise
   unchanged for hosts.

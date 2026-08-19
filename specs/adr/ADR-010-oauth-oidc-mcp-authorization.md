@@ -423,7 +423,7 @@ may invalidate grants and tokens according to the issuer's risk policy.
 
 ### Persistence, transactions, and events
 
-The module extends the in-memory, SQLite, and PostgreSQL stores. Goose migrations
+The module extends the in-memory and PostgreSQL stores. Goose migrations
 and sqlc queries cover at least issuers, resources, clients, the CIMD cache,
 initial access tokens, grants, codes, access tokens, refresh-token families,
 consents, and referenced keys. Every internal identifier created by Credbound is

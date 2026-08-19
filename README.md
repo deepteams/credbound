@@ -62,8 +62,8 @@ The project follows a _Specs First_ approach. The product contract is defined in
 
 ## Status
 
-The core, in-memory store, SQLite store, PostgreSQL store and migrations, and
-security adapters are implemented. Version `v0` may still introduce breaking
+The core, in-memory store, PostgreSQL store and migrations, and security
+adapters are implemented. Version `v0` may still introduce breaking
 changes before the first stable release. CI applies the PostgreSQL migrations
 into the dedicated `credbound` schema and exercises lifecycle, OAuth, pagination, transactional
 hooks, and append-only audit behavior against a real PostgreSQL service.
@@ -141,8 +141,8 @@ checks and per-workspace MFA enforcement. The host owns sessions and must:
 Hosts that would rather not manage session persistence themselves can use the
 optional server-side session module (`CreateSession`, `AuthenticateSession`,
 `Sessions`, `RevokeSession`, `RevokeUserSessions`), available when the store
-implements `SessionStore` — the bundled in-memory, SQLite, and PostgreSQL
-stores all do. It persists the `Authentication` snapshot behind a
+implements `SessionStore` — both bundled stores, in-memory and PostgreSQL,
+do. It persists the `Authentication` snapshot behind a
 single-display `cbs_` token (digest-only at rest, absolute
 `Config.SessionTTL` expiry plus an optional `Config.SessionIdleTimeout`),
 lists a user's devices, and extends the revocation cascade of
@@ -156,12 +156,12 @@ token's transport — cookies, CSRF, TLS — remains host-owned.
 import (
     "github.com/deepteams/credbound"
     "github.com/deepteams/credbound/password"
-    "github.com/deepteams/credbound/sqlstore/sqlite" // driver: modernc.org/sqlite
+    "github.com/deepteams/credbound/sqlstore/postgresql" // driver: jackc/pgx/v5
     "github.com/deepteams/credbound/totpadapter"
     "github.com/deepteams/credbound/webauthnadapter"
 )
 
-store, err := sqlite.New(database)
+store, err := postgresql.New(database, pool)
 if err != nil {
     return err
 }
@@ -209,13 +209,13 @@ auth, err := credbound.New(credbound.Config{
 ```
 
 The snippet assumes the embedded migrations have already been applied to
-`database` (see `migrations.SQLite()` and `migrations.PostgreSQL()` below).
+`database` (see `migrations.PostgreSQL()` below).
 For a first experiment, `memory.New()` (package
 `github.com/deepteams/credbound/memory`) is a full-featured store that needs
 no database or migrations at all.
 Only `Store`, `Passwords`, and the three secrets are required: the `TOTP` and
 `Passkeys` providers are optional, and their flows return `ErrNotSupported`
-until the host wires them. A complete, runnable integration — SQLite,
+until the host wires them. A complete, runnable integration — PostgreSQL,
 migration application, first-run bootstrap, and a cookie-session HTTP layer
 following the sessions contract above — lives in
 [`examples/minimal`](examples/minimal/main.go).
@@ -238,7 +238,7 @@ roles or permissions.
 
 ### Optional SCIM provisioning
 
-The in-memory, SQLite, and PostgreSQL stores implement `SCIMStore`. A SaaS
+The in-memory and PostgreSQL stores implement `SCIMStore`. A SaaS
 application offering SCIM creates a workspace configuration, returns the raw
 credential to the directory once, and then mounts the adapter:
 
@@ -284,7 +284,7 @@ commercial policy.
 A `TransactionHook` extends the Credbound transaction before its audit record
 and commit. This is the intended extension point for atomically creating a
 freemium credit ledger, quota, or outbox row in the host-service database.
-SQLite and PostgreSQL provide a typed `TxFrom`; the handle is valid only during
+The PostgreSQL store provides a typed `TxFrom`; the handle is valid only during
 the callback. Any hook error or panic cancels the entire mutation.
 
 An `EventListener` then receives the committed fact, such as `user.created` or
@@ -303,11 +303,11 @@ To add a business fact to the audit log, the service calls `RecordAudit` with an
 `AuditInput`. Credbound always constructs the UUIDv7 identifier, actor, and
 timestamp.
 
-Embedded Goose migrations are available through `migrations.SQLite()` and
+Embedded Goose migrations are available through
 `migrations.PostgreSQL()`. Versions are timestamps so they interleave with the
-host service's own migrations, and on PostgreSQL every table lives in the
-dedicated `credbound` schema. Hosts without a migration tool call
-`migrations.ApplySQLite(ctx, db)` or `migrations.ApplyPostgreSQL(ctx, db)`
+host service's own migrations, and every table lives in the dedicated
+`credbound` schema. Hosts without a migration tool call
+`migrations.ApplyPostgreSQL(ctx, db)`
 instead — idempotent, one transaction per migration; pick goose or the
 helpers for a given database, never both. The first `Bootstrap` call atomically creates the
 first user, their workspace, their `admin` membership, and their instance-level
@@ -324,7 +324,7 @@ host-service tests: in-memory store, fast fake password hasher, deterministic
 clock and randomness, and TOTP/passkey fakes whose ceremonies succeed with
 fixed inputs. `DiscoverablePasskeys` replaces the passkey fake when the test
 covers usernameless sign-in, and `WithStore` points the manager at a
-migration-applied SQLite or PostgreSQL store when persistence itself is under
+migration-applied PostgreSQL store when persistence itself is under
 test. Nothing in it is safe for production.
 
 ```go
