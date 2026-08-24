@@ -29,6 +29,7 @@ func buildRoleCatalog(configured []RoleDefinition) (*roleCatalog, error) {
 				PermissionWorkspaceAccess, PermissionWorkspaceUsersRead, PermissionWorkspaceUsersWrite,
 				PermissionWorkspaceSettingsWrite,
 				PermissionWorkspaceRBACWrite, PermissionWorkspaceAuditRead,
+				PermissionWorkspaceCredentialsManage,
 				PermissionOAuthResourceManage,
 			},
 			Inherits: []Role{RoleMember},

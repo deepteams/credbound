@@ -49,7 +49,8 @@
 //   - SSO linking and domains: BeginSSOLink, BeginSSOStepUp, UnlinkSSO,
 //     SSOIdentities; CreateWorkspaceDomain, ConfirmWorkspaceDomain,
 //     UpdateWorkspaceDomainPolicy, RemoveWorkspaceDomain, WorkspaceDomains.
-//   - PATs and revocation: CreatePAT, RevokePAT, PATs; RevokeUserCredentials.
+//   - PATs and revocation: CreatePAT, RevokePAT, PATs, WorkspacePATs,
+//     RevokeWorkspacePAT; RevokeUserCredentials.
 //   - Tenant authorization: AuthorizePermission (canonical), Authorize,
 //     GrantRole, RequireStepUp.
 //   - Lifecycle: Bootstrap, CreateUser, UpdateUser, Disable/EnableUser,

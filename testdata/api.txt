@@ -142,6 +142,7 @@ credbound const PermissionUsersRead Permission
 credbound const PermissionUsersWrite Permission
 credbound const PermissionWorkspaceAccess WorkspacePermission
 credbound const PermissionWorkspaceAuditRead WorkspacePermission
+credbound const PermissionWorkspaceCredentialsManage WorkspacePermission
 credbound const PermissionWorkspaceRBACWrite WorkspacePermission
 credbound const PermissionWorkspaceSettingsWrite WorkspacePermission
 credbound const PermissionWorkspaceUsersRead WorkspacePermission
@@ -1150,6 +1151,8 @@ credbound field WorkspaceMember.Membership Membership
 credbound field WorkspaceMember.User User
 credbound field WorkspaceMembership.Membership Membership
 credbound field WorkspaceMembership.Workspace Workspace
+credbound field WorkspacePAT.PAT PAT
+credbound field WorkspacePAT.User User
 credbound func CollectPage[T any](seq iter.Seq2[PageEvent[T], error]) ([]T, PageEnd, error)
 credbound func ComputeAuditHash(previous []byte, event AuditEvent) []byte
 credbound func CredentialFingerprint(hash string) []byte
@@ -1326,10 +1329,12 @@ credbound interface OIDCSigner.JWKS(context.Context) (json.RawMessage, error)
 credbound interface OIDCSigner.SignIDToken(context.Context, OIDCClaims) (string, error)
 credbound interface Observer.Observe(context.Context, Operation)
 credbound interface PATStore.CreatePAT(context.Context, PAT, Commit) error
+credbound interface PATStore.PATByID(context.Context, UUID) (PAT, error)
 credbound interface PATStore.PATByPrefix(context.Context, string) (PAT, error)
 credbound interface PATStore.PATs(context.Context, UUID, PageRequest) iter.Seq2[PageEvent[PAT], error]
 credbound interface PATStore.RevokePAT(context.Context, UUID, UUID, time.Time, Commit) error
 credbound interface PATStore.TouchPAT(context.Context, UUID, time.Time, Commit) error
+credbound interface PATStore.WorkspacePATs(context.Context, UUID, PageRequest) iter.Seq2[PageEvent[PAT], error]
 credbound interface PasskeyCredentialStore.PasskeyByCredentialID(ctx context.Context, credentialID []byte) (Passkey, error)
 credbound interface PasskeyProvider.BeginAuthentication(context.Context, PasskeyUser) (json.RawMessage, []byte, error)
 credbound interface PasskeyProvider.BeginDecoyAuthentication(ctx context.Context, seed []byte) (json.RawMessage, []byte, error)
@@ -1573,6 +1578,7 @@ credbound method (*Manager) RevokeSCIMCredential(ctx context.Context, actor Auth
 credbound method (*Manager) RevokeSession(ctx context.Context, actor Authentication, sessionID UUID) (err error)
 credbound method (*Manager) RevokeUserCredentials(ctx context.Context, actor Authentication, request TrustedRequest, userID UUID) (err error)
 credbound method (*Manager) RevokeUserSessions(ctx context.Context, actor Authentication, request TrustedRequest, userID UUID) (err error)
+credbound method (*Manager) RevokeWorkspacePAT(ctx context.Context, actor Authentication, workspaceID, patID UUID) (err error)
 credbound method (*Manager) RotateOAuthClientSecret(ctx context.Context, actor Authentication, request TrustedRequest, clientRecordID UUID) (_ IssuedOAuthClient, err error)
 credbound method (*Manager) RotateSCIMCredential(ctx context.Context, actor Authentication, configurationID UUID, expiresAt *time.Time) (_ IssuedSCIMCredential, err error)
 credbound method (*Manager) SCIMConfigurations(ctx context.Context, actor Authentication, workspaceID UUID) iter.Seq2[SCIMConfiguration, error]
@@ -1607,6 +1613,7 @@ credbound method (*Manager) Workspace(ctx context.Context, actor Authentication,
 credbound method (*Manager) WorkspaceDomains(ctx context.Context, actor Authentication, workspaceID UUID, page PageRequest) iter.Seq2[PageEvent[WorkspaceDomain], error]
 credbound method (*Manager) WorkspaceInvitations(ctx context.Context, actor Authentication, workspaceID UUID, page PageRequest) iter.Seq2[PageEvent[WorkspaceInvitation], error]
 credbound method (*Manager) WorkspaceMembers(ctx context.Context, actor Authentication, workspaceID UUID, page PageRequest) iter.Seq2[PageEvent[WorkspaceMember], error]
+credbound method (*Manager) WorkspacePATs(ctx context.Context, actor Authentication, workspaceID UUID, page PageRequest) iter.Seq2[PageEvent[WorkspacePAT], error]
 credbound method (*Manager) Workspaces(ctx context.Context, actor Authentication, page PageRequest) iter.Seq2[PageEvent[Workspace], error]
 credbound method (*ValidationError) Error() string
 credbound method (*ValidationError) Unwrap() error
@@ -1995,6 +2002,7 @@ credbound type WorkspaceInvitationChange struct
 credbound type WorkspaceInvitationEvent struct
 credbound type WorkspaceMember struct
 credbound type WorkspaceMembership struct
+credbound type WorkspacePAT struct
 credbound type WorkspacePermission =
 credbound type WorkspaceStore interface
 credbound var ErrAuditCompromised
@@ -2145,6 +2153,7 @@ memory method (*Store) OAuthProtectedResourceByID(ctx context.Context, id credbo
 memory method (*Store) OAuthProtectedResourceByURI(ctx context.Context, uri string) (credbound.OAuthProtectedResource, error)
 memory method (*Store) OAuthProtectedResources(ctx context.Context, workspaceID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthProtectedResource], error]
 memory method (*Store) OAuthRefreshTokenByPrefix(ctx context.Context, prefix string) (credbound.OAuthRefreshToken, error)
+memory method (*Store) PATByID(ctx context.Context, id credbound.UUID) (credbound.PAT, error)
 memory method (*Store) PATByPrefix(ctx context.Context, prefix string) (credbound.PAT, error)
 memory method (*Store) PATs(ctx context.Context, userID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.PAT], error]
 memory method (*Store) PasskeyByCredentialID(ctx context.Context, credentialID []byte) (credbound.Passkey, error)
@@ -2231,6 +2240,7 @@ memory method (*Store) WorkspaceDomainByID(ctx context.Context, id credbound.UUI
 memory method (*Store) WorkspaceDomains(ctx context.Context, workspaceID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.WorkspaceDomain], error]
 memory method (*Store) WorkspaceInvitationByID(ctx context.Context, invitationID credbound.UUID) (credbound.WorkspaceInvitation, error)
 memory method (*Store) WorkspaceInvitations(ctx context.Context, workspaceID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.WorkspaceInvitation], error]
+memory method (*Store) WorkspacePATs(ctx context.Context, workspaceID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.PAT], error]
 memory method (*Store) Workspaces(ctx context.Context, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Workspace], error]
 memory method (*Tx) Active() bool
 memory method (*Tx) Audit() credbound.AuditEvent
@@ -2396,6 +2406,7 @@ sqlstore/postgresql method (*Store) OAuthProtectedResourceByID(ctx context.Conte
 sqlstore/postgresql method (*Store) OAuthProtectedResourceByURI(ctx context.Context, resource string) (credbound.OAuthProtectedResource, error)
 sqlstore/postgresql method (*Store) OAuthProtectedResources(ctx context.Context, workspaceID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.OAuthProtectedResource], error]
 sqlstore/postgresql method (*Store) OAuthRefreshTokenByPrefix(ctx context.Context, prefix string) (credbound.OAuthRefreshToken, error)
+sqlstore/postgresql method (*Store) PATByID(ctx context.Context, id credbound.UUID) (credbound.PAT, error)
 sqlstore/postgresql method (*Store) PATByPrefix(ctx context.Context, prefix string) (credbound.PAT, error)
 sqlstore/postgresql method (*Store) PATs(ctx context.Context, userID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.PAT], error]
 sqlstore/postgresql method (*Store) PasskeyByCredentialID(ctx context.Context, credentialID []byte) (credbound.Passkey, error)
@@ -2481,6 +2492,7 @@ sqlstore/postgresql method (*Store) WorkspaceDomainByID(ctx context.Context, id 
 sqlstore/postgresql method (*Store) WorkspaceDomains(ctx context.Context, workspaceID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.WorkspaceDomain], error]
 sqlstore/postgresql method (*Store) WorkspaceInvitationByID(ctx context.Context, invitationID credbound.UUID) (credbound.WorkspaceInvitation, error)
 sqlstore/postgresql method (*Store) WorkspaceInvitations(ctx context.Context, workspaceID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.WorkspaceInvitation], error]
+sqlstore/postgresql method (*Store) WorkspacePATs(ctx context.Context, workspaceID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.PAT], error]
 sqlstore/postgresql method (*Store) Workspaces(ctx context.Context, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.Workspace], error]
 sqlstore/postgresql method (*Tx) Audit() credbound.AuditEvent
 sqlstore/postgresql method (*Tx) Kind() credbound.StoreKind

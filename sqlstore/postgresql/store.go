@@ -1011,7 +1011,26 @@ func (s *Store) AnonymizeUser(ctx context.Context, userID credbound.UUID, at tim
 
 // PATs streams the user's tokens, newest first, as one cursor page with
 // digests omitted.
+// PATByID returns one token by identifier.
+func (s *Store) PATByID(ctx context.Context, id credbound.UUID) (credbound.PAT, error) {
+	row, err := s.queries.GetPATByID(ctx, dbID(id))
+	if err != nil {
+		return credbound.PAT{}, mapError(err)
+	}
+	return patFromRow(row)
+}
+
+// WorkspacePATs streams the tokens bound to one workspace, newest first,
+// across every owner.
+func (s *Store) WorkspacePATs(ctx context.Context, workspaceID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.PAT], error] {
+	return s.patPage(ctx, page, workspaceID, workspacePATsFirstPage, workspacePATsAfterCursor)
+}
+
 func (s *Store) PATs(ctx context.Context, userID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.PAT], error] {
+	return s.patPage(ctx, page, userID, patsFirstPage, patsAfterCursor)
+}
+
+func (s *Store) patPage(ctx context.Context, page credbound.PageRequest, owner credbound.UUID, firstPage, afterCursor string) iter.Seq2[credbound.PageEvent[credbound.PAT], error] {
 	return func(yield func(credbound.PageEvent[credbound.PAT], error) bool) {
 		streamCtx, cancel := context.WithTimeout(ctx, s.streamTimeout)
 		defer cancel()
@@ -1020,9 +1039,9 @@ func (s *Store) PATs(ctx context.Context, userID credbound.UUID, page credbound.
 			yield(credbound.PageEvent[credbound.PAT]{}, err)
 			return
 		}
-		query, args := patsFirstPage, []any{userID, page.Limit + 1}
+		query, args := firstPage, []any{owner, page.Limit + 1}
 		if cursor.ID != (credbound.UUID{}) {
-			query, args = patsAfterCursor, []any{userID, cursor.Time, cursor.ID, page.Limit + 1}
+			query, args = afterCursor, []any{owner, cursor.Time, cursor.ID, page.Limit + 1}
 		}
 		rows, err := s.query(streamCtx, query, args...)
 		if err != nil {

@@ -173,6 +173,8 @@ CreatePAT(ctx, authn, CreatePATInput) (IssuedPAT, error)
 AuthenticatePAT(ctx, rawToken) (Authentication, error)
 RevokePAT(ctx, authn, patID) error
 PATs(ctx, authn, userID, PageRequest) iter.Seq2[PageEvent[PAT], error]
+WorkspacePATs(ctx, authn, workspaceID, PageRequest) iter.Seq2[PageEvent[WorkspacePAT], error]
+RevokeWorkspacePAT(ctx, authn, workspaceID, patID) error
 
 GrantRole(ctx, authn, workspaceID, userID, role) error
 InviteToWorkspace(ctx, authn, workspaceID, InviteToWorkspaceInput) (IssuedWorkspaceInvitation, error)

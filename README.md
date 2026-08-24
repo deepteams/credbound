@@ -139,6 +139,23 @@ checks and per-workspace MFA enforcement. The host owns sessions and must:
   `ChangePassword`, `DisableUser`, or `RevokeUserCredentials` fires — the
   library revokes PATs and OAuth grants but cannot see host sessions.
 
+### Workspace-scoped keys
+
+A PAT bound to a workspace (`CreatePATInput.WorkspaceID`) is administered by
+that workspace, not only by its owner: `WorkspacePATs` lists the bound tokens
+of every member joined with the owner's profile, and `RevokeWorkspacePAT`
+disables one — the page that turns off a departed colleague's key. Both are
+gated by `workspace.credentials.manage`, which the `admin` role holds by
+default and which conveys no power over memberships, so no
+instance-administration role is involved.
+
+A token bound to no workspace is its owner's across the whole instance: no
+workspace administrator can see it, revoke it, or learn that it exists — a
+mismatched binding reports `ErrNotFound`. Reading one's own tokens (`PATs`)
+needs an interactive authentication and nothing more, since the listing
+carries names, prefixes and timestamps but never a secret; issuing and
+revoking follow `Config.StepUp`.
+
 ### Machine traffic
 
 Every chained audit write takes one instance-wide row lock (`audit_chain`)

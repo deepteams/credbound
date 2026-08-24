@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"iter"
 	"slices"
@@ -239,9 +240,13 @@ func (m *Manager) RevokePAT(ctx context.Context, actor Authentication, patID UUI
 }
 
 // PATs streams a user's tokens — metadata, prefix and timestamps, never the
-// secret. An empty userID means the actor, which requires a recent
-// interactive authentication; reading another user requires admin users
-// read — the same scoping as Sessions, Emails and Passkeys.
+// secret. An empty userID means the actor, which requires an interactive
+// authentication and nothing more: what it returns are names, prefixes and
+// timestamps, not credentials, and a token-management screen that had to
+// re-prompt for a password every StepUpMaxAge would train users to
+// re-authenticate on sight. Issuing and revoking stay gated by
+// Config.StepUp's PAT scope. Reading another user requires admin users read —
+// the same scoping as Sessions, Emails and Passkeys.
 func (m *Manager) PATs(ctx context.Context, actor Authentication, userID UUID, page PageRequest) iter.Seq2[PageEvent[PAT], error] {
 	if actor.UserID == (UUID{}) {
 		return errorSeq[PageEvent[PAT]](ErrUnauthorized)
@@ -250,7 +255,7 @@ func (m *Manager) PATs(ctx context.Context, actor Authentication, userID UUID, p
 		userID = actor.UserID
 	}
 	if userID == actor.UserID {
-		if err := m.requireRecentInteractive(ctx, actor); err != nil {
+		if err := m.requireInteractive(ctx, actor); err != nil {
 			return errorSeq[PageEvent[PAT]](err)
 		}
 	} else if err := m.AuthorizeAdmin(ctx, actor, PermissionUsersRead); err != nil {
@@ -261,6 +266,100 @@ func (m *Manager) PATs(ctx context.Context, actor Authentication, userID UUID, p
 		return errorSeq[PageEvent[PAT]](err)
 	}
 	return m.store.PATs(ctx, userID, page)
+}
+
+// WorkspacePATs streams the tokens bound to one workspace joined with each
+// owner's account profile, so a workspace administrator can render the keys
+// page of their tenant — including the key of a colleague who has left —
+// without the instance-wide admin users read permission. It requires
+// workspace credentials manage in that workspace. Digests are never exposed,
+// and a token whose owner vanished mid-stream is skipped rather than failing
+// the page, exactly like WorkspaceMembers.
+//
+// Only workspace-bound tokens appear: a token created without a WorkspaceID
+// belongs to its user across the whole instance, not to a tenant, so no
+// workspace administrator can see or revoke it.
+func (m *Manager) WorkspacePATs(ctx context.Context, actor Authentication, workspaceID UUID, page PageRequest) iter.Seq2[PageEvent[WorkspacePAT], error] {
+	if err := m.AuthorizePermission(ctx, actor, workspaceID, PermissionWorkspaceCredentialsManage); err != nil {
+		return errorSeq[PageEvent[WorkspacePAT]](err)
+	}
+	page, err := normalizePage(page)
+	if err != nil {
+		return errorSeq[PageEvent[WorkspacePAT]](err)
+	}
+	return func(yield func(PageEvent[WorkspacePAT], error) bool) {
+		for event, err := range m.store.WorkspacePATs(ctx, workspaceID, page) {
+			if err != nil {
+				yield(PageEvent[WorkspacePAT]{}, err)
+				return
+			}
+			if event.Data == nil {
+				if event.End != nil && !yield(PageEvent[WorkspacePAT]{Type: event.Type, End: event.End}, nil) {
+					return
+				}
+				continue
+			}
+			user, userErr := m.store.UserByID(ctx, event.Data.UserID)
+			if userErr != nil {
+				if errors.Is(userErr, ErrNotFound) {
+					continue
+				}
+				yield(PageEvent[WorkspacePAT]{}, userErr)
+				return
+			}
+			pat := *event.Data
+			pat.Digest = nil
+			if !yield(ItemEvent(WorkspacePAT{PAT: pat, User: user}), nil) {
+				return
+			}
+		}
+	}
+}
+
+// RevokeWorkspacePAT revokes a token bound to the workspace, whoever owns it,
+// atomically with the audit event. It is how a tenant disables the key of a
+// departed member without instance administration: the actor needs workspace
+// credentials manage and the step-up its workspace scope demands
+// (Config.StepUp). A token that is not bound to this workspace — another
+// tenant's, or an unbound instance-wide one — reports ErrNotFound, so the
+// permission can never reach beyond the tenant that granted it.
+func (m *Manager) RevokeWorkspacePAT(ctx context.Context, actor Authentication, workspaceID, patID UUID) (err error) {
+	started := m.now()
+	defer func() { m.observe(ctx, "auth.pat.workspace_revoke", started, err) }()
+	if err := m.authorizeWorkspaceMutation(ctx, actor, workspaceID, PermissionWorkspaceCredentialsManage, "pat.workspace.revoke"); err != nil {
+		return err
+	}
+	if patID == (UUID{}) {
+		return fmt.Errorf("%w: PAT id is required", ErrInvalidInput)
+	}
+	pat, err := m.store.PATByID(ctx, patID)
+	if err != nil {
+		return m.mapStoreError(ctx, "auth.pat.workspace_revoke", err)
+	}
+	// The binding is the whole authorization: an unbound token, or one bound
+	// elsewhere, is not this workspace's to revoke and must not even be
+	// confirmed to exist.
+	if pat.WorkspaceID != workspaceID {
+		return ErrNotFound
+	}
+	event, err := m.newAudit(ctx, actor.UserID, "pat.revoke", "pat", patID.String(), workspaceID, AuditSucceeded, "")
+	if err != nil {
+		return err
+	}
+	meta, err := m.newEventMeta(EventPATRevoked, "auth.pat.workspace_revoke", actor.UserID, workspaceID, event)
+	if err != nil {
+		return err
+	}
+	change := PATRevocation{EventMeta: meta, PATID: patID, UserID: pat.UserID}
+	commit := m.transactionalCommit(event, "pat.revocation", func(ctx context.Context, tx Tx, hook TransactionHook) error {
+		return hook.ApplyPATRevocation(ctx, tx, change)
+	})
+	if err := m.store.RevokePAT(ctx, pat.UserID, patID, m.now(), commit); err != nil {
+		return m.mapStoreError(ctx, "auth.pat.workspace_revoke", err)
+	}
+	revoked := PATRevokedEvent{EventMeta: meta, PATID: patID, UserID: pat.UserID}
+	m.events.emit(ctx, EventPATRevoked, func(listener EventListener) error { return listener.OnPATRevoked(ctx, revoked) })
+	return nil
 }
 
 // recordUnknownPATRejection audits a token that matches no record at all —

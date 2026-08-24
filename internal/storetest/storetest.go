@@ -63,6 +63,7 @@ var flows = []flow{
 	{"TOTP", testTOTP},
 	{"Passkeys", testPasskeys},
 	{"PersonalAccessTokens", testPersonalAccessTokens},
+	{"WorkspacePATAdministration", testWorkspacePATAdministration},
 	{"Sessions", testSessions},
 	{"Invitations", testInvitations},
 	{"SignUp", testSignUp},
@@ -608,6 +609,60 @@ func testPasskeys(t *testing.T, factory Factory) {
 // testPersonalAccessTokens pins the PAT contract: the raw token is shown once,
 // its scopes cap workspace permissions, it can never satisfy a step-up, and
 // revocation is immediate.
+// testWorkspacePATAdministration pins the tenant-scoped key page across
+// stores: a workspace administrator holding no instance role lists the
+// workspace-bound tokens of every member with their owner profile and revokes
+// them, while an unbound token stays out of the tenant's reach.
+func testWorkspacePATAdministration(t *testing.T, factory Factory) {
+	h := newHarness(t, factory)
+	root, workspace := h.bootstrap()
+
+	admin, err := h.manager.CreateUser(h.ctx, h.stepUp(root.UserID), workspace.ID, credbound.CreateUserInput{
+		Email: "keys-admin@example.com", DisplayName: "Keys Admin", Password: memberPassword, Role: credbound.RoleAdmin,
+	})
+	if err != nil {
+		t.Fatalf("create workspace admin: %v", err)
+	}
+	member, err := h.manager.CreateUser(h.ctx, h.stepUp(root.UserID), workspace.ID, credbound.CreateUserInput{
+		Email: "keys-member@example.com", DisplayName: "Keys Member", Password: memberPassword, Role: credbound.RoleMember,
+	})
+	if err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	bound, err := h.manager.CreatePAT(h.ctx, h.stepUp(member.ID), credbound.CreatePATInput{
+		Name: "router key", WorkspaceID: workspace.ID, Scopes: []string{"read"},
+	})
+	if err != nil {
+		t.Fatalf("create bound PAT: %v", err)
+	}
+	unbound, err := h.manager.CreatePAT(h.ctx, h.stepUp(member.ID), credbound.CreatePATInput{
+		Name: "personal", Scopes: []string{"read"},
+	})
+	if err != nil {
+		t.Fatalf("create unbound PAT: %v", err)
+	}
+
+	rows, _ := collect(t, h.manager.WorkspacePATs(h.ctx, h.stepUp(admin.ID), workspace.ID, credbound.PageRequest{Limit: 50}))
+	if len(rows) != 1 || rows[0].PAT.ID != bound.PAT.ID || rows[0].PAT.Digest != nil {
+		t.Fatalf("workspace keys = %#v", rows)
+	}
+	if rows[0].User.ID != member.ID || rows[0].User.DisplayName != "Keys Member" {
+		t.Fatalf("owner profile = %#v", rows[0].User)
+	}
+	if err := h.manager.RevokeWorkspacePAT(h.ctx, h.stepUp(admin.ID), workspace.ID, unbound.PAT.ID); !errors.Is(err, credbound.ErrNotFound) {
+		t.Fatalf("revoking an unbound token: %v", err)
+	}
+	if err := h.manager.RevokeWorkspacePAT(h.ctx, h.stepUp(admin.ID), workspace.ID, bound.PAT.ID); err != nil {
+		t.Fatalf("workspace revocation: %v", err)
+	}
+	if _, err := h.manager.AuthenticatePAT(h.ctx, bound.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("revoked workspace key authenticated: %v", err)
+	}
+	if _, err := h.manager.AuthenticatePAT(h.ctx, unbound.Token); err != nil {
+		t.Fatalf("unbound token after the tenant revocations: %v", err)
+	}
+}
+
 func testPersonalAccessTokens(t *testing.T, factory Factory) {
 	h := newHarness(t, factory)
 	root, workspace := h.bootstrap()

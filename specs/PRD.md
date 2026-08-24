@@ -42,6 +42,7 @@ Credbound provides a reusable, testable, transport-independent core.
 | PAT-001 | Creation | A PAT uses at least 256 bits of entropy, is returned in plaintext only once, and only an HMAC digest is persisted. |
 | PAT-002 | Multiplicity | A user may own multiple named PATs that can be revoked independently. |
 | PAT-003 | Visibility | Lists expose metadata, prefix, creation time, expiration, and latest use, but never the secret. |
+| PAT-006 | Workspace administration | A token bound to a workspace is administered by that workspace: a member holding workspace credentials manage lists the bound tokens of every member with their owner profile, and revokes them, without any instance-administration role. A token bound to no workspace belongs to its owner across the instance and is invisible and untouchable to every workspace administrator. Reading one's own tokens requires an interactive authentication only — the metadata carries no secret — while issuing and revoking follow PAT-005. |
 | PAT-005 | Issuance policy | The PAT mutations follow their own family of AUTH-019. Creation and revocation always share the requirement, and no mode accepts a non-interactive credential, so a PAT never mints or revokes a PAT. |
 | PAT-004 | Scope enforcement | A PAT scope is either the `*` wildcard or a workspace permission string, validated at creation. The canonical permission authorization denies a scoped credential any permission outside its scopes, and the coarse role authorization requires the wildcard, so the member's role never widens a narrow token. |
 | SSO-007 | Single-use ceremony | Completing an SSO ceremony consumes its sealed continuation atomically with the success commit; replaying the continuation or a captured provider response within the TTL fails like an invalid credential. |
@@ -221,6 +222,14 @@ authentication updates `last_used_at` and honors expiration, revocation, and
 the optional workspace. The scopes chosen at creation are the ceiling of what
 the token can authorize: `AuthorizePermission` requires the permission itself
 (or `*`) among the scopes, and role-based `Authorize` requires `*`.
+
+A PAT carries an optional workspace binding, and that binding decides who
+administers it. `WorkspacePATs` and `RevokeWorkspacePAT` are scoped by
+`workspace.credentials.manage`, a permission the `admin` role holds by default
+and that a host may grant to an operations role on its own — it conveys no
+power over memberships. The binding is checked before the revocation and a
+mismatch reports `ErrNotFound`, so a tenant administrator can neither reach
+another tenant's tokens nor an unbound one, and cannot learn that they exist.
 
 ### SSO
 

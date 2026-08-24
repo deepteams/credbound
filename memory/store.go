@@ -1513,7 +1513,32 @@ func (s *Store) AnonymizeUser(ctx context.Context, userID credbound.UUID, at tim
 
 // PATs streams the user's tokens, newest first, as one cursor page with
 // digests omitted.
+// PATByID returns one token by identifier.
+func (s *Store) PATByID(ctx context.Context, id credbound.UUID) (credbound.PAT, error) {
+	if err := ctx.Err(); err != nil {
+		return credbound.PAT{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	pat, found := s.pats[id]
+	if !found {
+		return credbound.PAT{}, credbound.ErrNotFound
+	}
+	return clonePAT(pat), nil
+}
+
+// WorkspacePATs streams the tokens bound to one workspace, newest first.
+func (s *Store) WorkspacePATs(ctx context.Context, workspaceID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.PAT], error] {
+	return s.patPage(ctx, page, func(pat credbound.PAT) bool {
+		return workspaceID != (credbound.UUID{}) && pat.WorkspaceID == workspaceID
+	})
+}
+
 func (s *Store) PATs(ctx context.Context, userID credbound.UUID, page credbound.PageRequest) iter.Seq2[credbound.PageEvent[credbound.PAT], error] {
+	return s.patPage(ctx, page, func(pat credbound.PAT) bool { return pat.UserID == userID })
+}
+
+func (s *Store) patPage(ctx context.Context, page credbound.PageRequest, match func(credbound.PAT) bool) iter.Seq2[credbound.PageEvent[credbound.PAT], error] {
 	return func(yield func(credbound.PageEvent[credbound.PAT], error) bool) {
 		cursor, err := decodeCursor(page.Cursor)
 		if err != nil {
@@ -1527,7 +1552,7 @@ func (s *Store) PATs(ctx context.Context, userID credbound.UUID, page credbound.
 		s.mu.RLock()
 		values := make([]credbound.PAT, 0)
 		for _, pat := range s.pats {
-			if pat.UserID == userID && afterCursor(pat.CreatedAt, pat.ID, cursor) {
+			if match(pat) && afterCursor(pat.CreatedAt, pat.ID, cursor) {
 				values = append(values, clonePAT(pat))
 			}
 		}

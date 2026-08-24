@@ -59,6 +59,16 @@ FROM credbound.personal_access_tokens
 WHERE user_id = $1::uuid AND (created_at, id) < ($2, $3::uuid)
 ORDER BY created_at DESC, id DESC LIMIT $4`
 
+	workspacePATsFirstPage = `SELECT id, user_id, name, prefix, digest, workspace_id, scopes_json, created_at, expires_at, last_used_at, revoked_at
+FROM credbound.personal_access_tokens
+WHERE workspace_id = $1::uuid
+ORDER BY created_at DESC, id DESC LIMIT $2`
+
+	workspacePATsAfterCursor = `SELECT id, user_id, name, prefix, digest, workspace_id, scopes_json, created_at, expires_at, last_used_at, revoked_at
+FROM credbound.personal_access_tokens
+WHERE workspace_id = $1::uuid AND (created_at, id) < ($2, $3::uuid)
+ORDER BY created_at DESC, id DESC LIMIT $4`
+
 	invitationsFirstPage = `SELECT id, workspace_id, email, role, invited_by, digest, created_at, expires_at, accepted_at, accepted_user_id, revoked_at
 FROM credbound.workspace_invitations
 WHERE workspace_id = $1::uuid

@@ -9,6 +9,21 @@ breaking changes may land in any release and are called out explicitly.
 
 ### Added
 
+- Workspace-scoped PAT administration closes the gap between "a PAT belongs to
+  an account" and "an API key belongs to a workspace". `Manager.WorkspacePATs`
+  lists the tokens bound to a workspace — every member's, joined with the
+  owner's account profile the way `WorkspaceMembers` does — and
+  `Manager.RevokeWorkspacePAT` revokes one, so a tenant can disable a departed
+  colleague's key without any instance-administration role. Both are gated by
+  the new `PermissionWorkspaceCredentialsManage`
+  (`workspace.credentials.manage`), which the `admin` role holds by default
+  and which a host may grant to an operations role on its own: it conveys no
+  power over memberships. A token bound to no workspace remains its owner's
+  across the instance — a workspace administrator cannot see it, revoke it, or
+  learn that it exists, since a binding mismatch reports `ErrNotFound`.
+  Breaking for custom stores: the `PATStore` port gains `PATByID` and
+  `WorkspacePATs`; stores embedding the bundled implementations inherit them.
+
 - `Config.PATTouchInterval` takes the machine-authentication path off the
   instance-wide audit-chain lock. Every chained audit write holds that lock
   (`SELECT ... FROM audit_chain FOR UPDATE`) until its commit, so it
@@ -104,6 +119,14 @@ breaking changes may land in any release and are called out explicitly.
   own markers.
 
 ### Changed
+
+- `Manager.PATs` no longer requires a *recent* interactive authentication for
+  the actor's own tokens, only an interactive one. The listing carries names,
+  prefixes and timestamps and never a secret, so tying it to `StepUpMaxAge`
+  only made a token-management screen re-prompt for a password every ten
+  minutes. Issuing and revoking are unchanged and still follow
+  `Config.StepUp`; reading another user's tokens still requires admin users
+  read.
 
 - **Breaking: identifiers are `credbound.UUID`, not `string`.** Every identifier
   in the API — `User.ID`, `Authentication.UserID`, the `Store` port's

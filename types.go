@@ -29,7 +29,15 @@ const (
 	PermissionWorkspaceSettingsWrite WorkspacePermission = "workspace.settings.write"
 	PermissionWorkspaceRBACWrite     WorkspacePermission = "workspace.rbac.write"
 	PermissionWorkspaceAuditRead     WorkspacePermission = "workspace.audit.read"
-	PermissionOAuthResourceManage    WorkspacePermission = "oauth.resource.manage"
+	// PermissionWorkspaceCredentialsManage administers the workspace-bound
+	// credentials of every member — listing and revoking the PATs bound to
+	// the workspace — without any power over the members themselves. It is
+	// deliberately separate from workspace users write: the page that
+	// disables a departed colleague's key is not the page that manages
+	// memberships, and a machine-operations role may need the first without
+	// the second.
+	PermissionWorkspaceCredentialsManage WorkspacePermission = "workspace.credentials.manage"
+	PermissionOAuthResourceManage        WorkspacePermission = "oauth.resource.manage"
 )
 
 // RoleDefinition registers a workspace role in the immutable RBAC catalog

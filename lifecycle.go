@@ -583,6 +583,15 @@ type WorkspaceMember struct {
 	Membership Membership
 }
 
+// WorkspacePAT is one workspace-bound token joined with its owner's account
+// profile. It is the row a workspace administrator's key list renders: the
+// token never carries its digest, and the owner is resolved so the page can
+// name whose key it is without the instance-wide admin users read permission.
+type WorkspacePAT struct {
+	PAT  PAT
+	User User
+}
+
 // WorkspaceMembers streams the memberships of a workspace joined with each
 // member's account profile (display name, primary email), so a workspace
 // administrator can render a member list without the instance-wide admin

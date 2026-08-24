@@ -169,9 +169,17 @@ type PasskeyStore interface {
 type PATStore interface {
 	CreatePAT(context.Context, PAT, Commit) error
 	PATByPrefix(context.Context, string) (PAT, error)
+	// PATByID returns one token by identifier, reporting ErrNotFound for an
+	// unknown one. It backs the workspace-scoped administration, which
+	// resolves a token's owner and binding before acting on it.
+	PATByID(context.Context, UUID) (PAT, error)
 	TouchPAT(context.Context, UUID, time.Time, Commit) error
 	RevokePAT(context.Context, UUID, UUID, time.Time, Commit) error
 	PATs(context.Context, UUID, PageRequest) iter.Seq2[PageEvent[PAT], error]
+	// WorkspacePATs streams the tokens bound to one workspace, newest first,
+	// across every owner. Tokens that are not bound to a workspace belong to
+	// no tenant and never appear here.
+	WorkspacePATs(context.Context, UUID, PageRequest) iter.Seq2[PageEvent[PAT], error]
 }
 
 // RevocationStore holds the cross-credential compromise-response and
