@@ -42,6 +42,21 @@ type Commit struct {
 	// was already recorded, so a replayed ceremony can never commit twice.
 	// Records may be pruned once ExpiresAt has passed.
 	Ceremony *CeremonyConsumption
+	// Unchained appends the audit event without extending the hash chain:
+	// no sequence, no predecessor hash, and no chain head to advance. It is
+	// reserved for the high-frequency events that carry no identified actor
+	// and therefore nothing to protect from tampering — today, the rejection
+	// of a token that matches no record at all. Chaining those would make an
+	// unauthenticated caller take the instance-wide chain lock once per
+	// request, which is a throughput ceiling and an amplification vector;
+	// leaving them out of the chain costs nothing, because an event about
+	// nobody cannot be tampered with in anyone's favour. The event is still
+	// persisted, still listed, and still fails the operation when it cannot
+	// be written (AUDIT-002); it is simply invisible to VerifyAuditChain.
+	//
+	// A store that ignores the flag and chains the event anyway stays
+	// correct — it only keeps the contention.
+	Unchained bool
 }
 
 // CeremonyConsumption identifies a single-use ceremony continuation being

@@ -83,6 +83,22 @@ type Config struct {
 	// not. It leaves SCIM credentials, sessions and OAuth tokens untouched,
 	// which keep their own markers.
 	PATPrefix string
+	// PATTouchInterval coarsens the write AuthenticatePAT performs: a
+	// successful authentication whose token was already touched within the
+	// interval skips the last-used refresh, the owner's last-seen refresh and
+	// the audit event, turning the per-request write transaction into at most
+	// one write per token per interval. It matters more than its session
+	// sibling, because a PAT is how machines authenticate: every write goes
+	// through the instance-wide audit-chain lock, so a per-request write makes
+	// one token's traffic contend with every mutation of every tenant.
+	// Revocation, expiry, disablement and workspace-access checks still run
+	// against the store on every call, so a revoked token is refused on the
+	// very next request; the explicit trade-offs are last-used granularity, an
+	// audit log that records a token's activity at most once per interval, and
+	// the authentication events (EventPATAuthenticated,
+	// EventAuthenticationSucceeded) firing at that same reduced rate. Zero
+	// keeps the per-request write.
+	PATTouchInterval time.Duration
 	// StepUpMaxAge bounds how old an interactive AAL2 authentication may be
 	// to satisfy RequireStepUp. Zero keeps the default of 10 minutes.
 	StepUpMaxAge time.Duration
@@ -261,6 +277,7 @@ type Manager struct {
 	readPATPeppers        [][]byte
 	readRecoveryPeppers   [][]byte
 	stepUpMaxAge          time.Duration
+	patTouchInterval      time.Duration
 	stepUp                StepUpPolicies
 	ceremonyTTL           time.Duration
 	minPasswordLen        int
@@ -359,6 +376,9 @@ func New(cfg Config) (*Manager, error) {
 	}
 	if cfg.SessionTTL <= 0 {
 		cfg.SessionTTL = 30 * 24 * time.Hour
+	}
+	if cfg.PATTouchInterval < 0 {
+		return nil, fmt.Errorf("%w: PAT touch interval cannot be negative", ErrInvalidInput)
 	}
 	if cfg.SessionTouchInterval < 0 {
 		return nil, fmt.Errorf("%w: session touch interval cannot be negative", ErrInvalidInput)
@@ -528,6 +548,7 @@ func New(cfg Config) (*Manager, error) {
 		readPATPeppers:        readPATPeppers,
 		readRecoveryPeppers:   readRecoveryPeppers,
 		stepUpMaxAge:          cfg.StepUpMaxAge,
+		patTouchInterval:      cfg.PATTouchInterval,
 		stepUp:                cfg.StepUp.resolve(),
 		ceremonyTTL:           cfg.CeremonyTTL,
 		minPasswordLen:        cfg.MinPasswordLen,

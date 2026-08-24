@@ -26,6 +26,7 @@ auth, err := credbound.New(credbound.Config{
     StepUp: credbound.StepUpPolicies{
         Default: credbound.StepUpPolicyUserCapable,
     },
+    PATTouchInterval: time.Minute,
     WorkspaceRoles: []credbound.RoleDefinition{
         {
             Role:        "viewer",

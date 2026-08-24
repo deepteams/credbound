@@ -133,7 +133,19 @@ func (m *Manager) AuthenticatePAT(ctx context.Context, raw string) (_ Authentica
 		if pat.ID != (UUID{}) {
 			actor = pat.UserID
 		}
-		audit, auditErr := m.recordAuthenticationAudit(ctx, actor, "auth.pat", AuditFailed, "invalid_credentials")
+		// A token that matches no record names nobody: the rejection is worth
+		// recording as scan evidence, but chaining it would let any
+		// unauthenticated caller take the instance-wide chain lock once per
+		// request. A rejection that does name an account (wrong digest on a
+		// known prefix, revoked, expired, disabled owner) stays chained: it is
+		// evidence about someone, so it must stay tamper-evident.
+		var audit AuditEvent
+		var auditErr error
+		if actor == (UUID{}) {
+			audit, auditErr = m.recordUnknownPATRejection(ctx)
+		} else {
+			audit, auditErr = m.recordAuthenticationAudit(ctx, actor, "auth.pat", AuditFailed, "invalid_credentials")
+		}
 		if auditErr != nil {
 			return Authentication{}, auditErr
 		}
@@ -163,16 +175,26 @@ func (m *Manager) AuthenticatePAT(ctx context.Context, raw string) (_ Authentica
 			return Authentication{}, ErrInvalidCredentials
 		}
 	}
+	authentication := Authentication{
+		UserID: pat.UserID, Method: MethodPAT, Level: AAL1, AuthenticatedAt: now,
+		WorkspaceID: pat.WorkspaceID, Scopes: slices.Clone(pat.Scopes),
+	}
+	// Within the configured touch interval the authentication stays
+	// read-only: the token was used recently enough that refreshing last-used
+	// (and appending its audit event) again would only add write contention,
+	// and every store-backed check above already ran, so revocation remains
+	// instant. This is the difference between one write per machine request
+	// and one per token per interval, on a path where every write serializes
+	// on the audit chain.
+	if m.patTouchInterval > 0 && pat.LastUsedAt != nil && now.Before(pat.LastUsedAt.Add(m.patTouchInterval)) {
+		return authentication, nil
+	}
 	event, err := m.newAudit(ctx, pat.UserID, "auth.pat", "pat", pat.ID.String(), pat.WorkspaceID, AuditSucceeded, "")
 	if err != nil {
 		return Authentication{}, err
 	}
 	if err := m.store.TouchPAT(ctx, pat.ID, now, Commit{Audit: event}); err != nil {
 		return Authentication{}, m.mapStoreError(ctx, "auth.pat.authenticate", err)
-	}
-	authentication := Authentication{
-		UserID: pat.UserID, Method: MethodPAT, Level: AAL1, AuthenticatedAt: now,
-		WorkspaceID: pat.WorkspaceID, Scopes: slices.Clone(pat.Scopes),
 	}
 	if meta, metaErr := m.newEventMeta(EventPATAuthenticated, "auth.pat.authenticate", pat.UserID, pat.WorkspaceID, event); metaErr == nil {
 		authenticated := PATAuthenticatedEvent{EventMeta: meta, PATID: pat.ID, UserID: pat.UserID}
@@ -239,6 +261,26 @@ func (m *Manager) PATs(ctx context.Context, actor Authentication, userID UUID, p
 		return errorSeq[PageEvent[PAT]](err)
 	}
 	return m.store.PATs(ctx, userID, page)
+}
+
+// recordUnknownPATRejection audits a token that matches no record at all —
+// the shape parsed, the prefix resolved to nothing. It is the one audit event
+// Credbound writes outside the hash chain (Commit.Unchained): it names no
+// account, so there is nothing in it for an attacker to tamper with in
+// anyone's favour, while chaining it would let any unauthenticated caller
+// take the instance-wide chain lock once per request — a throughput ceiling
+// for every tenant's mutations and an amplification vector for a caller that
+// holds no credential. It still fails closed: an audit that cannot be written
+// still refuses the authentication.
+func (m *Manager) recordUnknownPATRejection(ctx context.Context) (AuditEvent, error) {
+	event, err := m.newAudit(ctx, UUID{}, "auth.pat", "user", UUID{}.String(), UUID{}, AuditFailed, "invalid_credentials")
+	if err != nil {
+		return AuditEvent{}, err
+	}
+	if err := m.store.AppendAudit(ctx, Commit{Audit: event, Unchained: true}); err != nil {
+		return AuditEvent{}, m.mapStoreError(ctx, "auth.pat", err)
+	}
+	return event, nil
 }
 
 // parsePAT validates the `<marker>_<12 hex>_<43 chars>` PAT shape against the

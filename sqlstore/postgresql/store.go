@@ -1748,10 +1748,28 @@ func (s *Store) mutateIf(ctx context.Context, commit credbound.Commit, fn func(*
 			return hookErr
 		}
 	}
-	if err := chainAudit(ctx, q, commit.Audit); err != nil {
+	if err := appendAudit(ctx, q, commit.Audit, commit.Unchained); err != nil {
 		return err
 	}
 	return mapError(tx.Commit())
+}
+
+// appendAudit writes the audit event inside the same transaction as the
+// mutation it records. Unless the commit opted out, it also links the event to
+// the persisted chain head — which means taking the instance-wide row lock
+// GetAuditChainHead holds until the commit, so an unchained event skips it
+// entirely and never queues behind another transaction.
+func appendAudit(ctx context.Context, q *db.Queries, event credbound.AuditEvent, unchained bool) error {
+	if unchained {
+		if event.ActorKind == "" {
+			event.ActorKind = credbound.ActorUser
+		}
+		if err := q.InsertAudit(ctx, auditParams(event)); err != nil {
+			return fmt.Errorf("%w: %v", credbound.ErrAuditUnavailable, err)
+		}
+		return nil
+	}
+	return chainAudit(ctx, q, event)
 }
 
 // chainAudit links the audit event to the persisted chain head and appends it

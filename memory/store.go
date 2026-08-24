@@ -2998,7 +2998,7 @@ func (s *Store) finishCommitLocked(ctx context.Context, commit credbound.Commit,
 			return err
 		}
 	}
-	s.commitAudit(commit.Audit)
+	s.commitAudit(commit.Audit, commit.Unchained)
 	return nil
 }
 
@@ -3015,9 +3015,17 @@ func (s *Store) canAudit(event credbound.AuditEvent) error {
 	return nil
 }
 
-func (s *Store) commitAudit(event credbound.AuditEvent) {
+// commitAudit appends the event, extending the hash chain unless the commit
+// asked to stay out of it. An unchained event keeps a zero sequence and no
+// hashes, which is exactly what ChainedAuditEvents and VerifyAuditChain skip.
+func (s *Store) commitAudit(event credbound.AuditEvent, unchained bool) {
 	if event.ActorKind == "" {
 		event.ActorKind = credbound.ActorUser
+	}
+	if unchained {
+		s.audits = append(s.audits, event)
+		s.auditIDs[event.ID] = struct{}{}
+		return
 	}
 	event.Sequence = s.auditSequence + 1
 	event.PreviousHash = slices.Clone(s.auditHead)

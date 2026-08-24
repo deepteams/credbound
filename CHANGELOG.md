@@ -9,6 +9,32 @@ breaking changes may land in any release and are called out explicitly.
 
 ### Added
 
+- `Config.PATTouchInterval` takes the machine-authentication path off the
+  instance-wide audit-chain lock. Every chained audit write holds that lock
+  (`SELECT ... FROM audit_chain FOR UPDATE`) until its commit, so it
+  serializes with every other mutation of every tenant — invisible for a
+  control plane, a hard throughput ceiling for `AuthenticatePAT`, which is how
+  machines authenticate. Within the interval a successful authentication stays
+  read-only: no last-used refresh, no owner last-seen refresh, no audit event,
+  no lock. Revocation, expiry, disablement and workspace-access checks still
+  run against the store on every call, so a revoked token is refused on the
+  very next request; the trade-offs are last-used granularity and
+  `EventPATAuthenticated`/`EventAuthenticationSucceeded` firing at most once
+  per token per interval. Zero keeps the previous per-request write. It
+  mirrors `Config.SessionTouchInterval`.
+
+- The rejection of a PAT that matches no record is now audited outside the
+  hash chain (`Commit.Unchained`), so it no longer takes the chain lock. Such
+  an event names no account — there is nothing in it to tamper with in
+  anyone's favour — while chaining it let any unauthenticated caller
+  serialize the whole instance by replaying well-formed garbage tokens, once
+  per request. It is still persisted, still listed, and still fails the
+  authentication when it cannot be written (AUDIT-002); it is simply invisible
+  to `VerifyAuditChain`. A rejection that does name an account (wrong digest
+  on a known prefix, revoked, expired, disabled owner) stays chained. Custom
+  stores that ignore the new `Commit.Unchained` flag keep chaining those
+  events and remain correct — they only keep the contention.
+
 - `Config.StepUp` lets a deployment choose the authentication its
   step-up-gated operations demand, instead of always imposing a fresh AAL2
   step-up that a user with no enrolled second factor can never produce —

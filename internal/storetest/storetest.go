@@ -70,6 +70,7 @@ var flows = []flow{
 	{"WorkspacesAndRBAC", testWorkspacesAndRBAC},
 	{"Pagination", testPagination},
 	{"AuditChain", testAuditChain},
+	{"UnchainedAudit", testUnchainedAudit},
 	{"SingleUseUnderConcurrency", testSingleUseUnderConcurrency},
 	{"ConcurrentBootstrap", testConcurrentBootstrap},
 	{"ConcurrentUniqueAddress", testConcurrentUniqueAddress},
@@ -1068,6 +1069,73 @@ func testPagination(t *testing.T, factory Factory) {
 // testAuditChain pins AUDIT-001: every mutation appends a hash-chained event,
 // the chain verifies end to end, and a host-recorded business fact joins the
 // same chain with an actor and timestamp it cannot forge.
+// testUnchainedAudit pins Commit.Unchained end to end: the rejection of a
+// token that matches no record is persisted and listed, but stays out of the
+// hash chain — so it never takes the chain lock — while the chain itself still
+// verifies and a rejection that names an account is still chained.
+func testUnchainedAudit(t *testing.T, factory Factory) {
+	h := newHarness(t, factory)
+	root, _ := h.bootstrap()
+	actor := h.stepUp(root.UserID)
+
+	before, err := h.manager.VerifyAuditChain(h.ctx, actor)
+	if err != nil {
+		t.Fatalf("verify chain: %v", err)
+	}
+	unknown := "cbp_0123456789ab_" + strings.Repeat("A", 43)
+	for range 3 {
+		if _, err := h.manager.AuthenticatePAT(h.ctx, unknown); !errors.Is(err, credbound.ErrInvalidCredentials) {
+			t.Fatalf("unknown token: %v", err)
+		}
+	}
+	after, err := h.manager.VerifyAuditChain(h.ctx, actor)
+	if err != nil {
+		t.Fatalf("verify chain after unknown tokens: %v", err)
+	}
+	// Reading the administrative log is itself audited, so the head moves by
+	// the two verifications alone; what must not move is the count of chained
+	// events attributable to the three rejections.
+	if after.HeadSequence-before.HeadSequence > 1 {
+		t.Fatalf("three unknown-token rejections added %d chained events", after.HeadSequence-before.HeadSequence)
+	}
+	instance, _ := collect(t, h.manager.InstanceAuditEvents(h.ctx, actor, credbound.PageRequest{Limit: 100}))
+	rejections := 0
+	for _, event := range instance {
+		if event.Action == "auth.pat" && event.Outcome == credbound.AuditFailed {
+			rejections++
+			if event.Sequence != 0 || len(event.Hash) != 0 {
+				t.Fatalf("unknown-token rejection was chained: %#v", event)
+			}
+		}
+	}
+	if rejections != 3 {
+		t.Fatalf("recorded rejections = %d, want 3", rejections)
+	}
+
+	// A rejection that names an account keeps its place in the chain.
+	issued, err := h.manager.CreatePAT(h.ctx, actor, credbound.CreatePATInput{Name: "machine", Scopes: []string{"read"}})
+	if err != nil {
+		t.Fatalf("create PAT: %v", err)
+	}
+	if err := h.manager.RevokePAT(h.ctx, actor, issued.PAT.ID); err != nil {
+		t.Fatalf("revoke PAT: %v", err)
+	}
+	chained, err := h.manager.VerifyAuditChain(h.ctx, actor)
+	if err != nil {
+		t.Fatalf("verify chain before the named rejection: %v", err)
+	}
+	if _, err := h.manager.AuthenticatePAT(h.ctx, issued.Token); !errors.Is(err, credbound.ErrInvalidCredentials) {
+		t.Fatalf("revoked token: %v", err)
+	}
+	final, err := h.manager.VerifyAuditChain(h.ctx, actor)
+	if err != nil {
+		t.Fatalf("verify chain after the named rejection: %v", err)
+	}
+	if final.HeadSequence <= chained.HeadSequence+1 {
+		t.Fatalf("the rejection of a known token was not chained: %d then %d", chained.HeadSequence, final.HeadSequence)
+	}
+}
+
 func testAuditChain(t *testing.T, factory Factory) {
 	h := newHarness(t, factory)
 	root, workspace := h.bootstrap()

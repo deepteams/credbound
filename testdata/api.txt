@@ -250,6 +250,7 @@ credbound field ClientAuditRecordedEvent.EventMeta EventMeta
 credbound field Commit.Audit AuditEvent
 credbound field Commit.Ceremony *CeremonyConsumption
 credbound field Commit.Transactional func(context.Context, Tx) error
+credbound field Commit.Unchained bool
 credbound field Config.AdminPermissions map[InstanceRole][]Permission
 credbound field Config.CeremonyTTL time.Duration
 credbound field Config.Clock func() time.Time
@@ -267,6 +268,7 @@ credbound field Config.OAuth *OAuthConfig
 credbound field Config.Observer Observer
 credbound field Config.PATPepper []byte
 credbound field Config.PATPrefix string
+credbound field Config.PATTouchInterval time.Duration
 credbound field Config.Passkeys PasskeyProvider
 credbound field Config.PasswordPolicy PasswordPolicy
 credbound field Config.PasswordResetTTL time.Duration

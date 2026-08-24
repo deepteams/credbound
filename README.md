@@ -91,8 +91,12 @@ hooks, and append-only audit behavior against a real PostgreSQL service.
   grants and clears its lockout; a locked account still performs the same
   password derivation and answers with the same public error as a wrong
   password, so it never confirms whether an address exists.
-- Every audit event is hash-chained to its predecessor inside the commit
-  transaction; tampering is detectable with `VerifyAuditChain`.
+- Every audit event that identifies an actor is hash-chained to its
+  predecessor inside the commit transaction; tampering is detectable with
+  `VerifyAuditChain`. The rejection of a credential matching no record is the
+  one exception: it names nobody, so it is recorded and listed but stays out
+  of the chain — chaining it would let an unauthenticated caller take the
+  instance-wide chain lock once per request.
 - Access to application resources must always provide a `workspace_id`.
 - All entity IDs created by Credbound are canonical UUIDv7 values that are
   monotonic within the process.
@@ -134,6 +138,28 @@ checks and per-workspace MFA enforcement. The host owns sessions and must:
 - terminate its own sessions for a user when `CompletePasswordReset`,
   `ChangePassword`, `DisableUser`, or `RevokeUserCredentials` fires — the
   library revokes PATs and OAuth grants but cannot see host sessions.
+
+### Machine traffic
+
+Every chained audit write takes one instance-wide row lock (`audit_chain`)
+held until the commit, so it serializes with every other mutation of every
+tenant. That is invisible for a control plane and a hard ceiling for a hot
+path — and `AuthenticatePAT` is a hot path, since a PAT is how machines
+authenticate. Two settings keep it off that lock:
+
+- `Config.PATTouchInterval` coarsens the write a successful `AuthenticatePAT`
+  performs (last-used, owner last-seen, audit event) to at most one per token
+  per interval, exactly as `SessionTouchInterval` does for sessions. Every
+  store-backed check — revocation, expiry, disablement, workspace access —
+  still runs on every call, so a revoked token is refused on the very next
+  request. The trade-offs are last-used granularity and an audit log that
+  records a token's activity once per interval.
+- The rejection of a token matching no record is audited outside the chain
+  (see above), so a caller holding no credential cannot serialize the
+  instance by replaying garbage tokens.
+
+A workload authenticating machines should set `PATTouchInterval` (a minute is
+a reasonable start); the default zero keeps the historical per-request write.
 
 `RequireStepUp` accepts only interactive AAL2 authentications newer than
 `Config.StepUpMaxAge`; a PAT can never satisfy it.

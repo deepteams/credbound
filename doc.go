@@ -190,8 +190,13 @@
 //
 // Sensitive mutations and their audit events are committed atomically by the
 // Store contract and fail closed when the audit cannot be persisted
-// (ErrAuditUnavailable). Every audit event is hash-chained to its
-// predecessor with ComputeAuditHash; VerifyAuditChain recomputes the chain
-// and reports tampering as ErrAuditCompromised. WithRequestMetadata attaches
-// the sanitized client IP address and user agent that audit events record.
+// (ErrAuditUnavailable). Every audit event that identifies an actor is
+// hash-chained to its predecessor with ComputeAuditHash; VerifyAuditChain
+// recomputes the chain and reports tampering as ErrAuditCompromised. The
+// chain write takes one instance-wide lock, so the rejection of a credential
+// matching no record is deliberately left unchained (Commit.Unchained) and
+// Config.PATTouchInterval coarsens the write of the machine-authentication
+// path; both keep a hot path from serializing every tenant's mutations.
+// WithRequestMetadata attaches the sanitized client IP address and user agent
+// that audit events record.
 package credbound
