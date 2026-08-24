@@ -522,6 +522,16 @@ func (m *Manager) requireStepUp(ctx context.Context, authn Authentication, opera
 	if err == nil {
 		return m.requireActiveUser(ctx, authn.UserID)
 	}
+	return m.denyStepUp(ctx, authn, operation, err)
+}
+
+// denyStepUp reports the refusal of a step-up-gated operation, emitting the
+// audit event that lets a host see the prompt it should raise. It returns err
+// untouched, and stays silent for a refusal that is not a step-up demand (a
+// disabled user, no actor at all) — those carry their own signal. Every gate
+// that can answer ErrStepUpRequired routes through it, so the event does not
+// depend on which policy produced the refusal.
+func (m *Manager) denyStepUp(ctx context.Context, authn Authentication, operation string, err error) error {
 	if !errors.Is(err, ErrStepUpRequired) {
 		return err
 	}
@@ -549,6 +559,22 @@ func (m *Manager) requireRecentInteractive(ctx context.Context, authn Authentica
 	}
 	age := m.now().Sub(authn.AuthenticatedAt)
 	if !authn.Interactive() || authn.SecondFactorRequired || age < 0 || age > m.stepUpMaxAge {
+		return ErrStepUpRequired
+	}
+	return m.requireActiveUser(ctx, authn.UserID)
+}
+
+// requireInteractive is the floor every step-up policy keeps, whatever it
+// relaxes: a user-present ceremony whose factors are all verified, for an
+// account that is still enabled. Assurance level and age are deliberately not
+// checked — that is what makes it a floor and not a step-up. A stored
+// credential (a PAT) never passes, so relaxing a policy down to it can never
+// let a leaked token mint or revoke another one.
+func (m *Manager) requireInteractive(ctx context.Context, authn Authentication) error {
+	if authn.UserID == (UUID{}) {
+		return ErrUnauthorized
+	}
+	if !authn.Interactive() || authn.SecondFactorRequired {
 		return ErrStepUpRequired
 	}
 	return m.requireActiveUser(ctx, authn.UserID)

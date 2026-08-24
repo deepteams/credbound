@@ -134,6 +134,42 @@ const (
 	AAL2 AssuranceLevel = 2
 )
 
+// StepUpPolicy selects how strictly an operation demands a fresh interactive
+// AAL2 authentication. A step-up is only ever as available as the second
+// factors a deployment actually enrolls: without a policy, a product whose
+// users have no TOTP factor and no passkey is simply locked out of every
+// operation the step-up guards. Config.PATStepUp applies it to the PAT
+// mutations.
+type StepUpPolicy string
+
+const (
+	// StepUpPolicyRequired is the default and the strict mode: the operation
+	// accepts exactly what RequireStepUp accepts, so a user with no enrolled
+	// second factor can never perform it.
+	StepUpPolicyRequired StepUpPolicy = "required"
+	// StepUpPolicyUserCapable demands the full step-up from every user who
+	// could satisfy one — an active TOTP factor, or a passkey with a passkey
+	// provider configured — and accepts a plain interactive authentication
+	// from users who have neither. Enrolling a factor therefore tightens the
+	// operation for that user with no configuration change, and nobody is
+	// locked out meanwhile.
+	StepUpPolicyUserCapable StepUpPolicy = "user_capable"
+	// StepUpPolicyNone asks for no step-up: any interactive authentication of
+	// an active user is accepted, at any assurance level and any age. The
+	// non-interactive floor still holds — a PAT can never mint or revoke a
+	// PAT — and a context whose second factor is still pending is refused.
+	StepUpPolicyNone StepUpPolicy = "none"
+)
+
+// valid reports whether the policy is one of the three documented modes.
+func (p StepUpPolicy) valid() bool {
+	switch p {
+	case StepUpPolicyRequired, StepUpPolicyUserCapable, StepUpPolicyNone:
+		return true
+	}
+	return false
+}
+
 // User is a global account. Email mirrors the primary EmailAddress;
 // LastSeenAt reflects the latest successful authentication across all
 // factors and is updated atomically with the authentication audit.

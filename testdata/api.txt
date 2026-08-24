@@ -156,6 +156,9 @@ credbound const SSOProviderGoogle SSOProviderKind
 credbound const SSOProviderMicrosoft SSOProviderKind
 credbound const SSOProviderOIDC SSOProviderKind
 credbound const SSOProviderSAML SSOProviderKind
+credbound const StepUpPolicyNone StepUpPolicy
+credbound const StepUpPolicyRequired StepUpPolicy
+credbound const StepUpPolicyUserCapable StepUpPolicy
 credbound const StoreMemory StoreKind
 credbound const StorePostgreSQL StoreKind
 credbound embeds Store.AuditStore
@@ -260,6 +263,7 @@ credbound field Config.OAuth *OAuthConfig
 credbound field Config.Observer Observer
 credbound field Config.PATPepper []byte
 credbound field Config.PATPrefix string
+credbound field Config.PATStepUp StepUpPolicy
 credbound field Config.Passkeys PasskeyProvider
 credbound field Config.PasswordPolicy PasswordPolicy
 credbound field Config.PasswordResetTTL time.Duration
@@ -1920,6 +1924,7 @@ credbound type SignUpInput struct
 credbound type SignUpResult struct
 credbound type SignupStore interface
 credbound type StepUpDeniedEvent struct
+credbound type StepUpPolicy =
 credbound type Store interface
 credbound type StoreKind =
 credbound type Subscription interface

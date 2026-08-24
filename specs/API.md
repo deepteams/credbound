@@ -23,6 +23,7 @@ auth, err := credbound.New(credbound.Config{
         OIDCSigner:      oidcSigner,
     },
     StepUpMaxAge:   10 * time.Minute,
+    PATStepUp:      credbound.StepUpPolicyUserCapable,
     WorkspaceRoles: []credbound.RoleDefinition{
         {
             Role:        "viewer",

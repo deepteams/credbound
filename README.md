@@ -138,6 +138,24 @@ checks and per-workspace MFA enforcement. The host owns sessions and must:
 `RequireStepUp` accepts only interactive AAL2 authentications newer than
 `Config.StepUpMaxAge`; a PAT can never satisfy it.
 
+A deployment whose users enroll no second factor cannot reach the operations
+that step-up guards at all, so `Config.PATStepUp` makes the demand of
+`CreatePAT` and `RevokePAT` — and of those two only — a choice between three
+modes:
+
+| `Config.PATStepUp` | Accepted authentication |
+|---|---|
+| `StepUpPolicyRequired` (default, zero value) | fresh interactive AAL2, exactly `RequireStepUp` |
+| `StepUpPolicyUserCapable` | the same step-up from users holding an active TOTP factor or a passkey; any interactive authentication from users holding neither |
+| `StepUpPolicyNone` | any interactive authentication, at any assurance level and any age |
+
+The two relaxed modes never go below an interactive context of an enabled
+account whose factors are all verified: a PAT can neither mint nor revoke a
+PAT under any policy, a workspace with `RequireMFA` still holds a
+workspace-bound token to AAL2, and a refusal still emits `step_up.denied`.
+Creation and revocation move together on purpose — a deployment must never be
+able to issue a token it cannot revoke.
+
 Hosts that would rather not manage session persistence themselves can use the
 optional server-side session module (`CreateSession`, `AuthenticateSession`,
 `Sessions`, `RevokeSession`, `RevokeUserSessions`), available when the store

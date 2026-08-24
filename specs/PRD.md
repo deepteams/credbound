@@ -41,6 +41,7 @@ Credbound provides a reusable, testable, transport-independent core.
 | PAT-001 | Creation | A PAT uses at least 256 bits of entropy, is returned in plaintext only once, and only an HMAC digest is persisted. |
 | PAT-002 | Multiplicity | A user may own multiple named PATs that can be revoked independently. |
 | PAT-003 | Visibility | Lists expose metadata, prefix, creation time, expiration, and latest use, but never the secret. |
+| PAT-005 | Issuance policy | The deployment chooses the authentication the PAT mutations demand: a fresh AAL2 step-up (the default), that same step-up only from users who have an enrolled second factor, or any interactive authentication. Creation and revocation always share the requirement, and no mode accepts a non-interactive credential, so a PAT never mints or revokes a PAT. |
 | PAT-004 | Scope enforcement | A PAT scope is either the `*` wildcard or a workspace permission string, validated at creation. The canonical permission authorization denies a scoped credential any permission outside its scopes, and the coarse role authorization requires the wildcard, so the member's role never widens a narrow token. |
 | SSO-007 | Single-use ceremony | Completing an SSO ceremony consumes its sealed continuation atomically with the success commit; replaying the continuation or a captured provider response within the TTL fails like an invalid credential. |
 | TENANT-001 | Isolation | Every resource-access authorization is evaluated for an explicit `workspace_id`. |
@@ -195,6 +196,15 @@ expiration. Validated passkey authentication directly produces an AAL2 context.
 `RequireStepUp` accepts only interactive AAL2 authentication whose
 `AuthenticatedAt` falls within the configured window. PATs are rejected
 regardless of their age.
+
+`Config.PATStepUp` selects, for `CreatePAT` and `RevokePAT` only, which of
+three modes gates them: `required` (the default, `RequireStepUp` itself),
+`user_capable` (that step-up for users holding an active TOTP factor or a
+passkey, a plain interactive authentication for those holding neither), or
+`none` (any interactive authentication). A relaxed mode keeps the
+interactive floor, the disabled-account check, the workspace MFA policy and
+the `step_up.denied` audit event; a store failure while measuring a user's
+capability counts as capable, so it tightens the gate rather than relaxing it.
 
 ### PAT
 
