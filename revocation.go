@@ -23,7 +23,7 @@ func (m *Manager) RevokeUserCredentials(ctx context.Context, actor Authenticatio
 		return fmt.Errorf("%w: invalid user id", ErrInvalidInput)
 	}
 	if userID == actor.UserID {
-		if err := m.requireStepUp(ctx, actor, "auth.credentials.revoke"); err != nil {
+		if err := m.requireScopedStepUp(ctx, actor, StepUpScopeAccount, "auth.credentials.revoke"); err != nil {
 			return err
 		}
 	} else {

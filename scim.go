@@ -24,7 +24,7 @@ func (m *Manager) CreateSCIMConfiguration(ctx context.Context, actor Authenticat
 	if m.scimStore == nil {
 		return IssuedSCIMCredential{}, ErrNotSupported
 	}
-	if err := m.requireStepUp(ctx, actor, "scim.configuration.create"); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeWorkspace, "scim.configuration.create"); err != nil {
 		return IssuedSCIMCredential{}, err
 	}
 	if err := m.AuthorizePermission(ctx, actor, workspaceID, PermissionWorkspaceRBACWrite); err != nil {
@@ -811,7 +811,7 @@ func (m *Manager) requireSCIMAdmin(ctx context.Context, actor Authentication, co
 	if m.scimStore == nil {
 		return SCIMConfiguration{}, ErrNotSupported
 	}
-	if err := m.requireStepUp(ctx, actor, operation); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeWorkspace, operation); err != nil {
 		return SCIMConfiguration{}, err
 	}
 	configuration, err := m.scimStore.SCIMConfiguration(ctx, configurationID)

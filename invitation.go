@@ -18,7 +18,7 @@ const invitationPrefix = "cbi"
 func (m *Manager) InviteToWorkspace(ctx context.Context, actor Authentication, workspaceID UUID, input InviteToWorkspaceInput) (_ IssuedWorkspaceInvitation, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "workspace.invitation.create", started, err) }()
-	if err := m.requireStepUp(ctx, actor, "workspace.invitation.create"); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeWorkspace, "workspace.invitation.create"); err != nil {
 		return IssuedWorkspaceInvitation{}, err
 	}
 	if err := m.AuthorizePermission(ctx, actor, workspaceID, PermissionWorkspaceUsersWrite); err != nil {
@@ -243,7 +243,7 @@ func (m *Manager) RegisterFromInvitation(ctx context.Context, raw string, input 
 func (m *Manager) RevokeInvitation(ctx context.Context, actor Authentication, workspaceID, invitationID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "workspace.invitation.revoke", started, err) }()
-	if err := m.requireStepUp(ctx, actor, "workspace.invitation.revoke"); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeWorkspace, "workspace.invitation.revoke"); err != nil {
 		return err
 	}
 	if err := m.AuthorizePermission(ctx, actor, workspaceID, PermissionWorkspaceUsersWrite); err != nil {

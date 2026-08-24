@@ -426,7 +426,7 @@ func (m *Manager) discoverablePasskeys() (DiscoverablePasskeyProvider, PasskeyCr
 func (m *Manager) DeletePasskey(ctx context.Context, actor Authentication, passkeyID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.passkey.delete", started, err) }()
-	if err := m.requireStepUp(ctx, actor, "auth.passkey.delete"); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeAccount, "auth.passkey.delete"); err != nil {
 		return err
 	}
 	if passkeyID == (UUID{}) {

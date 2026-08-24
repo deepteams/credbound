@@ -159,6 +159,10 @@ credbound const SSOProviderSAML SSOProviderKind
 credbound const StepUpPolicyNone StepUpPolicy
 credbound const StepUpPolicyRequired StepUpPolicy
 credbound const StepUpPolicyUserCapable StepUpPolicy
+credbound const StepUpScopeAccount StepUpScope
+credbound const StepUpScopeAdmin StepUpScope
+credbound const StepUpScopePAT StepUpScope
+credbound const StepUpScopeWorkspace StepUpScope
 credbound const StoreMemory StoreKind
 credbound const StorePostgreSQL StoreKind
 credbound embeds Store.AuditStore
@@ -263,7 +267,6 @@ credbound field Config.OAuth *OAuthConfig
 credbound field Config.Observer Observer
 credbound field Config.PATPepper []byte
 credbound field Config.PATPrefix string
-credbound field Config.PATStepUp StepUpPolicy
 credbound field Config.Passkeys PasskeyProvider
 credbound field Config.PasswordPolicy PasswordPolicy
 credbound field Config.PasswordResetTTL time.Duration
@@ -280,6 +283,7 @@ credbound field Config.SessionIdleTimeout time.Duration
 credbound field Config.SessionTTL time.Duration
 credbound field Config.SessionTouchInterval time.Duration
 credbound field Config.SignUp *SignUpConfig
+credbound field Config.StepUp StepUpPolicies
 credbound field Config.StepUpMaxAge time.Duration
 credbound field Config.Store Store
 credbound field Config.TOTP TOTPProvider
@@ -979,6 +983,11 @@ credbound field SignUpResult.User User
 credbound field SignUpResult.Workspace Workspace
 credbound field StepUpDeniedEvent.EventMeta EventMeta
 credbound field StepUpDeniedEvent.UserID UUID
+credbound field StepUpPolicies.Account StepUpPolicy
+credbound field StepUpPolicies.Admin StepUpPolicy
+credbound field StepUpPolicies.Default StepUpPolicy
+credbound field StepUpPolicies.PAT StepUpPolicy
+credbound field StepUpPolicies.Workspace StepUpPolicy
 credbound field TOTPActivatedEvent.EventMeta EventMeta
 credbound field TOTPActivatedEvent.RecoveryCodeCount int
 credbound field TOTPActivatedEvent.UserID UUID
@@ -1551,6 +1560,7 @@ credbound method (*Manager) ReplaceOAuthClientJWKS(ctx context.Context, actor Au
 credbound method (*Manager) ReplaceSCIMUser(ctx context.Context, principal SCIMAuthentication, id UUID, input SCIMUserInput) (_ SCIMUser, err error)
 credbound method (*Manager) RequireAdminMutation(actor Authentication, request TrustedRequest) error
 credbound method (*Manager) RequireStepUp(authn Authentication) error
+credbound method (*Manager) RequireStepUpFor(ctx context.Context, authn Authentication, scope StepUpScope) error
 credbound method (*Manager) ResendEmailVerification(ctx context.Context, address string) (_ IssuedEmailVerification, err error)
 credbound method (*Manager) RevokeInvitation(ctx context.Context, actor Authentication, workspaceID, invitationID UUID) (err error)
 credbound method (*Manager) RevokeOAuthGrant(ctx context.Context, actor Authentication, grantID UUID) (err error)
@@ -1924,7 +1934,9 @@ credbound type SignUpInput struct
 credbound type SignUpResult struct
 credbound type SignupStore interface
 credbound type StepUpDeniedEvent struct
+credbound type StepUpPolicies struct
 credbound type StepUpPolicy =
+credbound type StepUpScope =
 credbound type Store interface
 credbound type StoreKind =
 credbound type Subscription interface

@@ -315,7 +315,7 @@ func (m *Manager) RevokeOAuthGrant(ctx context.Context, actor Authentication, gr
 		return err
 	}
 	if grant.UserID == actor.UserID {
-		if err := m.requireStepUp(ctx, actor, "oauth.grant.revoke"); err != nil {
+		if err := m.requireScopedStepUp(ctx, actor, StepUpScopeAccount, "oauth.grant.revoke"); err != nil {
 			return err
 		}
 	} else if err := m.authorizeWorkspaceMutation(ctx, actor, grant.WorkspaceID, PermissionOAuthResourceManage, "oauth.grant.revoke"); err != nil {

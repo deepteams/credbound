@@ -9,19 +9,26 @@ breaking changes may land in any release and are called out explicitly.
 
 ### Added
 
-- `Config.PATStepUp` lets a deployment choose the authentication `CreatePAT`
-  and `RevokePAT` demand, instead of always imposing a fresh AAL2 step-up
-  that a user with no enrolled second factor can never produce:
-  `StepUpPolicyRequired` (the zero value, unchanged behaviour),
-  `StepUpPolicyUserCapable` — the full step-up from users holding an active
-  TOTP factor or a passkey, a plain interactive authentication from users
-  holding neither, so enrolling a factor tightens the gate on its own — and
-  `StepUpPolicyNone`. The relaxed modes still refuse a non-interactive
-  credential (a PAT never mints or revokes a PAT) and a sign-in whose second
-  factor is pending, still refuse a disabled account, still honour a
-  workspace's `RequireMFA` for a workspace-bound token, and still emit
-  `step_up.denied` on refusal. Creation and revocation move together, so a
-  deployment can never issue a token it cannot revoke.
+- `Config.StepUp` lets a deployment choose the authentication its
+  step-up-gated operations demand, instead of always imposing a fresh AAL2
+  step-up that a user with no enrolled second factor can never produce —
+  which locked such a deployment out of creating a workspace, inviting a
+  member, granting a role, issuing a PAT or managing its own credentials. A
+  `StepUpPolicy` is one of `StepUpPolicyRequired` (the zero value, unchanged
+  behaviour), `StepUpPolicyUserCapable` — the full step-up from users holding
+  an active TOTP factor or a passkey, a plain interactive authentication from
+  users holding neither, so enrolling a factor tightens the gate on its own —
+  or `StepUpPolicyNone`. `StepUpPolicies.Default` sets it for every family and
+  the `PAT`, `Workspace`, `Account` and `Admin` fields override it per
+  `StepUpScope`; a zero field inherits `Default`, so the zero `Config` behaves
+  exactly as before. No mode accepts a non-interactive credential (a PAT never
+  satisfies a step-up anywhere), a sign-in whose second factor is pending, or
+  a disabled account; the workspace `RequireMFA` policy and the
+  `step_up.denied` audit event are unchanged, and the loopback
+  `TrustedRequest` waiver on instance administration is untouched. The new
+  `Manager.RequireStepUpFor(ctx, authn, scope)` answers what a family demands
+  of an actor, so a host can prompt for the second factor before an operation
+  instead of after its refusal.
 
 - `credboundtest.DiscoverablePasskeys` extends the passkey fake with
   usernameless sign-in over discoverable credentials, so a host can test

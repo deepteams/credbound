@@ -388,7 +388,7 @@ func (m *Manager) finishSSOLink(ctx context.Context, provider SSOProvider, state
 func (m *Manager) UnlinkSSO(ctx context.Context, actor Authentication, identityID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.sso.unlink", started, err) }()
-	if err := m.requireStepUp(ctx, actor, "auth.sso.unlink"); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeAccount, "auth.sso.unlink"); err != nil {
 		return err
 	}
 	if !validUUIDv7(identityID) {

@@ -100,7 +100,7 @@ func (m *Manager) Bootstrap(ctx context.Context, input BootstrapInput) (_ Authen
 func (m *Manager) CreateUser(ctx context.Context, actor Authentication, workspaceID UUID, input CreateUserInput) (_ User, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.user.create", started, err) }()
-	if err := m.requireStepUp(ctx, actor, "auth.user.create"); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeWorkspace, "auth.user.create"); err != nil {
 		return User{}, err
 	}
 	if err := m.AuthorizePermission(ctx, actor, workspaceID, PermissionWorkspaceUsersWrite); err != nil {
@@ -517,12 +517,36 @@ func (m *Manager) RequireStepUp(authn Authentication) error {
 	return nil
 }
 
-func (m *Manager) requireStepUp(ctx context.Context, authn Authentication, operation string) error {
-	err := m.RequireStepUp(authn)
-	if err == nil {
+// RequireStepUpFor answers what the operations of one scope demand under
+// Config.StepUp, for an actor and as of now: nil when authn may perform them,
+// ErrStepUpRequired when the host should prompt for a second factor,
+// ErrUnauthorized without an actor, ErrForbidden when the account is disabled
+// or unreadable. It is the check the Manager runs itself before every gated
+// call, so a host can raise the prompt ahead of the refusal — an admin screen
+// that greys out its mutations, for instance — instead of discovering it from
+// the error. Unlike RequireStepUp it needs a context, because deciding
+// StepUpPolicyUserCapable means reading what the user has enrolled.
+func (m *Manager) RequireStepUpFor(ctx context.Context, authn Authentication, scope StepUpScope) error {
+	policy := m.stepUp.policyFor(scope)
+	if policy == StepUpPolicyRequired || (policy == StepUpPolicyUserCapable && m.stepUpCapable(ctx, authn.UserID)) {
+		if err := m.RequireStepUp(authn); err != nil {
+			return err
+		}
 		return m.requireActiveUser(ctx, authn.UserID)
 	}
-	return m.denyStepUp(ctx, authn, operation, err)
+	return m.requireInteractive(ctx, authn)
+}
+
+// requireScopedStepUp is RequireStepUpFor with the audit event every refused
+// gate emits. Every step-up-gated operation of the Manager goes through it,
+// naming the scope whose policy governs it, so a family is relaxed in exactly
+// one place and the event does not depend on which policy produced the
+// refusal.
+func (m *Manager) requireScopedStepUp(ctx context.Context, authn Authentication, scope StepUpScope, operation string) error {
+	if err := m.RequireStepUpFor(ctx, authn, scope); err != nil {
+		return m.denyStepUp(ctx, authn, operation, err)
+	}
+	return nil
 }
 
 // denyStepUp reports the refusal of a step-up-gated operation, emitting the
@@ -562,6 +586,39 @@ func (m *Manager) requireRecentInteractive(ctx context.Context, authn Authentica
 		return ErrStepUpRequired
 	}
 	return m.requireActiveUser(ctx, authn.UserID)
+}
+
+// stepUpCapable reports whether the user could satisfy a step-up at all: an
+// active TOTP factor, or a registered passkey when a passkey provider is
+// configured to challenge it (stored credentials no ceremony can assert are
+// not a capability). It fails closed — an unreadable factor or credential
+// list counts as capable — so a store failure tightens the gate to the full
+// step-up instead of quietly relaxing it. Under StepUpPolicyUserCapable it is
+// what decides, per user, between the full step-up and the interactive floor.
+// An SSO identity is deliberately not counted: an IdP grants AAL2 only under a Config.SSOAssurance policy, and a
+// user whose only route to a step-up is their IdP would be gated on the
+// provider's answer rather than on anything enrolled here.
+func (m *Manager) stepUpCapable(ctx context.Context, userID UUID) bool {
+	if userID == (UUID{}) {
+		return false
+	}
+	factor, err := m.store.TOTPByUserID(ctx, userID)
+	if err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			return true
+		}
+	} else if factor.Active {
+		return true
+	}
+	if m.passkeys == nil {
+		return false
+	}
+	// The first yield settles it, credential or error alike: an enumeration
+	// that cannot be read must not downgrade the gate either.
+	for range m.store.Passkeys(ctx, userID) {
+		return true
+	}
+	return false
 }
 
 // requireInteractive is the floor every step-up policy keeps, whatever it

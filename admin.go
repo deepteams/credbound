@@ -137,7 +137,7 @@ func (m *Manager) requireAdminMutation(ctx context.Context, actor Authentication
 	if request.Local {
 		return nil
 	}
-	return m.requireStepUp(ctx, actor, operation)
+	return m.requireScopedStepUp(ctx, actor, StepUpScopeAdmin, operation)
 }
 
 // InstanceAdministrator returns one user's instance-administration role. It

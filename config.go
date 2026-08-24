@@ -86,15 +86,15 @@ type Config struct {
 	// StepUpMaxAge bounds how old an interactive AAL2 authentication may be
 	// to satisfy RequireStepUp. Zero keeps the default of 10 minutes.
 	StepUpMaxAge time.Duration
-	// PATStepUp selects the authentication CreatePAT and RevokePAT demand;
-	// see StepUpPolicy. Zero keeps StepUpPolicyRequired, the historical
-	// behaviour: only a fresh interactive AAL2 context mints or revokes a
-	// token. Relaxing it trades issuance assurance for reachability in a
-	// deployment whose users hold no second factor, and it moves both
-	// mutations together on purpose — a deployment must never be able to
-	// issue a token it cannot revoke. It does not touch AuthenticatePAT: a
-	// PAT still never satisfies a step-up anywhere.
-	PATStepUp StepUpPolicy
+	// StepUp selects, per family of guarded operations, the authentication a
+	// step-up-gated call demands; see StepUpPolicies and StepUpScope. The
+	// zero value keeps the strict historical behaviour everywhere: only a
+	// fresh interactive AAL2 context may perform them. Relaxing a family
+	// trades assurance for reachability in a deployment whose users hold no
+	// second factor; no setting here ever lets a non-interactive credential
+	// (a PAT) through, and none of them touch AuthenticatePAT or the
+	// workspace RequireMFA policy.
+	StepUp StepUpPolicies
 	// CeremonyTTL bounds the validity of sealed ceremony continuations
 	// (WebAuthn, SSO, OAuth consent). Email OTP continuations follow
 	// EmailAuthenticationTTL plus a one-minute audit grace instead. Zero
@@ -261,7 +261,7 @@ type Manager struct {
 	readPATPeppers        [][]byte
 	readRecoveryPeppers   [][]byte
 	stepUpMaxAge          time.Duration
-	patStepUp             StepUpPolicy
+	stepUp                StepUpPolicies
 	ceremonyTTL           time.Duration
 	minPasswordLen        int
 	passwordPolicy        PasswordPolicy
@@ -334,11 +334,10 @@ func New(cfg Config) (*Manager, error) {
 	if cfg.StepUpMaxAge <= 0 {
 		cfg.StepUpMaxAge = 10 * time.Minute
 	}
-	if cfg.PATStepUp == "" {
-		cfg.PATStepUp = StepUpPolicyRequired
-	}
-	if !cfg.PATStepUp.valid() {
-		return nil, fmt.Errorf("%w: PAT step-up policy must be %q, %q or %q", ErrInvalidInput, StepUpPolicyNone, StepUpPolicyUserCapable, StepUpPolicyRequired)
+	for name, policy := range cfg.StepUp.fields() {
+		if policy != "" && !policy.valid() {
+			return nil, fmt.Errorf("%w: %s must be %q, %q or %q", ErrInvalidInput, name, StepUpPolicyNone, StepUpPolicyUserCapable, StepUpPolicyRequired)
+		}
 	}
 	if cfg.CeremonyTTL <= 0 {
 		cfg.CeremonyTTL = 5 * time.Minute
@@ -529,7 +528,7 @@ func New(cfg Config) (*Manager, error) {
 		readPATPeppers:        readPATPeppers,
 		readRecoveryPeppers:   readRecoveryPeppers,
 		stepUpMaxAge:          cfg.StepUpMaxAge,
-		patStepUp:             cfg.PATStepUp,
+		stepUp:                cfg.StepUp.resolve(),
 		ceremonyTTL:           cfg.CeremonyTTL,
 		minPasswordLen:        cfg.MinPasswordLen,
 		passwordPolicy:        cfg.PasswordPolicy,

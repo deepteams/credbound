@@ -117,7 +117,7 @@ func (m *Manager) VerifyAuditChainFrom(ctx context.Context, actor Authentication
 // AuditEvents streams the audit log of one workspace. The actor needs a
 // fresh AAL2 step-up and workspace audit read in that workspace.
 func (m *Manager) AuditEvents(ctx context.Context, actor Authentication, workspaceID UUID, page PageRequest) iter.Seq2[PageEvent[AuditEvent], error] {
-	if err := m.requireStepUp(ctx, actor, "audit.workspace.list"); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeWorkspace, "audit.workspace.list"); err != nil {
 		return errorSeq[PageEvent[AuditEvent]](err)
 	}
 	if err := m.AuthorizePermission(ctx, actor, workspaceID, PermissionWorkspaceAuditRead); err != nil {

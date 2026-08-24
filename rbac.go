@@ -139,7 +139,7 @@ func (m *Manager) AuthorizePermission(ctx context.Context, authn Authentication,
 func (m *Manager) GrantRole(ctx context.Context, actor Authentication, workspaceID, userID UUID, role Role) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "rbac.role.grant", started, err) }()
-	if err := m.requireStepUp(ctx, actor, "rbac.role.grant"); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeWorkspace, "rbac.role.grant"); err != nil {
 		return err
 	}
 	if err := m.AuthorizePermission(ctx, actor, workspaceID, PermissionWorkspaceRBACWrite); err != nil {

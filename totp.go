@@ -232,7 +232,7 @@ func (m *Manager) DisableTOTP(ctx context.Context, actor Authentication, code st
 	if err != nil {
 		return err
 	}
-	if err := m.requireStepUp(ctx, promoted, "auth.totp.disable"); err != nil {
+	if err := m.requireScopedStepUp(ctx, promoted, StepUpScopeAccount, "auth.totp.disable"); err != nil {
 		return err
 	}
 	event, err := m.newAudit(ctx, actor.UserID, "totp.disable", "user", actor.UserID.String(), UUID{}, AuditSucceeded, "")
@@ -268,7 +268,7 @@ func (m *Manager) RegenerateRecoveryCodes(ctx context.Context, actor Authenticat
 	}
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.totp.recovery.regenerate", started, err) }()
-	if err := m.requireStepUp(ctx, actor, "auth.totp.recovery.regenerate"); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeAccount, "auth.totp.recovery.regenerate"); err != nil {
 		return nil, err
 	}
 	factor, err := m.store.TOTPByUserID(ctx, actor.UserID)

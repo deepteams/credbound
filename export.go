@@ -61,7 +61,7 @@ func (m *Manager) ExportUserData(ctx context.Context, actor Authentication, user
 			return UserDataExport{}, err
 		}
 	} else {
-		if err := m.requireStepUp(ctx, actor, "user.data.export"); err != nil {
+		if err := m.requireScopedStepUp(ctx, actor, StepUpScopeAccount, "user.data.export"); err != nil {
 			return UserDataExport{}, err
 		}
 		if err := m.AuthorizeAdmin(ctx, actor, PermissionUsersRead); err != nil {

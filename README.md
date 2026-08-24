@@ -139,22 +139,45 @@ checks and per-workspace MFA enforcement. The host owns sessions and must:
 `Config.StepUpMaxAge`; a PAT can never satisfy it.
 
 A deployment whose users enroll no second factor cannot reach the operations
-that step-up guards at all, so `Config.PATStepUp` makes the demand of
-`CreatePAT` and `RevokePAT` — and of those two only — a choice between three
-modes:
+that step-up guards at all — creating a workspace, inviting a member, granting
+a role. `Config.StepUp` therefore chooses, per family of operations, which of
+three modes gates them:
 
-| `Config.PATStepUp` | Accepted authentication |
+| `StepUpPolicy` | Accepted authentication |
 |---|---|
 | `StepUpPolicyRequired` (default, zero value) | fresh interactive AAL2, exactly `RequireStepUp` |
 | `StepUpPolicyUserCapable` | the same step-up from users holding an active TOTP factor or a passkey; any interactive authentication from users holding neither |
 | `StepUpPolicyNone` | any interactive authentication, at any assurance level and any age |
 
-The two relaxed modes never go below an interactive context of an enabled
-account whose factors are all verified: a PAT can neither mint nor revoke a
-PAT under any policy, a workspace with `RequireMFA` still holds a
-workspace-bound token to AAL2, and a refusal still emits `step_up.denied`.
-Creation and revocation move together on purpose — a deployment must never be
-able to issue a token it cannot revoke.
+`StepUp.Default` governs every family; `PAT`, `Workspace`, `Account` and
+`Admin` override it where one deserves a different answer, and a zero field
+inherits `Default`:
+
+```go
+cfg.StepUp = credbound.StepUpPolicies{
+    Default: credbound.StepUpPolicyUserCapable, // tenant, account, PAT, admin
+    PAT:     credbound.StepUpPolicyRequired,    // ...except token issuance
+}
+```
+
+The scopes are `StepUpScopeWorkspace` (workspaces, memberships, roles,
+invitations, domains, SCIM, workspace OAuth resources, administrative user
+creation, workspace audit reads), `StepUpScopeAccount` (passkey deletion,
+TOTP disabling, recovery codes, email selection and removal, SSO unlinking,
+sessions, credential revocation, data export), `StepUpScopePAT`, and
+`StepUpScopeAdmin` (instance administration, whose loopback `TrustedRequest`
+waiver is unaffected). `RequireStepUpFor(ctx, authn, scope)` answers what a
+family demands of an actor, so a host can raise the second-factor prompt
+before the operation rather than after its refusal.
+
+No mode goes below an interactive context of an enabled account whose factors
+are all verified: a PAT can never satisfy any of them, a workspace with
+`RequireMFA` still holds its interactive sessions to AAL2, and a refusal still
+emits `step_up.denied`. `StepUpPolicyUserCapable` is the mode to reach for
+first — a user who enrolls a factor is immediately held to the full step-up
+everywhere, including on the operations that could remove that factor, so
+relaxing a deployment for the users who have none never weakens the users who
+do.
 
 Hosts that would rather not manage session persistence themselves can use the
 optional server-side session module (`CreateSession`, `AuthenticateSession`,

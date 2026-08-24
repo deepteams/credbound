@@ -19,6 +19,7 @@ Credbound provides a reusable, testable, transport-independent core.
 | AUTH-003 | Passkey | The library can start and finish WebAuthn registration and authentication ceremonies while requiring user verification. |
 | AUTH-004 | 2FA | A user can enable TOTP after confirming a valid code and receives single-use recovery codes. |
 | AUTH-005 | Step-up | A sensitive operation can require interactive AAL2 authentication newer than a configurable duration. |
+| AUTH-019 | Step-up policy | The deployment chooses, per family of guarded operations (PAT, tenant mutations, account credentials, instance administration), whether they demand a fresh AAL2 step-up (the default), demand it only from users who have an enrolled second factor, or accept any interactive authentication. No setting accepts a non-interactive credential, a pending second factor or a disabled account, and the host can query a family's requirement for an actor before attempting the operation. |
 | AUTH-006 | Enumeration resistance | An unknown identifier, an invalid password, and an account without a password credential produce the same public error and all perform a password derivation. Reset and magic-link initiation succeed without a token instead of erroring for ineligible addresses. |
 | AUTH-007 | Password reset | A single-use, expiring reset token is issued for an enabled account with the same cryptographic work for unknown addresses. Completing it atomically replaces the password, revokes the account's PATs and OAuth grants, clears its lockout, and audits the recovery. |
 | AUTH-008 | Magic link | A single-use, short-lived email token authenticates the owner of a verified address at AAL1 and reports whether a TOTP factor is still required. |
@@ -41,7 +42,7 @@ Credbound provides a reusable, testable, transport-independent core.
 | PAT-001 | Creation | A PAT uses at least 256 bits of entropy, is returned in plaintext only once, and only an HMAC digest is persisted. |
 | PAT-002 | Multiplicity | A user may own multiple named PATs that can be revoked independently. |
 | PAT-003 | Visibility | Lists expose metadata, prefix, creation time, expiration, and latest use, but never the secret. |
-| PAT-005 | Issuance policy | The deployment chooses the authentication the PAT mutations demand: a fresh AAL2 step-up (the default), that same step-up only from users who have an enrolled second factor, or any interactive authentication. Creation and revocation always share the requirement, and no mode accepts a non-interactive credential, so a PAT never mints or revokes a PAT. |
+| PAT-005 | Issuance policy | The PAT mutations follow their own family of AUTH-019. Creation and revocation always share the requirement, and no mode accepts a non-interactive credential, so a PAT never mints or revokes a PAT. |
 | PAT-004 | Scope enforcement | A PAT scope is either the `*` wildcard or a workspace permission string, validated at creation. The canonical permission authorization denies a scoped credential any permission outside its scopes, and the coarse role authorization requires the wildcard, so the member's role never widens a narrow token. |
 | SSO-007 | Single-use ceremony | Completing an SSO ceremony consumes its sealed continuation atomically with the success commit; replaying the continuation or a captured provider response within the TTL fails like an invalid credential. |
 | TENANT-001 | Isolation | Every resource-access authorization is evaluated for an explicit `workspace_id`. |
@@ -61,7 +62,7 @@ Credbound provides a reusable, testable, transport-independent core.
 | ADMIN-002 | First administrator | The first account created by `Bootstrap` atomically receives the instance-level `root` role. |
 | ADMIN-003 | Permissions | Each instance role maps to explicit permissions; services authorize an action by permission rather than through ad hoc role-name comparisons. |
 | ADMIN-004 | Elevation and downgrade | Only a `root` may grant, modify, or remove an instance-administration role. The operation is audited and protected by step-up. |
-| ADMIN-005 | Mutation protection | Any administrative write or deletion concerning a user, workspace, role, permission, or global setting requires fresh AAL2, except for a trusted local request. |
+| ADMIN-005 | Mutation protection | Any administrative write or deletion concerning a user, workspace, role, permission, or global setting requires fresh AAL2, except for a trusted local request or where AUTH-019 relaxes the administration family. |
 | ADMIN-006 | Local exception | The localhost exception is determined by the server adapter from the actually observed remote address and trusted-proxy configuration, never from a header or URL freely supplied by the client. |
 | ADMIN-007 | Audited access | Every opening or operation of the administration interface, whether allowed or denied, produces an audit event. |
 | AUDIT-001 | Append-only audit | Every authentication, factor/PAT management operation, and permission change produces an immutable timestamped event with actor, action, target, workspace, and outcome. |
@@ -197,14 +198,18 @@ expiration. Validated passkey authentication directly produces an AAL2 context.
 `AuthenticatedAt` falls within the configured window. PATs are rejected
 regardless of their age.
 
-`Config.PATStepUp` selects, for `CreatePAT` and `RevokePAT` only, which of
-three modes gates them: `required` (the default, `RequireStepUp` itself),
-`user_capable` (that step-up for users holding an active TOTP factor or a
-passkey, a plain interactive authentication for those holding neither), or
-`none` (any interactive authentication). A relaxed mode keeps the
-interactive floor, the disabled-account check, the workspace MFA policy and
-the `step_up.denied` audit event; a store failure while measuring a user's
-capability counts as capable, so it tightens the gate rather than relaxing it.
+`Config.StepUp` selects, per family of guarded operations (`pat`,
+`workspace`, `account`, `admin`), which of three modes gates them: `required`
+(the default, `RequireStepUp` itself), `user_capable` (that step-up for users
+holding an active TOTP factor or a passkey, a plain interactive
+authentication for those holding neither), or `none` (any interactive
+authentication). `StepUp.Default` governs every family and the per-family
+fields override it. A relaxed mode keeps the interactive floor, the
+disabled-account check, the workspace MFA policy and the `step_up.denied`
+audit event; a store failure while measuring a user's capability counts as
+capable, so it tightens the gate rather than relaxing it.
+`RequireStepUpFor(ctx, authn, scope)` exposes the same decision to the host,
+which can then prompt for a second factor before the operation.
 
 ### PAT
 

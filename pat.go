@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"iter"
 	"slices"
@@ -34,7 +33,7 @@ func validTokenMarker(marker string) bool {
 // CreatePAT issues a personal access token with at least 256 bits of entropy
 // and returns the raw token exactly once; only its HMAC digest is persisted,
 // atomically with the audit event. The authentication it demands follows
-// Config.PATStepUp — a fresh AAL2 step-up by default — and binding the token
+// Config.StepUp's PAT scope — a fresh AAL2 step-up by default — and binding the token
 // to a workspace additionally requires access to that workspace. Each scope
 // is either the "*" wildcard or a workspace permission string: AuthorizePermission denies a scoped authentication any
 // permission outside its scopes, and the coarse role-based Authorize
@@ -43,7 +42,7 @@ func validTokenMarker(marker string) bool {
 func (m *Manager) CreatePAT(ctx context.Context, actor Authentication, input CreatePATInput) (_ IssuedPAT, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.pat.create", started, err) }()
-	if err := m.requirePATStepUp(ctx, actor, "auth.pat.create"); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopePAT, "auth.pat.create"); err != nil {
 		return IssuedPAT{}, err
 	}
 	name := strings.TrimSpace(input.Name)
@@ -184,14 +183,14 @@ func (m *Manager) AuthenticatePAT(ctx context.Context, raw string) (_ Authentica
 }
 
 // RevokePAT revokes one of the actor's own tokens, atomically with the audit
-// event. It demands the same authentication as CreatePAT (Config.PATStepUp,
-// a fresh AAL2 step-up by default), so a token can never become harder to
+// event. It demands the same authentication as CreatePAT (the PAT scope of
+// Config.StepUp, a fresh AAL2 step-up by default), so a token can never become harder to
 // revoke than it was to issue; a token belonging to another user is reported
 // as ErrNotFound by the store.
 func (m *Manager) RevokePAT(ctx context.Context, actor Authentication, patID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.pat.revoke", started, err) }()
-	if err := m.requirePATStepUp(ctx, actor, "auth.pat.revoke"); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopePAT, "auth.pat.revoke"); err != nil {
 		return err
 	}
 	if patID == (UUID{}) {
@@ -240,54 +239,6 @@ func (m *Manager) PATs(ctx context.Context, actor Authentication, userID UUID, p
 		return errorSeq[PageEvent[PAT]](err)
 	}
 	return m.store.PATs(ctx, userID, page)
-}
-
-// requirePATStepUp gates the PAT mutations according to Config.PATStepUp.
-// StepUpPolicyRequired is the plain step-up; the two relaxed modes never fall
-// below requireInteractive, so whatever the policy a PAT can neither mint nor
-// revoke a PAT, and a sign-in whose second factor is still pending is refused.
-// A refusal audits EventStepUpDenied in every mode, so a host prompting on
-// that event keeps working after a policy change.
-func (m *Manager) requirePATStepUp(ctx context.Context, actor Authentication, operation string) error {
-	if m.patStepUp == StepUpPolicyRequired || (m.patStepUp == StepUpPolicyUserCapable && m.stepUpCapable(ctx, actor.UserID)) {
-		return m.requireStepUp(ctx, actor, operation)
-	}
-	if err := m.requireInteractive(ctx, actor); err != nil {
-		return m.denyStepUp(ctx, actor, operation, err)
-	}
-	return nil
-}
-
-// stepUpCapable reports whether the user could satisfy a step-up at all: an
-// active TOTP factor, or a registered passkey when a passkey provider is
-// configured to challenge it (stored credentials no ceremony can assert are
-// not a capability). It fails closed — an unreadable factor or credential
-// list counts as capable — so a store failure tightens the gate to the full
-// step-up instead of quietly relaxing it. An SSO identity is deliberately not
-// counted: an IdP grants AAL2 only under a Config.SSOAssurance policy, and a
-// user whose only route to a step-up is their IdP would be gated on the
-// provider's answer rather than on anything enrolled here.
-func (m *Manager) stepUpCapable(ctx context.Context, userID UUID) bool {
-	if userID == (UUID{}) {
-		return false
-	}
-	factor, err := m.store.TOTPByUserID(ctx, userID)
-	if err != nil {
-		if !errors.Is(err, ErrNotFound) {
-			return true
-		}
-	} else if factor.Active {
-		return true
-	}
-	if m.passkeys == nil {
-		return false
-	}
-	// The first yield settles it, credential or error alike: an enumeration
-	// that cannot be read must not downgrade the gate either.
-	for range m.store.Passkeys(ctx, userID) {
-		return true
-	}
-	return false
 }
 
 // parsePAT validates the `<marker>_<12 hex>_<43 chars>` PAT shape against the

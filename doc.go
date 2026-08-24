@@ -113,9 +113,12 @@
 // the provider unverified); otherwise it is AAL1, because SSO never mints
 // AAL2 on the IdP's unverified word. Sensitive operations demand a fresh
 // interactive AAL2 context (RequireStepUp) and fail with ErrStepUpRequired
-// otherwise. Config.PATStepUp relaxes that demand for CreatePAT and RevokePAT
-// alone, for deployments whose users enroll no second factor: see
-// StepUpPolicy. Administrative mutations use RequireAdminMutation, which may
+// otherwise. Config.StepUp relaxes that demand per family of operations —
+// PAT, tenant mutations, account credentials, instance administration — for
+// deployments whose users enroll no second factor; RequireStepUpFor answers
+// what a given family demands of a given actor, so a host can prompt before
+// the refusal. See StepUpPolicies. Administrative mutations use
+// RequireAdminMutation, which may
 // waive the step-up only for a TrustedRequest built from an actually
 // observed loopback peer (see TrustedRequestFromAddr) — never from
 // client-supplied headers.

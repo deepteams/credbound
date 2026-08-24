@@ -14,7 +14,7 @@ import (
 func (m *Manager) CreateWorkspace(ctx context.Context, actor Authentication, input CreateWorkspaceInput) (_ Workspace, err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "workspace.create", started, err) }()
-	if err := m.requireStepUp(ctx, actor, "workspace.create"); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeWorkspace, "workspace.create"); err != nil {
 		return Workspace{}, err
 	}
 	user, err := m.store.UserByID(ctx, actor.UserID)
@@ -625,7 +625,7 @@ func (m *Manager) WorkspaceMembers(ctx context.Context, actor Authentication, wo
 }
 
 func (m *Manager) authorizeWorkspaceMutation(ctx context.Context, actor Authentication, workspaceID UUID, permission WorkspacePermission, operation string) error {
-	if err := m.requireStepUp(ctx, actor, operation); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeWorkspace, operation); err != nil {
 		return err
 	}
 	if !validUUIDv7(workspaceID) {

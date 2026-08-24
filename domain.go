@@ -262,7 +262,7 @@ func (m *Manager) WorkspaceDomains(ctx context.Context, actor Authentication, wo
 // step-up gate runs before the lookup so anonymous or stale contexts cannot
 // probe domain identifiers.
 func (m *Manager) authorizedWorkspaceDomain(ctx context.Context, actor Authentication, domainID UUID, operation string) (WorkspaceDomain, error) {
-	if err := m.requireStepUp(ctx, actor, operation); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeWorkspace, operation); err != nil {
 		return WorkspaceDomain{}, err
 	}
 	if !validUUIDv7(domainID) {

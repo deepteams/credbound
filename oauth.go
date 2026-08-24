@@ -189,7 +189,7 @@ func (m *Manager) CreateOAuthProtectedResource(ctx context.Context, actor Authen
 	if err != nil {
 		return OAuthProtectedResource{}, err
 	}
-	if err := m.requireStepUp(ctx, actor, "oauth.resource.create"); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeWorkspace, "oauth.resource.create"); err != nil {
 		return OAuthProtectedResource{}, err
 	}
 	if err := m.AuthorizePermission(ctx, actor, workspaceID, PermissionOAuthResourceManage); err != nil {

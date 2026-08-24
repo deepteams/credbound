@@ -23,7 +23,9 @@ auth, err := credbound.New(credbound.Config{
         OIDCSigner:      oidcSigner,
     },
     StepUpMaxAge:   10 * time.Minute,
-    PATStepUp:      credbound.StepUpPolicyUserCapable,
+    StepUp: credbound.StepUpPolicies{
+        Default: credbound.StepUpPolicyUserCapable,
+    },
     WorkspaceRoles: []credbound.RoleDefinition{
         {
             Role:        "viewer",
@@ -164,6 +166,7 @@ UnlinkSSO(ctx, authn, identityID) error
 SSOIdentities(ctx, authn, userID, PageRequest) iter.Seq2[PageEvent[SSOIdentity], error]
 
 RequireStepUp(authn) error
+RequireStepUpFor(ctx, authn, StepUpScope) error
 
 CreatePAT(ctx, authn, CreatePATInput) (IssuedPAT, error)
 AuthenticatePAT(ctx, rawToken) (Authentication, error)

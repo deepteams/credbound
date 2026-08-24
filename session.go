@@ -280,7 +280,7 @@ func (m *Manager) Sessions(ctx context.Context, actor Authentication, userID UUI
 			return errorSeq[PageEvent[Session]](err)
 		}
 	} else {
-		if err := m.requireStepUp(ctx, actor, "auth.session.list"); err != nil {
+		if err := m.requireScopedStepUp(ctx, actor, StepUpScopeAccount, "auth.session.list"); err != nil {
 			return errorSeq[PageEvent[Session]](err)
 		}
 		if err := m.AuthorizeAdmin(ctx, actor, PermissionUsersRead); err != nil {
@@ -304,7 +304,7 @@ func (m *Manager) RevokeSession(ctx context.Context, actor Authentication, sessi
 	if m.sessionStore == nil {
 		return ErrNotSupported
 	}
-	if err := m.requireStepUp(ctx, actor, "auth.session.revoke"); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeAccount, "auth.session.revoke"); err != nil {
 		return err
 	}
 	if sessionID == (UUID{}) {
@@ -356,7 +356,7 @@ func (m *Manager) RevokeUserSessions(ctx context.Context, actor Authentication, 
 		return fmt.Errorf("%w: invalid user id", ErrInvalidInput)
 	}
 	if userID == actor.UserID {
-		if err := m.requireStepUp(ctx, actor, "auth.session.revoke_all"); err != nil {
+		if err := m.requireScopedStepUp(ctx, actor, StepUpScopeAccount, "auth.session.revoke_all"); err != nil {
 			return err
 		}
 	} else {

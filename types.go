@@ -138,8 +138,8 @@ const (
 // AAL2 authentication. A step-up is only ever as available as the second
 // factors a deployment actually enrolls: without a policy, a product whose
 // users have no TOTP factor and no passkey is simply locked out of every
-// operation the step-up guards. Config.PATStepUp applies it to the PAT
-// mutations.
+// operation the step-up guards. Config.StepUp assigns one policy per family
+// of guarded operations; see StepUpPolicies.
 type StepUpPolicy string
 
 const (
@@ -168,6 +168,106 @@ func (p StepUpPolicy) valid() bool {
 		return true
 	}
 	return false
+}
+
+// StepUpScope names one family of step-up-gated operations. The families are
+// what Config.StepUp configures and what RequireStepUpFor evaluates, so a host
+// can prompt for a second factor before an operation instead of after its
+// refusal.
+type StepUpScope string
+
+const (
+	// StepUpScopePAT covers CreatePAT and RevokePAT.
+	StepUpScopePAT StepUpScope = "pat"
+	// StepUpScopeWorkspace covers the tenant mutations: creating, updating,
+	// disabling and enabling a workspace, memberships and their roles,
+	// invitations, workspace domains, SCIM configurations, workspace OAuth
+	// resources, administrative user creation, and reading a workspace audit
+	// log.
+	StepUpScopeWorkspace StepUpScope = "workspace"
+	// StepUpScopeAccount covers a user's own credentials and data: deleting a
+	// passkey, disabling TOTP, regenerating recovery codes, selecting or
+	// removing an email address, unlinking an SSO identity, listing and
+	// revoking sessions, revoking a personal OAuth grant, the credential
+	// revocation cascade, and the personal-data export.
+	StepUpScopeAccount StepUpScope = "account"
+	// StepUpScopeAdmin covers the instance-administration mutations behind
+	// RequireAdminMutation — disabling a user, instance roles, the instance
+	// audit log — whose loopback exception (TrustedRequest) is unaffected.
+	StepUpScopeAdmin StepUpScope = "admin"
+)
+
+// StepUpPolicies assigns a StepUpPolicy to each StepUpScope. Default governs
+// every family, and the per-family fields override it where one deserves a
+// different answer; a zero field inherits Default, and a zero Default is
+// StepUpPolicyRequired. The zero StepUpPolicies therefore means "every
+// step-up-gated operation demands a fresh interactive AAL2 context", which is
+// what Credbound did before the policies existed.
+//
+// StepUpPolicyUserCapable deserves a special mention here: under it, a user
+// who enrolls a second factor is immediately held to the full step-up on
+// every family, including the operations that could remove that factor
+// (DeletePasskey, DisableTOTP). Relaxing a deployment for the users who have
+// no factor therefore does not weaken the users who do.
+type StepUpPolicies struct {
+	// Default applies to every scope that names no policy of its own. Zero
+	// keeps StepUpPolicyRequired.
+	Default StepUpPolicy
+	// PAT overrides Default for StepUpScopePAT. Zero inherits Default.
+	PAT StepUpPolicy
+	// Workspace overrides Default for StepUpScopeWorkspace. Zero inherits
+	// Default.
+	Workspace StepUpPolicy
+	// Account overrides Default for StepUpScopeAccount. Zero inherits
+	// Default.
+	Account StepUpPolicy
+	// Admin overrides Default for StepUpScopeAdmin. Zero inherits Default —
+	// so a relaxed Default reaches instance administration too, which is the
+	// one place worth naming explicitly when that is not what you want.
+	Admin StepUpPolicy
+}
+
+// resolve returns the policies with every inherited field filled in, so a
+// lookup never has to re-apply the defaulting rules.
+func (p StepUpPolicies) resolve() StepUpPolicies {
+	if p.Default == "" {
+		p.Default = StepUpPolicyRequired
+	}
+	for _, field := range []*StepUpPolicy{&p.PAT, &p.Workspace, &p.Account, &p.Admin} {
+		if *field == "" {
+			*field = p.Default
+		}
+	}
+	return p
+}
+
+// fields pairs every configured policy with the Config field naming it, for
+// validation messages.
+func (p StepUpPolicies) fields() map[string]StepUpPolicy {
+	return map[string]StepUpPolicy{
+		"StepUp.Default":   p.Default,
+		"StepUp.PAT":       p.PAT,
+		"StepUp.Workspace": p.Workspace,
+		"StepUp.Account":   p.Account,
+		"StepUp.Admin":     p.Admin,
+	}
+}
+
+// policyFor answers the policy of one scope. It is meant for resolved
+// policies: an unknown scope, which the exported constants make unreachable
+// from a caller, falls back to the strictest answer rather than the loosest.
+func (p StepUpPolicies) policyFor(scope StepUpScope) StepUpPolicy {
+	switch scope {
+	case StepUpScopePAT:
+		return p.PAT
+	case StepUpScopeWorkspace:
+		return p.Workspace
+	case StepUpScopeAccount:
+		return p.Account
+	case StepUpScopeAdmin:
+		return p.Admin
+	}
+	return StepUpPolicyRequired
 }
 
 // User is a global account. Email mirrors the primary EmailAddress;

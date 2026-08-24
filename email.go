@@ -205,7 +205,7 @@ func (m *Manager) ConfirmEmail(ctx context.Context, raw string) (_ EmailAddress,
 func (m *Manager) SetPrimaryEmail(ctx context.Context, actor Authentication, emailID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.email.primary.set", started, err) }()
-	if err := m.requireStepUp(ctx, actor, "auth.email.primary.set"); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeAccount, "auth.email.primary.set"); err != nil {
 		return err
 	}
 	if !validUUIDv7(emailID) {
@@ -237,7 +237,7 @@ func (m *Manager) SetPrimaryEmail(ctx context.Context, actor Authentication, ema
 func (m *Manager) RemoveEmail(ctx context.Context, actor Authentication, emailID UUID) (err error) {
 	started := m.now()
 	defer func() { m.observe(ctx, "auth.email.remove", started, err) }()
-	if err := m.requireStepUp(ctx, actor, "auth.email.remove"); err != nil {
+	if err := m.requireScopedStepUp(ctx, actor, StepUpScopeAccount, "auth.email.remove"); err != nil {
 		return err
 	}
 	if !validUUIDv7(emailID) {
